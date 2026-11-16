@@ -105,6 +105,7 @@ import colour_pull
 import recovery
 import fade_unarm
 import pivots
+import pressure_exit
 import breakout
 import review
 import paper_wallet
@@ -412,6 +413,7 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max", "handoff_candle",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
+    "pressure_exit", "pressure_exit_pct",
     "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
@@ -1363,6 +1365,8 @@ class StrategyEngine:
         self._tapes: dict[str, pd.DataFrame] = {}
         # Daily pivot levels per (stock, trading day) (pivots.py); the earlier session never changes.
         self._pivot_cache: dict[tuple[str, dt.date], dict] = {}
+        # Last note of the buyers / sellers fade exit per stock (pressure_exit.py), so the signal line is written once.
+        self._pressure_note: dict[str, str] = {}
         self._review_bar: dict[str, int] = {}
         self._review_episode: dict[str, dict] = {}
         self.reviews: list[dict] = []
@@ -1996,6 +2000,7 @@ class StrategyEngine:
         await self._watch_recovery(symbol_cfg, now)
         await self._watch_gap_fade(symbol_cfg)
         await self._watch_pivot_target(symbol_cfg)
+        await self._watch_pressure_fade(symbol_cfg)
 
     def _held_error(self, symbol: str, exc: Exception) -> None:
         text = f"{symbol}: {exc}"
@@ -5707,6 +5712,29 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} pivot target {goal[0]} {goal[1]:.2f} reached"
         await self._exit_now(cfg, self.ltp, pivots.PIVOT_EXIT)
 
+    async def _watch_pressure_fade(self, cfg: BotConfig) -> None:
+        """Most active stocks: close once the buyers (a buy) or sellers (a sell) fade to the set % (pressure_exit.py)."""
+        pos = self.position
+        if pos is None or not pressure_exit.on(cfg) or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        if not pressure_exit.from_most_active(trade_sources(cfg).get(symbol)):
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other exits).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        hit, note = pressure_exit.judge(
+            symbol, pos.direction, opened.timestamp(), self._now().timestamp(), pressure_exit.pct(cfg)
+        )
+        if not hit:
+            if self._pressure_note.get(symbol) != note:
+                self._pressure_note[symbol] = note
+            return
+        self._pressure_note.pop(symbol, None)
+        self._signals[symbol] = f"{symbol} buyers / sellers exit — {note}"
+        await self._exit_now(cfg, self.ltp, pressure_exit.EXIT_REASON)
+
     async def _watch_supertrend_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the Supertrend flips against the trade (supertrend.py)."""
         pos = self.position
@@ -5785,6 +5813,7 @@ class StrategyEngine:
                     "CANDLE_END": "candle closed — flat",
                     "COLOUR_TURN": "candle turned the other colour — flat",
                     "PIVOT_TARGET": "pivot target reached — flat",
+                    pressure_exit.EXIT_REASON: "buyers / sellers faded — flat",
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
                     "MACD_CROSS": "MACD crossed its signal line against the trade — flat",
@@ -6629,6 +6658,7 @@ class StrategyEngine:
                         # Smart stop: this stock's own room (₹ a share) and how it was found (display only).
                         "smart_room": book.smart_room if book and book.smart else None,
                         "smart_note": smart_stop.describe(book.smart_info) if book and book.smart else None,
+                        "pressure_note": self._pressure_note.get(symbol) if book else None,
                         "smart_resized_at": (book.smart_resized_at or None) if book and book.smart else None,
                         "smart_atr_pct": (book.smart_info or {}).get("atr_pct") if book and book.smart else None,
                         # Best price since the entry (the trail tracker; display only).

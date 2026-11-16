@@ -512,6 +512,9 @@ class BotConfig(Base):
     auto_start: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Book the profit at a daily pivot level: OFF | R1 (R1 / S1, else R2 / S2) | R2 (pivots.py).
     pivot_target: Mapped[str | None] = mapped_column(String(3), nullable=True, default="OFF")
+    # Most active stocks: close once the buyers / sellers fade to pressure_exit_pct % (pressure_exit.py); per bot and per stock.
+    pressure_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    pressure_exit_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=55.0)
     # Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R.
     stop_plan: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     plan_be_r: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)

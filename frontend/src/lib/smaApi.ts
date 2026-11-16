@@ -315,6 +315,8 @@ export type SmaConfig = {
   auto_start?: boolean;
   /** Book the profit at a daily pivot level: R1 (S1 for a short; R2 / S2 when the entry is already past it) or R2. */
   pivot_target?: "OFF" | "R1" | "R2";
+  pressure_exit?: boolean;
+  pressure_exit_pct?: number;
   /** Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R. */
   stop_plan?: boolean;
   /** SMA 9 deceleration guard (decel_guard.py): slope in ATR per candle. */

@@ -198,6 +198,19 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   / S2 only; no level beyond the entry = no pivot target), via `_exit_now` (`PIVOT_TARGET`; a LIVE stop is cancelled
   first, a LIVE position restored without its stop id is left to that stop). Settings → 5. Stop-loss and target. Counts
   as an exit for `strategyChecks.noExitOn`. The stock research baseline keeps it off.
+- `backend/pressure_exit.py` – **buyers / sellers fade exit for Most active stocks** (`pressure_exit`, off by default;
+  `pressure_exit_pct` 55, 30-95; per bot and per stock, PAPER and LIVE; Settings → 3. When to exit, under the SMA cross
+  exit, `StrategyConfigPanel.PressureExit`, anchor `#sma-pressure-exit`; owner's case: Most active trades held to the
+  other-colour candle often closed a profit at a loss). Only stocks whose Trade list source says "Most active" (the
+  auto-arm chip "Auto-arm: Most active" or the Most active card's Arm): `StrategyEngine._watch_pressure_fade` (held-stock
+  loop, after the pivot target) closes a buy once the buyers' share of the waiting orders (`buy_share`) is at or below the
+  % and a sell once the sellers' share is (`judge`: reads after the entry only, at most `MAX_AGE_SEC` 20 min old, armed
+  only once that side was above the level from the last read before the entry on), via `_exit_now` (`PRESSURE_FADE`, LIVE
+  stop cancelled first; a LIVE position restored without its stop id is left to that stop). The shares are the desk's own
+  Most active scan's: every finished pass goes `routes_scalp._pressure_alert` → terminal `pressure_note` → `note_scan`
+  (memory only, keyed by the row's `read_at`), so it reacts as often as that scan's auto interval; with scans paused or
+  `SCANS=off` it never fires. Replays see no read (their clock is in the past) and keep their normal exits. The colour
+  exit, stops and targets stay on; whichever comes first closes. `books[].pressure_note` carries the latest reading.
 - Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
   PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle
   after the entry by `StrategyEngine._watch_bollinger` on `bb_period` /
