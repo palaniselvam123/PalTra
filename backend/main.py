@@ -4582,6 +4582,19 @@ async def scan_history_across(
     return {"days": sorted(set(picked)), "runs": runs}
 
 
+@app.get("/api/scan-history/across-active")
+async def scan_history_across_active(days: str = Query(..., description="Comma-separated YYYY-MM-DD days, at most 10")):
+    """Every saved Most active scan of one or more days, each row a list in `cols` order (scan_history.active_rows):
+    the Most active History's "Across days" view. Read-only."""
+    picked = [d.strip() for d in days.split(",") if d.strip()]
+    if not picked or any(not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) for d in picked):
+        raise HTTPException(400, "days must be YYYY-MM-DD, comma-separated.")
+    if len(set(picked)) > scan_history.MAX_ACROSS_DAYS:
+        raise HTTPException(400, f"At most {scan_history.MAX_ACROSS_DAYS} days at a time.")
+    runs = await asyncio.to_thread(scan_history.active_rows, picked)
+    return {"days": sorted(set(picked)), "cols": list(scan_history.ACTIVE_KEEP), "runs": runs}
+
+
 @app.get("/api/scan-history/{run_id}")
 async def scan_history_run(run_id: int):
     """One saved scan with every row as the page got it, and its accuracy check when one was made."""

@@ -1670,7 +1670,14 @@ spinning top), body and range) / Matched / Call columns
   `GET /api/scalp/active/history/{id}`; **Stocks not read** (`ActiveScanner.missed`, snapshot `missed` [{symbol, why}], saved in the run's
   `meta.missed`; `MostActive.MissedList`: "Not read in this scan: N stocks" under the filters, and a searched stock that is not
   in the scan is named with why; older saved scans only have the `failed` count); the card's Live / History switch (day, scan time, ‹ ›, CSV; Rank by, Bias, filters
-  and column sorting work on the saved scan). Each row also has `speed_pct_min` (`add_speed`: % per minute since the
+  and column sorting work on the saved scan). **Most active across days and scans** (`components/Scalp/ActiveAcrossDays.tsx`, top of the History view; like
+  Trend quality's `ChopAcrossDays`): tick up to 10 days; terminal `GET /api/scan-history/across-active?days=`
+  (`scan_history.active_rows`: every saved `active` run of those days, each row a list in `ACTIVE_KEEP` order) and its own
+  filters (who leads + share %, bias, vol vs usual, money traded, day move, speed, price) give one row per stock per day
+  (first / last time it passed, scans passed, price then, move to the day's last scan, buyers / vol / money then), one row
+  per stock, or **Every scan: how it built up** (each scan's price, day move, buyers / sellers %, vol vs usual, money,
+  distance from the average price, speed, bias and "What changed" since that stock's previous scan: bias, buyers / sellers
+  taking over, buyers ±10 pts, vol ±0.5×; "Only when it changed"); CSV, Arm, Arm these. Read-only. Each row also has `speed_pct_min` (`add_speed`: % per minute since the
   previous scan, signed; none on the day's first scan or after a gap over `SPEED_MAX_GAP_MIN` 30 min), a Speed column,
   "Min speed" filter and Rank by "Fastest move now" / "Furthest from average price". The card also has tick boxes (Arm
   ticked / Watch news, `TickArm`, `onArmMany`), Price from / to and "Vol vs usual at least" filters, **Read trend quality**

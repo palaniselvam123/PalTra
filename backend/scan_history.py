@@ -248,6 +248,41 @@ def chop_rows(days: list[str], minutes: int | None = None, candles: str | None =
     return out
 
 
+# The fields of a Most active row the Most active History's "Across days" view reads (active_rows), sent as one list
+# per row in this order, so a day of scans every few minutes stays small.
+ACTIVE_KEEP = (
+    "symbol", "ltp", "change_pct", "value_cr", "rvol", "buy_share", "vwap_dist_pct", "range_pct", "bias",
+    "speed_pct_min",
+)
+
+
+def active_rows(days: list[str]) -> list[dict]:
+    """Every saved Most active run of the given days (oldest first): {id, day, as_of, total, failed, rows}, each row a
+    list in ACTIVE_KEEP order (numbers rounded). Read-only."""
+    picked = [d for d in dict.fromkeys(days) if d][:MAX_ACROSS_DAYS]
+    if not picked:
+        return []
+    marks = ",".join("?" for _ in picked)
+    with _lock, _connect() as con:
+        found = con.execute(
+            f"SELECT id, day, as_of, total, failed, rows FROM scan_runs WHERE kind = 'active' AND day IN ({marks}) "
+            "ORDER BY as_of ASC, id ASC",
+            picked,
+        ).fetchall()
+
+    def cell(v):
+        return round(v, 4) if isinstance(v, float) else v
+
+    out = []
+    for row in found:
+        rows = _unpack(row["rows"]) or []
+        out.append({
+            "id": int(row["id"]), "day": row["day"], "as_of": row["as_of"], "total": row["total"], "failed": row["failed"],
+            "rows": [[cell(r.get(k)) for k in ACTIVE_KEEP] for r in rows if isinstance(r, dict) and r.get("symbol")],
+        })
+    return out
+
+
 def save_check(run_id: int, result: dict) -> None:
     now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     with _lock, _connect() as con:

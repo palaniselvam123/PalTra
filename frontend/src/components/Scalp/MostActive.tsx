@@ -10,6 +10,7 @@ import { ScanTradeTestView } from "@/components/Scalp/ScanTradeTest";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import clsx from "clsx";
 import { Activity, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, Flame, History, PlayCircle, Loader2, RefreshCw, Target } from "lucide-react";
+import { ActiveAcrossDays } from "@/components/Scalp/ActiveAcrossDays";
 import { api, type ActiveHistoryResponse, type ActiveMissed, type ActiveSort, type ActiveStock, type ActiveStocksResponse, type DeliveryRow } from "@/lib/api";
 import { saveFile } from "@/lib/chartTable";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
@@ -546,6 +547,9 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         for scalping.
       </Explain>
 
+      {view === "history" && (hist?.days.length ?? 0) > 0 && (
+        <ActiveAcrossDays days={hist?.days ?? []} armed={armed} arming={arming} onArm={onArm} onArmMany={onArmMany} />
+      )}
       {view === "history" && (
         <div className="mb-3 flex flex-wrap items-end gap-2 rounded-lg border border-border bg-surface2/60 p-3 text-xs">
           <label className="flex flex-col gap-1 text-slate-400">
