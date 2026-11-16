@@ -234,6 +234,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "handoff_now": "BOOLEAN DEFAULT 0",
             "auto_start": "BOOLEAN DEFAULT 0",
             "pivot_target": "VARCHAR(3) DEFAULT 'OFF'",
+            "pressure_exit": "BOOLEAN DEFAULT 0",
+            "pressure_exit_pct": "FLOAT DEFAULT 55",
             "stop_plan": "BOOLEAN DEFAULT 0",
             "plan_be_r": "FLOAT DEFAULT 1.5",
             "plan_trail_r": "FLOAT DEFAULT 2.0",

@@ -296,6 +296,9 @@ async def _pressure_alert(snapshot: dict) -> None:
         from app.sma_host import load_terminal
 
         mod = load_terminal()
+        if mod is not None and hasattr(mod, "pressure_note"):
+            # The bots' buyers / sellers fade exit reads these shares (pressure_exit.py).
+            mod.pressure_note(snapshot)
         if mod is not None and hasattr(mod, "auto_arm_after"):
             await mod.auto_arm_after("pressure", snapshot)
     except Exception:  # noqa: BLE001

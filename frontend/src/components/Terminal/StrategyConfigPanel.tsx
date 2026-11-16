@@ -475,6 +475,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     stop_handoff_loss: form.stop_handoff_loss !== false,
     handoff_now: Boolean(form.handoff_now),
     pivot_target: form.pivot_target === "R1" || form.pivot_target === "R2" ? form.pivot_target : "OFF",
+    pressure_exit: Boolean(form.pressure_exit),
+    pressure_exit_pct: Math.min(95, Math.max(30, Number(form.pressure_exit_pct ?? 55) || 55)),
     stop_plan: Boolean(form.stop_plan),
     decel_exit: Boolean(form.decel_exit),
     decel_lookback: Math.min(10, Math.max(1, Math.round(Number(form.decel_lookback ?? 2) || 2))),
@@ -2201,6 +2203,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </InfoTip>
             </span>
           </label>
+          <PressureExit form={form} set={set} isOwn={isOwn} />
           <Only s="sma">
           <div className={clsx("mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10", !crossExitOn(form) && "opacity-50")}>
             <label htmlFor="sma-exit-candle" className="flex items-center gap-1 text-sm text-slate-300">
@@ -3837,6 +3840,8 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "stop", key: "atr_target_mult", text: `Target at ${f.atr_target_mult}× ATR from the entry`, off: { atr_target_mult: "0" } });
   if (f.stop_plan && (f.stop_type ?? "ATR") === "ATR")
     add({ group: "stop", key: "stop_plan", text: `Stop plan: breakeven at +${f.plan_be_r ?? 1.5}R, Supertrend trail from +${f.plan_trail_r ?? 2}R`, off: { stop_plan: false } });
+  if (f.pressure_exit)
+    add({ group: "exit", key: "pressure_exit", text: `Most active stocks close when the buyers (a buy) / sellers (a sell) fade to ${f.pressure_exit_pct ?? 55}% or below`, off: { pressure_exit: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
     add({ group: "stop", key: "pivot_target", text: f.pivot_target === "R1" ? "Target at the R1 / S1 pivot (else R2 / S2)" : "Target at the R2 / S2 pivot", off: { pivot_target: "OFF" } });
 
@@ -4938,6 +4943,62 @@ function ColourInside({
 }
 
 /** A separate rule for closing a colour trade (colour_exit_on / _count / _body / _inside, backend colour_exit.py). */
+function PressureExit({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const on = Boolean(form.pressure_exit);
+  const pct = Number(form.pressure_exit_pct ?? 55);
+  return (
+    <div id="sma-pressure-exit" className="mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10">
+      <label className="flex items-start gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={on}
+          onChange={(e) => set("pressure_exit", e.target.checked)}
+          className="mt-1 accent-[#10B981]"
+        />
+        <span>
+          {(isOwn("pressure_exit") || isOwn("pressure_exit_pct")) && <OwnTag />}
+          <b className="text-slate-100">Most active stocks: exit when buyers / sellers fade</b> <NewTag id="pressure-fade-exit" />{" "}
+          <InfoTip label="About the buyers / sellers fade exit">
+            Only for stocks armed from Most active (the auto-arm or the card&apos;s Arm). A buy closes once the buyers&apos; share of
+            the waiting orders falls to this % or below; a sell once the sellers&apos; share does. It arms only after that side was
+            above the level (from the read that armed the stock on), so a trade that started without the pressure is not closed
+            by it. The shares come from the desk&apos;s Most active scan, so it reacts as often as that scan runs (set its auto scan
+            to 1-2 minutes for a quick exit; with scans paused it does nothing). The colour exit, stop and target stay on:
+            whichever comes first closes the trade. Live desk only; backtests have no past order book, so they keep their
+            normal exits.
+          </InfoTip>
+        </span>
+      </label>
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        Close when the side that started the trade is at
+        <input
+          type="number"
+          min={30}
+          max={95}
+          step={1}
+          disabled={!on}
+          value={Number.isFinite(pct) ? pct : 55}
+          onChange={(e) => set("pressure_exit_pct", e.target.value)}
+          className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        />
+        % or below
+      </label>
+      <p className="mt-1 text-xs text-slate-400">
+        Example at {Number.isFinite(pct) ? pct : 55}%: a buy armed when buyers were 75% closes when buyers drop to{" "}
+        {Number.isFinite(pct) ? pct : 55}%; a sell armed at sellers 75% closes when sellers drop to {Number.isFinite(pct) ? pct : 55}%.
+      </p>
+    </div>
+  );
+}
+
 function ColourExit({
   form,
   set,

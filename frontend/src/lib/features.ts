@@ -533,6 +533,8 @@ export const FEATURES: Feature[] = [
     purpose: "Two guides with pictures that tell apart the strategy settings with similar names." },
   { id: "set-basket-stop", area: "settings", added: "2026-11-14", pr: 417, href: S("sma-stop"), where: "Settings → 5. Stop-loss and target → One stop for all armed stocks", title: "One stop for all armed stocks",
     purpose: "Reads every armed or held stock and suggests one stop that fits them all: a common % or ATR multiples, with each stock's own numbers." },
+  { id: "pressure-fade-exit", area: "settings", added: "2026-11-16", pr: 442, href: S("sma-pressure-exit"), where: "Settings → Strategy → 3. When to exit → Most active stocks: exit when buyers / sellers fade", title: "Exit Most active trades when buyers / sellers fade",
+    purpose: "For stocks armed from Most active, a buy closes once the buyers' share of the waiting orders falls to your % (a sell: the sellers'), before a big candle of the other colour turns a profit into a loss. The colour exit, stop and target stay on." },
   { id: "set-smart-stop", area: "settings", added: "2026-11-14", pr: 419, href: S("sma-smart-stop"), where: "Settings → 5. Stop-loss and target → Smart stop", title: "Smart stop: each stock its own room",
     purpose: "One switch: each stock's stop room comes from its own recent dips, not too tight and not too loose, then follows the best price and locks the profit." },
   { id: "set-smart-candles", area: "settings", added: "2026-11-14", pr: 420, href: S("sma-smart-stop"), where: "Settings → 5. Stop-loss and target → Smart stop", title: "Smart stop reads the candles the bot trades",
@@ -575,7 +577,7 @@ export function featureById(id: string): Feature | undefined {
 const ANCHOR_GROUP: Record<string, string> = {
   "sma-candle-interval": "enter", "sma-day-extreme": "enter", "sma-colour-exit": "enter", "sma-colour-force": "enter",
   "sma-fresh": "check", "sma-exit-candle": "exit", "sma-slope-candle": "exit", "sma-small-colour": "exit",
-  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced",
+  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced",
 };
 
 /** The strategy form's group (enter, check, exit, gap, stop, risk, advanced) a Settings link opens, or null. */

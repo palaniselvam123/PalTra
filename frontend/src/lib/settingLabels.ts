@@ -185,6 +185,8 @@ export const SETTING_LABELS: Record<string, string> = {
   stop_handoff_loss: "stop move only on a loss",
   handoff_now: "Bot 2 orders at once",
   pivot_target: "pivot target",
+  pressure_exit: "Most active: exit when buyers / sellers fade",
+  pressure_exit_pct: "buyers / sellers fade exit %",
   stop_plan: "staged stop plan",
   decel_exit: "SMA 9 deceleration guard",
   decel_lookback: "deceleration slope over (candles)",

@@ -31,6 +31,7 @@ from candle_history import HistoryError, fetch_frame, load_history
 import all_bots_guard
 import pnl_alerts
 import pivots
+import pressure_exit as pressure_exit_mod
 import auto_start
 import scalp_alerts
 import auto_arm
@@ -817,6 +818,9 @@ class ConfigUpdate(BaseModel):
     handoff_now: bool | None = None
     auto_start: bool | None = None
     pivot_target: Literal["OFF", "R1", "R2"] | None = None
+    # Most active stocks: close once the buyers (a buy) / sellers (a sell) fade to this % (pressure_exit.py).
+    pressure_exit: bool | None = None
+    pressure_exit_pct: float | None = Field(default=None, ge=30, le=95)
     stop_plan: bool | None = None
     plan_be_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
     plan_trail_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
@@ -1875,6 +1879,8 @@ def _gap_dict(row) -> dict:
         "handoff_now": recovery_mod.handoff_now_on(row),
         "auto_start": bool(getattr(row, "auto_start", False)),
         "pivot_target": pivots.target_mode(row),
+        "pressure_exit": pressure_exit_mod.on(row),
+        "pressure_exit_pct": pressure_exit_mod.pct(row),
         "stop_plan": stop_plan_mod.on(row),
         "plan_be_r": stop_plan_mod.be_r(row),
         "plan_trail_r": stop_plan_mod.trail_r(row),
@@ -3923,6 +3929,15 @@ async def _auto_arm_notify(message: str) -> None:
     from app.services.alert_notifier import alert_notifier
 
     await alert_notifier.send_quiet(message)
+
+
+def pressure_note(snapshot: dict) -> int:
+    """Keep a finished Most active pass's buyers' shares for the buyers / sellers fade exit (pressure_exit.py)."""
+    try:
+        return pressure_exit_mod.note_scan(snapshot)
+    except Exception:  # noqa: BLE001
+        logging.getLogger("sma.pressure_exit").exception("buyers / sellers reads not kept")
+        return 0
 
 
 async def auto_arm_after(kind: str, snapshot: dict) -> dict | None:

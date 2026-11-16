@@ -235,6 +235,7 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
       code: "GAP_FADE",
     });
   if (cfg.pivot_target === "R1" || cfg.pivot_target === "R2") out.push({ name: `Pivot target (${cfg.pivot_target})`, when: price, code: "PIVOT_TARGET" });
+  if (cfg.pressure_exit) out.push({ name: `Most active stocks: buyers / sellers fade to ${cfg.pressure_exit_pct ?? 55}%`, when: "each Most active scan", code: "PRESSURE_FADE" });
   out.push({ name: `Square-off at ${cfg.square_off_time ?? "15:15"}`, when: "time", code: "EOD_SQUARE_OFF" });
   const mode = String(cfg.entry_mode ?? "SMA").toUpperCase();
   if (mode === "PATTERN") out.push({ name: "Candle pattern: each candle closes the trade", when: candle, code: "CANDLE_END" });

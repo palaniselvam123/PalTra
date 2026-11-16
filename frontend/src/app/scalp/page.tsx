@@ -782,7 +782,7 @@ export default function ScalpPage() {
             watching={new Set((data?.rows ?? []).map((r) => r.symbol))}
             armed={armed}
             arming={arming}
-            onArm={(s) => arm(s, "Scalp monitor")}
+            onArm={(s) => arm(s, "Most active")}
             onWatched={refresh}
             paused={paused}
             onStatus={onActiveStatus}

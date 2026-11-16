@@ -225,6 +225,8 @@ FIELD_HELP = {
     "stop_plan": "staged stop plan: breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R",
     "plan_be_r": "R multiple for breakeven", "plan_trail_r": "R multiple to start the Supertrend trail",
     "pivot_target": "OFF | R1 | R2: close at the pivot level",
+    "pressure_exit": "Most active stocks only: close a buy when the buyers' share of waiting orders fades to pressure_exit_pct % (a sell: the sellers')",
+    "pressure_exit_pct": "buyers / sellers % at or below which a Most active trade is closed (30-95)",
     "cross_exit": "an opposite SMA cross closes the trade and reverses (off = held through a cross)",
     "bb_exit": "Bollinger exit: OFF | BAND | MIDDLE | BOTH", "bb_period": "Bollinger period", "bb_std": "Bollinger std dev",
     "use_vwap": "entry check: buy above VWAP, sell below",
