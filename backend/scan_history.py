@@ -215,7 +215,7 @@ def get(run_id: int) -> dict | None:
 # (phases, notes, activity) stays in the saved run, so several days of scans fit in one answer.
 CHOP_KEEP = (
     "symbol", "ltp", "score", "trend", "trend_score", "trend_mode", "fresh", "phase", "phase_early", "phase_since_ts",
-    "phase_move_pct", "speed_pct_per_min", "crosses_today", "day_move_pct", "crosses_by_minutes",
+    "phase_move_pct", "phase_candles", "trend_checks", "speed_pct_per_min", "crosses_today", "day_move_pct", "crosses_by_minutes",
     "last_cross_side_by_minutes", "side_by_minutes", "trend_by_minutes", "run_candles_by_minutes",
     "run_since_ts_by_minutes", "gap_pct_by_minutes", "gap_peak_pct_by_minutes",
 )
