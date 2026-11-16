@@ -241,3 +241,11 @@ def test_a_saved_scan_keeps_the_stocks_it_could_not_read(tmp_path, monkeypatch):
     run = scan_history.save("active", {"as_of": NOON.isoformat(), "rows": [], "failed": 1, "missed": missed, "total": 1})
     assert run is not None
     assert scan_history.get(run)["meta"]["missed"] == missed
+
+
+def test_a_one_sided_order_book_is_not_a_buyers_share():
+    # Owner's KAYNES case: 0 buy orders waiting read as "sellers 100%" and armed the stock.
+    no_buyers = row_from_quote("KAYNES", _quote(2850.0, 2_000_000, 2860.0, 2915.0, buy=0, sell=50_000), 1_000_000, 0.5)
+    no_sellers = row_from_quote("KAYNES", _quote(2850.0, 2_000_000, 2860.0, 2915.0, buy=50_000, sell=0), 1_000_000, 0.5)
+    assert no_buyers.buy_share is None and no_sellers.buy_share is None
+    assert no_buyers.buy_qty == 0 and no_buyers.sell_qty == 50_000

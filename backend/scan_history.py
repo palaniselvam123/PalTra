@@ -344,6 +344,12 @@ def _opt(value) -> float | None:
     return out if out == out and out >= 0 else None
 
 
+def usable_share(value) -> float | None:
+    from pressure_exit import usable_share as usable
+
+    return usable(value)
+
+
 def active_reads(day: str) -> dict[str, list[tuple[float, float, float | None, float | None]]]:
     """{symbol: [(epoch read, buyers' share 0..1, volume vs usual ×, money traded ₹ cr)]} from that IST day's saved Most
     active scans, oldest first (the chart's reading line and the backtest PDF). Never raises."""
@@ -364,15 +370,12 @@ def active_reads(day: str) -> dict[str, list[tuple[float, float, float | None, f
         last_id = max(last_id, int(run["id"]))
         start = _epoch(run["as_of"])
         for row in _unpack(run["rows"]) or []:
-            if not isinstance(row, dict) or row.get("buy_share") is None:
+            if not isinstance(row, dict):
                 continue
-            try:
-                share = float(row["buy_share"])
-            except (TypeError, ValueError):
-                continue
+            share = usable_share(row.get("buy_share"))
             at = _epoch(row.get("read_at"), start)
             symbol = str(row.get("symbol") or "").upper()
-            if not symbol or at is None or not 0.0 <= share <= 1.0:
+            if share is None or not symbol or at is None:
                 continue
             by_symbol.setdefault(symbol, []).append((at, share, _opt(row.get("rvol")), _opt(row.get("value_cr"))))
     for reads in by_symbol.values():

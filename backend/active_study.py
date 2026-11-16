@@ -13,6 +13,7 @@ No Groww call, no order, nothing in the strategy reads it.
 """
 from __future__ import annotations
 
+from pressure_exit import usable_share
 import datetime as dt
 import statistics
 import threading
@@ -42,7 +43,8 @@ PARAMS: dict[str, tuple[str, str, object]] = {
     "vwap": ("Distance from average price", "price above (bullish) / below (bearish) today's average price",
              lambda r, s: (_f(r.get("vwap_dist_pct")) * s) if _f(r.get("vwap_dist_pct")) is not None else None),
     "pressure": ("Buyer / seller imbalance", "more buyers waiting (bullish) / sellers (bearish)",
-                 lambda r, s: ((_f(r.get("buy_share")) - 0.5) * s) if _f(r.get("buy_share")) is not None else None),
+                 lambda r, s: ((usable_share(r.get("buy_share")) - 0.5) * s) if usable_share(r.get("buy_share")) is not None
+                 else None),
     "speed": ("Speed now", "% per minute since the scan before, its way",
               lambda r, s: (_f(r.get("speed_pct_min")) * s) if _f(r.get("speed_pct_min")) is not None else None),
     "range": ("Day range %", "today's high − low as % of the open", lambda r, s: _f(r.get("range_pct"))),

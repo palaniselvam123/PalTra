@@ -375,28 +375,29 @@ def active_hits(scans: list[dict], pct: float, side: str, min_value_cr: float, p
                 price_max: float = 0.0, min_rvol: float = 0.0) -> list[tuple[str, str, str, float]]:
     """(HH:MM armed, symbol, BUY/SELL, %) from one day's saved Most active scans (each {as_of, rows}), first per stock.
 
-    A scan read at 10:04:30 arms at 10:05 (the minute after the read), like a live scan that finished then."""
+    A stock is armed the minute after its own order-book read (`read_at`; a scan saved before rows carried it falls
+    back to the scan's start): a read at 10:04:30 arms at 10:05, like a live scan that read it then. A pass takes
+    minutes, so the scan's start would arm stocks read late in it before anyone could have seen them. A one-sided
+    order book (no buy or no sell orders waiting) is never a hit (pressure_exit.usable_share)."""
     import scalp_alerts
+    from pressure_exit import usable_share
     from pressure_study import in_session
 
     need = float(pct) / 100.0
-    out: list[tuple[str, str, str, float]] = []
-    seen: set[str] = set()
+    first: dict[str, tuple[dt.datetime, str, float]] = {}
     for scan in sorted(scans, key=lambda x: str(x.get("as_of") or "")):
         if not in_session(scan):
             continue
         try:
-            when = dt.datetime.fromisoformat(str(scan["as_of"])).astimezone(IST)
+            start = dt.datetime.fromisoformat(str(scan["as_of"])).astimezone(IST)
         except (KeyError, ValueError):
             continue
-        at = (when.replace(second=0, microsecond=0) + dt.timedelta(minutes=1)).strftime("%H:%M")
         for r in scan.get("rows") or []:
             sym = str(r.get("symbol") or "").upper()
-            share = r.get("buy_share")
-            if not sym or sym in seen or share is None:
+            share = usable_share(r.get("buy_share"))
+            if not sym or share is None:
                 continue
             try:
-                share = float(share)
                 value = float(r.get("value_cr") or 0.0)
             except (TypeError, ValueError):
                 continue
@@ -412,8 +413,20 @@ def active_hits(scans: list[dict], pct: float, side: str, min_value_cr: float, p
                 continue
             if side != "BOTH" and side != s:
                 continue
-            seen.add(sym)
-            out.append((at, sym, s, round(p, 1)))
+            when = start
+            if r.get("read_at"):
+                try:
+                    read = dt.datetime.fromisoformat(str(r["read_at"]))
+                    when = (read if read.tzinfo else read.replace(tzinfo=IST)).astimezone(IST)
+                except ValueError:
+                    pass
+            if sym not in first or when < first[sym][0]:
+                first[sym] = (when, s, round(p, 1))
+    out = [
+        ((when.replace(second=0, microsecond=0) + dt.timedelta(minutes=1)).strftime("%H:%M"), sym, s, p)
+        for sym, (when, s, p) in first.items()
+    ]
+    out.sort(key=lambda h: (h[0], h[1]))
     return out
 
 

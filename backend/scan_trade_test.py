@@ -20,6 +20,7 @@ that sells; `BIAS` = the row's bias (LONG buys, SHORT sells); `MOVE` = up on the
 """
 from __future__ import annotations
 
+from pressure_exit import usable_share
 import datetime as dt
 
 import numpy as np
@@ -52,7 +53,7 @@ def picks(rows: list[dict], pick: str, pct: float, top_n: int) -> list[dict]:
         symbol, price = r.get("symbol"), _f(r.get("ltp"))
         if not symbol or not price:
             continue
-        share, why = _f(r.get("buy_share")), ""
+        share, why = usable_share(r.get("buy_share")), ""
         side = None
         if pick == "PRESSURE":
             if share is not None and share >= need:

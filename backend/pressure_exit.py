@@ -42,6 +42,17 @@ def _opt(value) -> float | None:
     return out if out == out and out >= 0 else None
 
 
+def usable_share(value) -> float | None:
+    """A buyers' share (0..1) worth reading, else None. A one-sided order book (no buy orders or no sell orders
+    waiting, so exactly 0 or 1) is a bad quote, not a real 100 % (owner's KAYNES case: 0 buy orders read at 09:31 on
+    a stock trading ₹500 cr armed it as "sellers 100%"). Saved scans from before this rule still hold such reads."""
+    try:
+        share = float(value)
+    except (TypeError, ValueError):
+        return None
+    return share if 0.0 < share < 1.0 else None
+
+
 def on(cfg) -> bool:
     return bool(getattr(cfg, "pressure_exit", False))
 
@@ -77,15 +88,9 @@ def note_scan(snapshot: dict) -> int:
     kept = 0
     for row in snapshot.get("rows") or []:
         symbol = str(row.get("symbol") or "").upper()
-        share = row.get("buy_share")
+        share = usable_share(row.get("buy_share"))
         at = _ts(row.get("read_at")) or start
         if not symbol or share is None or at is None:
-            continue
-        try:
-            share = float(share)
-        except (TypeError, ValueError):
-            continue
-        if not 0.0 <= share <= 1.0:
             continue
         reads = _READS.setdefault(symbol, [])
         if reads and reads[-1][0] >= at:

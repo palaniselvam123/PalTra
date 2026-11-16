@@ -198,6 +198,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   / S2 only; no level beyond the entry = no pivot target), via `_exit_now` (`PIVOT_TARGET`; a LIVE stop is cancelled
   first, a LIVE position restored without its stop id is left to that stop). Settings → 5. Stop-loss and target. Counts
   as an exit for `strategyChecks.noExitOn`. The stock research baseline keeps it off.
+- **One-sided order books** (`pressure_exit.usable_share`, frontend `api.usableShare`; owner's KAYNES case: 0 buy
+  orders read at 09:31 on a stock trading ₹500 cr armed it as "sellers 100%"): a buyers' share of exactly 0 or 1 (no buy
+  or no sell orders waiting) is a bad quote and reads as unknown. The Most active scan saves it as None
+  (`active_stocks.row_from_quote`), and every reader skips old saved ones: the alert (`scalp_alerts.pressure_picks`), the
+  live auto-arm, the auto-arm replay (`auto_arm.active_hits`), the fade exit (`note_scan`), the chart
+  (`scan_history.active_reads`), the buyers / sellers test, the column test, "Trade a saved scan" and the Most active
+  History tables.
 - `backend/pressure_exit.py` – **buyers / sellers fade exit for Most active stocks** (`pressure_exit`, off by default;
   `pressure_exit_pct` 55, 30-95; per bot and per stock, PAPER and LIVE; Settings → 3. When to exit, under the SMA cross
   exit, `StrategyConfigPanel.PressureExit`, anchor `#sma-pressure-exit`; owner's case: Most active trades held to the
@@ -1292,7 +1299,8 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   `components/Scalp/AutoArmReplay.tsx`; practice money, works after hours): `picks_for_day` gives each stock the minute it
   would have been armed: Trend quality every `every_min` minutes from `first` to `last` (`strong_read`: the same
   `trend_strength.read` on the candles closed before that minute as the card's Trend column, about 16 ms a read) and Most
-  active from that day's saved scans (`active_hits`, the minute after each read; `saved_scans` on this server, else on the
+  active from that day's saved scans (`active_hits`, the minute after each stock's own read, `read_at`, not the pass's
+  start, which armed stocks read late in a pass minutes early; older rows without `read_at` use the start; `saved_scans` on this server, else on the
   backtest server desk `GET /api/link/backtest/active-scans?day=&pct=&side=&min_value_cr=` behind `BACKTEST_LINK_TOKEN`,
   `main._auto_arm_scans`); the alert thresholds are the defaults. `ReplaySession` gives the engine `arm_windows`
   (`auto_arm.arm_windows`, the "as armed" path: a stock armed mid-day waits for a fresh signal) and starts the day at the

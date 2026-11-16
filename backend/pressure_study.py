@@ -16,6 +16,7 @@ No Groww call, no order, nothing in the strategy reads it.
 """
 from __future__ import annotations
 
+from pressure_exit import usable_share
 import bisect
 import statistics
 import threading
@@ -78,7 +79,7 @@ def day_series(runs: list[dict], rows_of) -> dict[str, tuple[list[int], list[flo
                 continue
             times.append(minute)
             prices.append(price)
-            shares.append(_f(row.get("buy_share")))
+            shares.append(usable_share(row.get("buy_share")))
             clocks.append(t.strftime("%H:%M:%S") if read else t.strftime("%H:%M"))
     return out
 

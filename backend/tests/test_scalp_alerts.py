@@ -188,3 +188,10 @@ def test_last_check_records_matches_while_the_alert_is_off():
     asyncio.run(scalp_alerts.after_trend_scan({"rows": rows}, send, NOW))
     last = scalp_alerts.view()["last"]["strong"]
     assert last["on"] is False and last["matched"] == 1 and last["new"] == 0
+
+
+def test_a_one_sided_book_never_alerts():
+    s = scalp_alerts.save({"pressure_on": True, "pressure_pct": 70, "pressure_min_rvol": 0})
+    rows = [{"symbol": "KAYNES", "buy_share": 0.0, "ltp": 1.0, "value_cr": 500},
+            {"symbol": "X", "buy_share": 1.0, "ltp": 1.0, "value_cr": 500}]
+    assert scalp_alerts.pressure_picks(rows, s, NOW, alerting=False) == []
