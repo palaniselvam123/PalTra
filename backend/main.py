@@ -823,6 +823,9 @@ class ConfigUpdate(BaseModel):
     # Most active stocks: close once the buyers (a buy) / sellers (a sell) fade to this % (pressure_exit.py).
     pressure_exit: bool | None = None
     pressure_exit_pct: float | None = Field(default=None, ge=30, le=95)
+    pressure_over_counter: bool | None = None
+    pressure_entry: Literal["OFF", "CHECK", "AT_ARM"] | None = None
+    pressure_entry_pct: float | None = Field(default=None, ge=30, le=95)
     stop_plan: bool | None = None
     plan_be_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
     plan_trail_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
@@ -1883,6 +1886,9 @@ def _gap_dict(row) -> dict:
         "pivot_target": pivots.target_mode(row),
         "pressure_exit": pressure_exit_mod.on(row),
         "pressure_exit_pct": pressure_exit_mod.pct(row),
+        "pressure_over_counter": bool(getattr(row, "pressure_over_counter", False)),
+        "pressure_entry": pressure_exit_mod.entry_mode(row),
+        "pressure_entry_pct": pressure_exit_mod.entry_pct(row),
         "stop_plan": stop_plan_mod.on(row),
         "plan_be_r": stop_plan_mod.be_r(row),
         "plan_trail_r": stop_plan_mod.trail_r(row),

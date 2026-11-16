@@ -477,6 +477,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     pivot_target: form.pivot_target === "R1" || form.pivot_target === "R2" ? form.pivot_target : "OFF",
     pressure_exit: Boolean(form.pressure_exit),
     pressure_exit_pct: Math.min(95, Math.max(30, Number(form.pressure_exit_pct ?? 55) || 55)),
+    pressure_over_counter: Boolean(form.pressure_over_counter),
+    pressure_entry: (["OFF", "CHECK", "AT_ARM"].includes(String(form.pressure_entry)) ? form.pressure_entry : "OFF") as SmaConfig["pressure_entry"],
+    pressure_entry_pct: Math.min(95, Math.max(30, Number(form.pressure_entry_pct ?? 65) || 65)),
     stop_plan: Boolean(form.stop_plan),
     decel_exit: Boolean(form.decel_exit),
     decel_lookback: Math.min(10, Math.max(1, Math.round(Number(form.decel_lookback ?? 2) || 2))),
@@ -1229,6 +1232,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
         </div>
         <div className="min-w-0">
+          <PressureEntry form={form} set={set} isOwn={isOwn} />
           <Only s="sma trend turn colour">
           <SectionTitle>Extra ways in (all off by default)</SectionTitle>
           </Only>
@@ -3842,6 +3846,10 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "stop", key: "stop_plan", text: `Stop plan: breakeven at +${f.plan_be_r ?? 1.5}R, Supertrend trail from +${f.plan_trail_r ?? 2}R`, off: { stop_plan: false } });
   if (f.pressure_exit)
     add({ group: "exit", key: "pressure_exit", text: `Most active stocks close when the buyers (a buy) / sellers (a sell) fade to ${f.pressure_exit_pct ?? 55}% or below`, off: { pressure_exit: false } });
+  if (f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM")
+    add({ group: "enter", key: "pressure_entry", text: `Most active stocks: ${f.pressure_entry === "AT_ARM" ? "entered at once while" : "enter only while"} the buyers (a buy) / sellers (a sell) hold ${f.pressure_entry_pct ?? 65}% or more`, off: { pressure_entry: "OFF" } });
+  if (f.pressure_exit && f.pressure_over_counter)
+    add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
     add({ group: "stop", key: "pivot_target", text: f.pivot_target === "R1" ? "Target at the R1 / S1 pivot (else R2 / S2)" : "Target at the R2 / S2 pivot", off: { pivot_target: "OFF" } });
 
@@ -4972,8 +4980,8 @@ function PressureExit({
             above the level (from the read that armed the stock on), so a trade that started without the pressure is not closed
             by it. The shares come from the desk&apos;s Most active scan, so it reacts as often as that scan runs (set its auto scan
             to 1-2 minutes for a quick exit; with scans paused it does nothing). The colour exit, stop and target stay on:
-            whichever comes first closes the trade. Live desk only; backtests have no past order book, so they keep their
-            normal exits.
+            whichever comes first closes the trade. It reads every saved Most active scan of the day too, so it also works
+            when the scan runs on another server and in backtests of days with saved scans.
           </InfoTip>
         </span>
       </label>
@@ -4994,6 +5002,84 @@ function PressureExit({
       <p className="mt-1 text-xs text-slate-400">
         Example at {Number.isFinite(pct) ? pct : 55}%: a buy armed when buyers were 75% closes when buyers drop to{" "}
         {Number.isFinite(pct) ? pct : 55}%; a sell armed at sellers 75% closes when sellers drop to {Number.isFinite(pct) ? pct : 55}%.
+      </p>
+      <label className="mt-2 flex items-start gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.pressure_over_counter)}
+          disabled={!on}
+          onChange={(e) => set("pressure_over_counter", e.target.checked)}
+          className="mt-1 accent-[#10B981]"
+        />
+        <span>
+          {isOwn("pressure_over_counter") && <OwnTag />}
+          <b className="text-slate-100">Let it overrule the counter-candle exit</b> <NewTag id="pressure-over-counter" />{" "}
+          <InfoTip label="About letting buyers / sellers overrule the counter-candle exit">
+            For these Most active stocks, a run of candles against the trade no longer closes it while the latest Most active read
+            (taken since the entry, at most 20 minutes old) still shows the trade&apos;s own side above the % above: the trade is
+            held and the fade exit decides. When that side falls to the % or below, the fade exit closes it. With no fresh read
+            (scans paused, the scan not reaching the stock) the counter-candle exit works as usual, so a trade is never left
+            without it. The stop, target and every other exit are unchanged.
+          </InfoTip>
+        </span>
+      </label>
+    </div>
+  );
+}
+
+function PressureEntry({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const mode = String(form.pressure_entry ?? "OFF");
+  const pct = Number(form.pressure_entry_pct ?? 65);
+  const shown = Number.isFinite(pct) ? pct : 65;
+  return (
+    <div id="sma-pressure-entry" className="mb-3 rounded-md p-2 ring-1 ring-inset ring-white/10">
+      <label className="block text-sm text-slate-300">
+        {(isOwn("pressure_entry") || isOwn("pressure_entry_pct")) && <OwnTag />}
+        <b className="text-slate-100">Most active stocks: when to enter</b> <NewTag id="pressure-entry" />{" "}
+        <InfoTip label="About entries for Most active stocks">
+          Only for stocks armed from Most active (the auto-arm or the card&apos;s Arm). &quot;Only while they hold&quot;: every
+          entry of such a stock (the cross, a colour candle, any signal) needs the order&apos;s own side, buyers for a buy and
+          sellers for a sell, still at this % or more in a Most active read of the last 20 minutes; otherwise it is refused, like
+          the other entry checks. &quot;Enter at once&quot;: the same check, and the bot also buys (buyers hold) or sells (sellers
+          hold) the stock at once, without waiting for its own signal, once a day per stock. Market hours, the cut-off, the Trade
+          list, the caps and one LIVE bot per stock still apply; the bot&apos;s stop, target and exits then run the trade. The reads
+          come from the Most active scan (set its auto scan to 1-2 minutes); backtests read the day&apos;s saved scans.
+        </InfoTip>
+        <select
+          value={mode}
+          onChange={(e) => set("pressure_entry", e.target.value)}
+          className="mt-1 block min-h-11 w-full rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 sm:min-h-9"
+        >
+          <option value="OFF">Off: the bot&apos;s own signal decides</option>
+          <option value="CHECK">Only while the buyers / sellers still hold</option>
+          <option value="AT_ARM">Enter at once while they hold (and check later entries)</option>
+        </select>
+      </label>
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        Buyers (a buy) / sellers (a sell) at least
+        <input
+          type="number"
+          min={30}
+          max={95}
+          step={1}
+          disabled={mode === "OFF"}
+          value={shown}
+          onChange={(e) => set("pressure_entry_pct", e.target.value)}
+          className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        />
+        %
+      </label>
+      <p className="mt-1 text-xs text-slate-400">
+        Example at {shown}%: a stock armed when buyers were 78% is bought only while buyers are still {shown}% or more; once they
+        drop under it, no new buy goes in.
       </p>
     </div>
   );

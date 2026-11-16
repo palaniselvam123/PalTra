@@ -183,6 +183,7 @@ def cross_exits(cfg) -> bool:
 # ":PULLBACK" (tall candle / breakout level) or ":EXTREME_LIMIT" (extreme_entry.py).
 ENTRY_REASONS = (
     "SMA_CROSS",
+    "MOST_ACTIVE",
     "GAP_MODE",
     "JOIN_TREND",
     "ALWAYS_IN",
@@ -413,7 +414,7 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max", "handoff_candle",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
-    "pressure_exit", "pressure_exit_pct",
+    "pressure_exit", "pressure_exit_pct", "pressure_over_counter", "pressure_entry", "pressure_entry_pct",
     "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
@@ -1370,6 +1371,9 @@ class StrategyEngine:
         self._pivot_cache: dict[tuple[str, dt.date], dict] = {}
         # Last note of the buyers / sellers fade exit per stock (pressure_exit.py), so the signal line is written once.
         self._pressure_note: dict[str, str] = {}
+        # Most active entry at once (pressure_exit.entry_mode AT_ARM): symbol -> the IST day it was entered / refused.
+        self._pe_done: dict[str, dt.date] = {}
+        self._pe_note: dict[str, str] = {}
         self._review_bar: dict[str, int] = {}
         self._review_episode: dict[str, dict] = {}
         self.reviews: list[dict] = []
@@ -1877,6 +1881,10 @@ class StrategyEngine:
                 if self.status != "RUNNING":
                     break
             if self._judged_bar.get(symbol) == closed_ts:
+                # Most active stocks: entered at once while the buyers / sellers still hold (pressure_exit.py).
+                await self._pressure_entry_pass(symbol, cfg, now)
+                if self.status != "RUNNING":
+                    break
                 # Always in a trade: between candles, a stock that just went flat is entered again at once.
                 await self._always_in_pass(symbol, frame, cfg, now)
                 if self.status != "RUNNING":
@@ -1922,7 +1930,11 @@ class StrategyEngine:
                 self._judged_bar[symbol] = judged
             if self.status != "RUNNING":
                 break
-            # After the candle's own signals (a fresh cross goes first): still flat = always in enters now.
+            # After the candle's own signals (a fresh cross goes first): a Most active stock is entered at once while
+            # its buyers / sellers hold, then still flat = always in enters now.
+            await self._pressure_entry_pass(symbol, cfg, now)
+            if self.status != "RUNNING":
+                break
             await self._always_in_pass(symbol, frame, cfg, now)
             if self.status != "RUNNING":
                 break
@@ -2162,6 +2174,48 @@ class StrategyEngine:
             self._signals[symbol] = result
             self.last_signal = result
         return result
+
+    async def _pressure_entry_pass(self, symbol: str, cfg: BotConfig, now: dt.datetime) -> None:
+        """Most active stocks with `pressure_entry` AT_ARM: entered at once (no cross, colour or entry check, like a
+        news entry) on the side whose buyers / sellers hold at least `pressure_entry_pct` % in a fresh read, once a day
+        per stock. Market hours, the cut-off, the Trade list, caps, the loss lock and one LIVE bot per stock still
+        apply (`direct_order`)."""
+        symbol_cfg = _cfg_for(cfg, symbol)
+        if pressure_exit.entry_mode(symbol_cfg) != "AT_ARM" or self.status != "RUNNING":
+            return
+        if not pressure_exit.from_most_active(trade_sources(symbol_cfg).get(symbol)):
+            return
+        day = now.date()
+        if self._pe_done.get(symbol) == day or symbol in self.positions or symbol in self._pullback:
+            return
+        if not market_is_open(now) or now.time() < OPENING_BUFFER_END or now.time() >= _entry_cutoff(symbol_cfg):
+            return
+        if not self._still_armed(symbol):
+            return
+        level = pressure_exit.entry_pct(symbol_cfg)
+        pick = pressure_exit.entry_side(symbol, now.timestamp(), level)
+        if pick is None:
+            note = f"{symbol} Most active entry waits for buyers or sellers at {level:g}% or more (a fresh scan read)"
+            if self._pe_note.get(symbol) != note:
+                self._pe_note[symbol] = note
+                self._signals[symbol] = note
+            return
+        side, share, at = pick
+        who = "buyers" if side == "LONG" else "sellers"
+        why = f"{who} {share:g}% at {at}"
+        try:
+            result = await self.direct_order(
+                symbol, "BULLISH" if side == "LONG" else "BEARISH", why=pressure_exit.ENTRY_REASON, note=why
+            )
+        except ForceRefused as exc:
+            if "PENDING" in str(exc):
+                return  # another order is in flight: asked again on the next pass
+            result = f"{symbol} Most active entry refused — {exc}"
+        self._pe_done[symbol] = day
+        self._pe_note.pop(symbol, None)
+        text = f"{result} — Most active entry ({why})"
+        self._signals[symbol] = text
+        self.last_signal = text
 
     async def _always_in_pass(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> None:
         """Always in a trade (always_in.py): a flat armed stock is entered on the side the SMAs point to now.
@@ -3044,6 +3098,18 @@ class StrategyEngine:
             )
             if small:
                 entry_block = f"{entry_block}; {small}" if entry_block else small
+        if pressure_exit.entry_mode(cfg) != "OFF" and pressure_exit.from_most_active(
+            trade_sources(cfg).get((self._focus or "").upper())
+        ):
+            # Most active stocks (pressure_exit.py): the order's own side must still hold at least the set %.
+            real = "LONG" if signal == "BULLISH" else "SHORT"
+            if getattr(cfg, "flip_orders", False):
+                real = "SHORT" if real == "LONG" else "LONG"
+            held = pressure_exit.entry_refusal(
+                self._focus or "", real, self._now().timestamp(), pressure_exit.entry_pct(cfg)
+            )
+            if held:
+                entry_block = f"{entry_block}; {held}" if entry_block else held
 
         async with self.lock:
             if self.inflight in IN_FLIGHT or self.inflight in ("PENDING", "TRANSIT"):
@@ -5371,6 +5437,14 @@ class StrategyEngine:
         )
         if not hit:
             return
+        if pressure_exit.over_counter(cfg) and pressure_exit.from_most_active(trade_sources(cfg).get(symbol)):
+            # The buyers / sellers reading overrules it while the trade's side still holds (pressure_exit.holds).
+            held, why = pressure_exit.holds(
+                symbol, pos.direction, opened.timestamp(), self._now().timestamp(), pressure_exit.pct(cfg)
+            )
+            if held:
+                self._signals[symbol] = f"{symbol} counter-candle exit held — {why}; the buyers / sellers fade exit decides"
+                return
         self._signals[symbol] = f"{symbol} counter-candle exit — {note}"
         side = pos.signal_direction
         await self._exit_now(cfg, self.ltp, "COUNTER_CANDLES")

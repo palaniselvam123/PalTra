@@ -139,12 +139,15 @@ def test_series_joins_saved_scans_and_live_reads(tmp_path, monkeypatch):
     import scan_history
 
     scan_history._ACTIVE_CACHE.clear()
+    scan_history._ACTIVE_CHECKED.clear()
     day = BASE.date().isoformat()
     assert scan_history.save("active", _scan(BASE - dt.timedelta(minutes=30), ACME=0.62, OTHER=0.4))
     assert scan_history.save("active", _scan(BASE - dt.timedelta(minutes=20), ACME=0.71))
     assert [round(s, 2) for _, s in scan_history.active_shares(day)["ACME"]] == [0.62, 0.71]
-    # A run saved later is read on the next call (only the new ones).
+    # A run saved later is read on the next call after ACTIVE_RECHECK_SEC (only the new ones).
     scan_history.save("active", _scan(BASE - dt.timedelta(minutes=10), ACME=0.55))
+    assert len(scan_history.active_shares(day)["ACME"]) == 2        # within the re-check time: the cached reads
+    scan_history._ACTIVE_CHECKED.clear()
     assert len(scan_history.active_shares(day)["ACME"]) == 3
     pressure_exit.note_scan(_scan(BASE + dt.timedelta(minutes=5), ACME=0.30))
     start = (BASE - dt.timedelta(hours=1)).timestamp()
@@ -182,3 +185,79 @@ def test_series_and_entry_read_carry_volume_and_money(tmp_path, monkeypatch):
     assert pressure_exit.read_before("ACME", (BASE - dt.timedelta(minutes=45)).timestamp()) is None
     scan_history._ACTIVE_CACHE.clear()
     pressure_exit.reset()
+
+
+def test_judge_reads_the_days_saved_scans(tmp_path, monkeypatch):
+    """A replay of a saved day (and a desk whose scan runs elsewhere) sees the saved Most active reads."""
+    monkeypatch.setenv("SCAN_HISTORY_FILE", str(tmp_path / "sh.db"))
+    import scan_history
+
+    scan_history._ACTIVE_CACHE.clear()
+    scan_history._ACTIVE_CHECKED.clear()
+    day = BASE - dt.timedelta(days=3)       # an earlier day: nothing in the live memory
+    entry = day.timestamp()
+    scan_history.save("active", _scan(day - dt.timedelta(minutes=5), ACME=0.80))
+    scan_history.save("active", _scan(day + dt.timedelta(minutes=10), ACME=0.50))
+    hit, note = pressure_exit.judge("ACME", "LONG", entry, entry + 15 * 60, 55)
+    assert hit and "faded to 50%" in note
+    # The replay clock before the second read does not see it.
+    assert not pressure_exit.judge("ACME", "LONG", entry, entry + 5 * 60, 55)[0]
+    scan_history._ACTIVE_CACHE.clear()
+
+
+def test_entry_check_and_side():
+    entry = BASE.timestamp()
+    assert pressure_exit.entry_mode(type("C", (), {"pressure_entry": "at_arm"})()) == "AT_ARM"
+    assert pressure_exit.entry_mode(type("C", (), {})()) == "OFF"
+    assert pressure_exit.entry_pct(type("C", (), {"pressure_entry_pct": None})()) == 65.0
+    assert "no Most active read" in pressure_exit.entry_refusal("ACME", "LONG", entry, 65)
+    pressure_exit.note_scan(_scan(BASE - dt.timedelta(minutes=2), ACME=0.72))
+    assert pressure_exit.entry_refusal("ACME", "LONG", entry, 65) is None
+    assert "sellers 28%" in pressure_exit.entry_refusal("ACME", "SHORT", entry, 65)
+    assert pressure_exit.entry_side("ACME", entry, 65)[:2] == ("LONG", 72.0)
+    assert pressure_exit.entry_side("ACME", entry, 75) is None
+    assert pressure_exit.entry_side("ACME", entry + 30 * 60, 65) is None        # the read is too old
+    pressure_exit.note_scan(_scan(BASE, ACME=0.6))
+    assert "buyers 60%" in pressure_exit.entry_refusal("ACME", "LONG", entry, 65)  # the demand went: no buy
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,source,share,orders", [
+    ("AT_ARM", "Auto-arm: Most active", 0.80, ["BULLISH"]),
+    ("AT_ARM", "Auto-arm: Most active", 0.20, ["BEARISH"]),
+    ("AT_ARM", "Auto-arm: Most active", 0.55, []),     # neither side holds 65 %
+    ("AT_ARM", "Trend quality", 0.80, []),             # not a Most active stock
+    ("CHECK", "Auto-arm: Most active", 0.80, []),      # the check alone never orders
+])
+async def test_entry_at_arm_orders_once(monkeypatch, tmp_path, mode, source, share, orders):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/e.db")
+    import database
+    from strategy_engine import StrategyEngine
+    from tests.test_sma_atr_terminal import _FakeBroker
+
+    database.reset_engine()
+    database.init_db()
+    eng = StrategyEngine(broker=_FakeBroker())
+    now = dt.datetime.now(IST).replace(hour=10, minute=30, second=0, microsecond=0)
+    while now.weekday() >= 5:
+        now -= dt.timedelta(days=1)
+    pressure_exit.note_scan(_scan(now - dt.timedelta(minutes=1), ACME=share))
+    eng.status = "RUNNING"
+    sent = []
+
+    async def fake_order(symbol, signal, why, note=""):
+        sent.append(signal)
+        assert why == "MOST_ACTIVE" and symbol == "ACME"
+        return f"opened {symbol}"
+
+    monkeypatch.setattr(eng, "direct_order", fake_order)
+    monkeypatch.setattr(eng, "_still_armed", lambda s: True)
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda *_: True)
+    cfg = type("C", (), {"symbol": "ACME", "pressure_entry": mode, "pressure_entry_pct": 65, "entry_cutoff_time": "15:00",
+                         "square_off_time": "15:15", "trade_sources": json.dumps({"ACME": source}),
+                         "stock_settings": None})()
+    monkeypatch.setattr("strategy_engine._cfg_for", lambda c, s: c)
+    await eng._pressure_entry_pass("ACME", cfg, now)
+    await eng._pressure_entry_pass("ACME", cfg, now)      # once a day
+    assert sent == orders
+    database.reset_engine()
