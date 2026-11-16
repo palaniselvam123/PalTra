@@ -4,7 +4,7 @@
  */
 import { TREND_GROUP_WORDS, trendGroup, trendShort, trendText, type TrendGroup } from "./trendAtEntry";
 import { istStamp } from "@/lib/format";
-import { pnlAtPrice, type ReplayRun, type TradeRow } from "@/lib/smaApi";
+import { pnlAtPrice, type MarketRead, type ReplayRun, type TradeRow } from "@/lib/smaApi";
 
 /** The PDF's built-in font has no ₹, ≥ or arrows; spell them out. */
 export function pdfText(value: string): string {
@@ -73,7 +73,20 @@ export type BacktestPdfInput = {
   pickRule?: [string, string][];
   /** The stocks picked each day, with the minute each was armed and why (the replay bar's armed list). */
   pickLog?: { day: string; time: string; symbol: string; source: string; side: string; why: string }[];
+  /** Each trade's latest saved Most active read before its entry, by trade id (volume vs usual, money traded). */
+  marketReads?: Record<string, MarketRead>;
 };
+
+/** "2.3× usual / ₹45 cr / read 09:52" for a trade's Most active read at entry, or "-" without one. */
+export function marketReadText(read: MarketRead | null | undefined): string {
+  if (!read || (read.rvol == null && read.value_cr == null)) return "-";
+  const parts = [
+    read.rvol == null ? "vol n/a" : `${read.rvol.toFixed(1)}x usual`,
+    read.value_cr == null ? "money n/a" : `Rs ${read.value_cr >= 100 ? read.value_cr.toFixed(0) : read.value_cr.toFixed(1)} cr`,
+    `read ${new Date(read.time * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" })}`,
+  ];
+  return parts.join("\n");
+}
 
 /** The full amount a trade would have cost bought outright: qty x entry price. */
 export function tradeValue(trade: Pick<TradeRow, "qty" | "entry_price">): number | null {
@@ -130,6 +143,7 @@ export async function downloadBacktestPdf({
   marginPct = 20,
   pickRule,
   pickLog,
+  marketReads,
 }: BacktestPdfInput): Promise<void> {
   const [{ jsPDF }, { autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
@@ -406,7 +420,7 @@ export async function downloadBacktestPdf({
     startY: y + 6,
     margin: { left: margin, right: margin },
     theme: "striped",
-    head: [["Trade ID", "Stock", "Side", "Qty", "Entry time", "Entry", "Full value", `Margin ${pct}%`, "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Trend at entry", "Charges", "P&L (before charges)"]],
+    head: [["Trade ID", "Stock", "Side", "Qty", "Entry time", "Entry", "Full value", `Margin ${pct}%`, "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Trend at entry", "Vol vs usual / money at entry", "Charges", "P&L (before charges)"]],
     body: rows.length
       ? rows.map((r) => [
           r.trade_ref || `#${r.id}`,
@@ -424,18 +438,19 @@ export async function downloadBacktestPdf({
           signedPts(r.points),
           r.exit_price == null ? "Open" : reasons[r.exit_reason || ""] ?? (r.exit_reason || "Closed"),
           (trendShort(r.entry_regime, r.direction) ?? "-").replace(/ [↑↓]/, ""),
+          marketReadText(marketReads?.[String(r.id)]),
           r.brokerage_and_taxes == null ? "-" : pdfMoney(r.brokerage_and_taxes).replace("+", ""),
           pdfMoney(r.net_pnl),
         ])
-      : [[{ content: "No closed trades.", colSpan: 17 }]],
+      : [[{ content: "No closed trades.", colSpan: 18 }]],
     styles: { fontSize: 7.5, cellPadding: 3 },
     headStyles: { fillColor: [30, 41, 59] },
-    columnStyles: Object.fromEntries([0, 3, 5, 6, 7, 9, 10, 11, 12, 15, 16].map((i) => [i, { halign: "right" as const }])),
+    columnStyles: Object.fromEntries([0, 3, 5, 6, 7, 9, 10, 11, 12, 16, 17].map((i) => [i, { halign: "right" as const }])),
     didParseCell: (cell) => {
-      if (cell.section === "head" && [0, 3, 5, 6, 7, 9, 10, 11, 12, 15, 16].includes(cell.column.index)) cell.cell.styles.halign = "right";
+      if (cell.section === "head" && [0, 3, 5, 6, 7, 9, 10, 11, 12, 16, 17].includes(cell.column.index)) cell.cell.styles.halign = "right";
       if (cell.section !== "body" || !rows.length) return;
       const r = rows[cell.row.index];
-      if (cell.column.index === 16 || cell.column.index === 2) cell.cell.styles.textColor = tone(r.net_pnl);
+      if (cell.column.index === 17 || cell.column.index === 2) cell.cell.styles.textColor = tone(r.net_pnl);
       if (cell.column.index === 12) cell.cell.styles.textColor = tone(r.points);
       if (cell.column.index === 10) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_high));
       if (cell.column.index === 11) cell.cell.styles.textColor = tone(pnlAtPrice(r, r.max_low));

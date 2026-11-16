@@ -2448,6 +2448,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         slopeTag={slopeWords(shownSlope, filters)}
         buyers={showBuyers ? shownBuyers : undefined}
         buyersAt={showBuyers && shownRead ? shownRead.time : null}
+        rvol={showBuyers ? shownRead?.rvol ?? null : null}
+        valueCr={showBuyers ? shownRead?.value_cr ?? null : null}
         colors={{ sma9: look.sma9.color, sma21: look.sma21.color, vwap: look.vwap.color, rsi: look.rsi.color, buyers: look.pressure.color }}
       />
       {whyLine && ohlc ? (
@@ -2939,6 +2941,8 @@ function OhlcLine({
   slopeTag,
   buyers,
   buyersAt,
+  rvol,
+  valueCr,
   colors,
 }: {
   ohlc: Ohlc | null;
@@ -2962,6 +2966,9 @@ function OhlcLine({
   buyers?: number | null;
   /** When that buyers % was read (epoch seconds): which Most active scan it came from. */
   buyersAt?: number | null;
+  /** Volume vs usual (×) and money traded (₹ crore) from that same Most active read. */
+  rvol?: number | null;
+  valueCr?: number | null;
   colors: { sma9: string; sma21: string; vwap: string; rsi: string; buyers: string };
 }) {
   if (!ohlc) return null;
@@ -3058,6 +3065,20 @@ function OhlcLine({
               (read {readClock(buyersAt)}) <NewTag id="chart-buyers-read-time" link={false} />
             </span>
           ) : null}
+        </span>
+      ) : null}
+      {buyers !== undefined && buyers != null && (rvol != null || valueCr != null) ? (
+        <span
+          className="cursor-help whitespace-nowrap"
+          title="From the same Most active read: today's volume so far against the usual volume by that time on earlier sessions (2× = twice the usual), and the money traded in the stock today so far."
+        >
+          <span className="text-slate-400">Vol vs usual</span>{" "}
+          <span className={clsx(rvol == null ? "text-slate-400" : rvol >= 2 ? "text-amber-300" : "text-slate-100")}>
+            {rvol == null ? "—" : `${rvol.toFixed(1)}×`}
+          </span>{" "}
+          <span className="text-slate-400">Money</span>{" "}
+          <span className="text-slate-100">{valueCr == null ? "—" : `₹${valueCr >= 100 ? valueCr.toFixed(0) : valueCr.toFixed(1)} cr`}</span>{" "}
+          <NewTag id="chart-rvol-money" link={false} />
         </span>
       ) : null}
     </div>

@@ -583,7 +583,13 @@ export function BacktestRuns() {
     setPrinting(run.id);
     try {
       // The practice wallet's margin share (20% = 5x) sizes the "margin" amounts; without a wallet 20% is assumed.
-      const [full, book, wallet] = await Promise.all([smaApi.replayRun(run.id), smaApi.tradeBook("REPLAY"), smaApi.wallet().catch(() => null)]);
+      const [full, book, wallet, marketReads] = await Promise.all([
+        smaApi.replayRun(run.id),
+        smaApi.tradeBook("REPLAY"),
+        smaApi.wallet().catch(() => null),
+        // Volume vs usual / money traded at each entry from the saved Most active scans (none = "-" in the PDF).
+        smaApi.replayRunMarketReads(run.id).catch(() => ({})),
+      ]);
       const { downloadBacktestPdf } = await import("@/lib/backtestPdf");
       await downloadBacktestPdf({
         run: full,
@@ -594,6 +600,7 @@ export function BacktestRuns() {
         reasons: REASON_SHORT,
         pickRule: pickRuleRows(full),
         pickLog: pickLogRows(full.settings),
+        marketReads,
       });
       setError(null);
     } catch (err) {

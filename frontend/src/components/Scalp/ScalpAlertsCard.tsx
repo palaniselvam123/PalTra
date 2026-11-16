@@ -146,6 +146,26 @@ export function ScalpAlertsCard() {
                   className={clsx(select, "w-28")}
                 />
               </label>
+              <label className="flex flex-col gap-1">
+                <span className="flex items-center gap-1">
+                  Vol vs usual at least (×, 0 = any)
+                  <NewTag id="alert-min-rvol" />
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.5}
+                  defaultValue={view.pressure_min_rvol ?? 0}
+                  disabled={busy}
+                  title="Today's volume so far against the usual volume by this time on earlier sessions (the Most active card's 'Vol vs usual'). 2 = twice the usual. A stock whose volume vs usual is not known yet is left out while this is set."
+                  onBlur={(e) => {
+                    const v = Math.min(100, Math.max(0, Number(e.target.value) || 0));
+                    if (v !== (view.pressure_min_rvol ?? 0)) void save({ pressure_min_rvol: v });
+                  }}
+                  className={clsx(select, "w-28")}
+                />
+              </label>
             </div>
             <ArmRow
               label="Most active"

@@ -275,8 +275,9 @@ def save_copy(kind: str, snapshot: dict, meta: dict | None = None) -> int | None
 
 # Buyers' share per stock from a day's saved Most active scans (the chart's buyers / sellers strip, pressure_exit.series).
 # Each day is read once and then only the runs saved after it (a Most active pass every few minutes), so the chart's
-# frequent refresh does not unpack every scan again. day -> (last run id read, {symbol: [(epoch, share 0..1)]}).
-_ACTIVE_CACHE: dict[str, tuple[int, dict[str, list[tuple[float, float]]]]] = {}
+# frequent refresh does not unpack every scan again.
+# day -> (last run id read, {symbol: [(epoch, share 0..1, volume vs usual or None, money traded ₹ cr or None)]}).
+_ACTIVE_CACHE: dict[str, tuple[int, dict[str, list[tuple[float, float, float | None, float | None]]]]] = {}
 _ACTIVE_CACHE_DAYS = 6
 
 
@@ -297,6 +298,20 @@ def _epoch(text, fallback: float | None = None) -> float | None:
 def active_shares(day: str) -> dict[str, list[tuple[float, float]]]:
     """{symbol: [(epoch of the stock's order-book read, buyers' share 0..1)]} from that IST day's saved Most active
     scans, oldest first. Never raises (an empty dict when the file cannot be read)."""
+    return {sym: [(at, share) for at, share, _, _ in reads] for sym, reads in active_reads(day).items()}
+
+
+def _opt(value) -> float | None:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if out == out and out >= 0 else None
+
+
+def active_reads(day: str) -> dict[str, list[tuple[float, float, float | None, float | None]]]:
+    """{symbol: [(epoch read, buyers' share 0..1, volume vs usual ×, money traded ₹ cr)]} from that IST day's saved Most
+    active scans, oldest first (the chart's reading line and the backtest PDF). Never raises."""
     last_id, by_symbol = _ACTIVE_CACHE.get(day, (0, {}))
     try:
         with _lock, _connect() as con:
@@ -324,9 +339,9 @@ def active_shares(day: str) -> dict[str, list[tuple[float, float]]]:
             symbol = str(row.get("symbol") or "").upper()
             if not symbol or at is None or not 0.0 <= share <= 1.0:
                 continue
-            by_symbol.setdefault(symbol, []).append((at, share))
+            by_symbol.setdefault(symbol, []).append((at, share, _opt(row.get("rvol")), _opt(row.get("value_cr"))))
     for reads in by_symbol.values():
-        reads.sort()
+        reads.sort(key=lambda r: r[0])
     _ACTIVE_CACHE[day] = (last_id, by_symbol)
     for old in sorted(_ACTIVE_CACHE)[:-_ACTIVE_CACHE_DAYS]:
         _ACTIVE_CACHE.pop(old, None)
