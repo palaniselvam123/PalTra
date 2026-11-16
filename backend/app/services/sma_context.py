@@ -229,6 +229,8 @@ FIELD_HELP = {
     "pressure_exit_pct": "buyers / sellers % at or below which a Most active trade is closed (30-95)",
     "pressure_entry": "Most active stocks: OFF; CHECK = every entry needs the order's side (buyers for a buy, sellers for a sell) still at least pressure_entry_pct % in a fresh Most active read; AT_ARM = the same check, and the stock is also entered at once on the side that holds it, once a day",
     "pressure_entry_pct": "buyers / sellers % a Most active stock's entry needs (30-95)",
+    "pressure_flip": "candle-colour mode, Most active stocks: when the colour points one way but the other side (sellers against a buy, buyers against a sell) holds at least pressure_flip_pct % in a fresh Most active read, the trade goes their way instead (entry reason PRESSURE_FLIP)",
+    "pressure_flip_pct": "buyers / sellers % that overrules the candle colour (55-95)",
     "pressure_over_counter": "Most active stocks with the fade exit on: hold the counter-candle exit while a fresh Most active read still shows the trade's side above pressure_exit_pct (no fresh read = the counter-candle exit works as usual)",
     "cross_exit": "an opposite SMA cross closes the trade and reverses (off = held through a cross)",
     "bb_exit": "Bollinger exit: OFF | BAND | MIDDLE | BOTH", "bb_period": "Bollinger period", "bb_std": "Bollinger std dev",

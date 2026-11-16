@@ -8,6 +8,7 @@ import pytest
 
 import pressure_exit
 from strategy_engine import IST
+from tests.test_gap_mode import db  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -277,3 +278,52 @@ async def test_entry_at_arm_orders_once(monkeypatch, tmp_path, mode, source, sha
     await eng._pressure_entry_pass("ACME", cfg, now)      # once a day
     assert sent == orders
     database.reset_engine()
+
+
+def test_flip_side_and_level():
+    entry = BASE.timestamp()
+    assert not pressure_exit.flip_on(type("C", (), {})())
+    assert pressure_exit.flip_pct(type("C", (), {"pressure_flip_pct": None})()) == 65.0
+    assert pressure_exit.flip_pct(type("C", (), {"pressure_flip_pct": 20})()) == 55.0
+    assert pressure_exit.flip_side("ACME", "LONG", entry, 65) is None          # no read: the colour decides
+    pressure_exit.note_scan(_scan(BASE - dt.timedelta(minutes=4), ACME=0.29))  # sellers 71 %
+    side, note = pressure_exit.flip_side("ACME", "LONG", entry, 65)
+    assert side == "SHORT" and "sellers 71%" in note
+    assert pressure_exit.flip_side("ACME", "LONG", entry, 75) is None          # under the level
+    assert pressure_exit.flip_side("ACME", "SHORT", entry, 65) is None         # buyers only 29 %
+    assert pressure_exit.flip_side("ACME", "LONG", entry + 30 * 60, 65) is None  # too old
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("on,source,share,want", [
+    (True, "Auto-arm: Most active", 0.29, ("SHORT", "PRESSURE_FLIP")),   # sellers 71 % turn the green buy
+    (True, "Auto-arm: Most active", 0.50, ("LONG", "CANDLE_COLOUR")),    # nobody holds 65 %
+    (True, "Trend quality", 0.29, ("LONG", "CANDLE_COLOUR")),            # not a Most active stock
+    (False, "Auto-arm: Most active", 0.29, ("LONG", "CANDLE_COLOUR")),   # switch off
+])
+async def test_colour_entry_flips_to_the_side_holding_the_orders(db, on, source, share, want):  # noqa: F811
+    import pandas as pd
+    from sma_research.replayer import replay_symbol
+    from tests.test_candle_patterns import DAY, DAY0, _quiet, _rows
+    from tests.test_gap_mode import _settings
+
+    pressure_exit.note_scan(_scan(dt.datetime.combine(DAY, dt.time(9, 40), tzinfo=IST), COL=share))
+    greens = [(1000.0, 1000.3), (1000.3, 1000.6), (1000.6, 1000.9)]
+    frame = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(30) + greens + _quiet(342, 1000.9)))
+    trades = await replay_symbol(frame, "COL", [DAY], _settings(
+        db, entry_mode="COLOUR", pattern_tf=1, qty=1, use_stop=False, pressure_flip=on, pressure_flip_pct=65,
+        trade_sources=json.dumps({"COL": source})))
+    assert (trades[0]["direction"], trades[0]["entry_reason"]) == want
+
+
+def test_replay_marks_most_active_picks():
+    from types import SimpleNamespace
+
+    import replay
+
+    picked = [{"symbol": "acme", "source": "Most active"}, {"symbol": "BETA", "source": "Trend quality"}]
+    got = replay.pick_sources(SimpleNamespace(kind="AUTOARM"), picked)
+    assert got == {"ACME": "Auto-arm: Most active", "BETA": "Auto-arm: Trend quality"}
+    assert pressure_exit.from_most_active(got["ACME"]) and not pressure_exit.from_most_active(got["BETA"])
+    assert pressure_exit.from_most_active(replay.pick_sources(SimpleNamespace(kind="ACTIVE"), [{"symbol": "X"}])["X"])
+    assert replay.pick_sources(SimpleNamespace(kind="TREND"), [{"symbol": "X"}]) == {}

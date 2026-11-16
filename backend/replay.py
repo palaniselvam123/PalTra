@@ -302,8 +302,12 @@ class ReplayEngine(StrategyEngine):
         fast: dict | None = None,
         chain: dict | None = None,
         on_bot: dict[str, int] | None = None,
+        sources: dict[str, str] | None = None,
     ):
         self.feed = feed
+        # Trade list source chips of a pick run's stocks ({symbol: "Auto-arm: Most active"}), merged over the live
+        # bot's own in load_config, so the Most active rules (pressure_exit.py) see a replayed pick as Most active.
+        self.pick_sources = dict(sources or {})
         # Play the hand-offs (handoff_chain.py): a stock handed to Bot 2 / Bot 3 stays in the run and trades
         # with that bot's settings from the run's snapshot. None = the old way (dropped from the run).
         self.chain = chain
@@ -633,6 +637,13 @@ class ReplayEngine(StrategyEngine):
             for name, fields in self._fast_moved.items():
                 own[name] = {**own.get(name, {}), **fields}
             data["stock_settings"] = json.dumps(own)
+        if self.pick_sources:
+            try:
+                own_sources = json.loads(data.get("trade_sources") or "{}")
+            except (TypeError, ValueError):
+                own_sources = {}
+            data["trade_sources"] = json.dumps({**(own_sources if isinstance(own_sources, dict) else {}),
+                                                **self.pick_sources})
         data["trading_mode"] = "REPLAY"
         data["max_trades_per_day"] = REPLAY_TRADE_CAP
         data["trade_symbols"] = ",".join(self._armed_now())
@@ -655,6 +666,23 @@ class ReplayEngine(StrategyEngine):
         snap = super().snapshot()
         snap["max_trades"] = None  # no cap on a replay
         return snap
+
+
+def pick_sources(rule, picked: list[dict]) -> dict[str, str]:
+    """The Trade list source chip each picked stock would have had live: a Most active pick backtest's stocks and
+    an auto-arm replay's Most active arms read as Most active (pressure_exit.from_most_active), the rest as their
+    source. Without it a replayed pick never counted as Most active and the buyers / sellers rules never applied."""
+    kind = getattr(rule, "kind", None)
+    out: dict[str, str] = {}
+    for p in picked:
+        name = str(p.get("symbol") or "").upper()
+        if not name:
+            continue
+        if kind == "ACTIVE":
+            out[name] = "Most active pick"
+        elif kind == auto_arm.KIND and p.get("source"):
+            out[name] = f"Auto-arm: {p['source']}"
+    return out
 
 
 def _is_fast(reason: str | None) -> bool:
@@ -1534,6 +1562,7 @@ class ReplaySession:
             start = self.start if index == 0 else SESSION_OPEN
             symbols = self.universe
             auto_windows = None
+            day_sources: dict[str, str] = {}
             if self.rule is not None:
                 # Pick as the live Scalp page would have at the pick time, then
                 # trade only those stocks from that minute on.
@@ -1550,6 +1579,7 @@ class ReplaySession:
                 self.picks[day.isoformat()] = picked
                 self._save_picks()
                 symbols = [p["symbol"] for p in picked]
+                day_sources = pick_sources(self.rule, picked)
                 start = self.rule.pick_time
                 if getattr(self.rule, "kind", None) == auto_arm.KIND and picked:
                     # Auto-arm replay: each stock armed from the minute the rule picked it (auto_arm.py), as live.
@@ -1584,7 +1614,7 @@ class ReplaySession:
                 # A fresh engine per day: its own trade count, loss limit and P&L.
                 engine = ReplayEngine(
                     feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved, arm_windows=windows, fast=fast_snap,
-                    chain=chain_snap, on_bot=day_on,
+                    chain=chain_snap, on_bot=day_on, sources=day_sources,
                 )
                 engine.handoff = engine._hand_off
                 engine.on_handoff = lambda name: self.handed_off.append(name)

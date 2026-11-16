@@ -28,7 +28,7 @@ import operator
 import os
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -193,6 +193,7 @@ ENTRY_REASONS = (
     "COUNTER_REENTRY",
     "CANDLE_PATTERN",
     "CANDLE_COLOUR",
+    "PRESSURE_FLIP",
     "NTH_CANDLE",
     "BREAKOUT_ARRIVAL",
     "FORCE_ORDER",
@@ -415,6 +416,7 @@ SNAPSHOT_FIELDS = (
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
     "pressure_exit", "pressure_exit_pct", "pressure_over_counter", "pressure_entry", "pressure_entry_pct",
+    "pressure_flip", "pressure_flip_pct",
     "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
@@ -2611,6 +2613,21 @@ class StrategyEngine:
         if pos is not None and colour_exit.on(cfg):
             # The trade is judged by its own exit rule (colour_exit.py); entries keep the usual one.
             call = colour_call(frame, colour_exit.exit_cfg(cfg))
+        why = "CANDLE_COLOUR"
+        if pressure_exit.flip_on(cfg) and pressure_exit.from_most_active(trade_sources(cfg).get(symbol)):
+            # Most active stocks (pressure_exit.py): buyers / sellers holding the set % overrule the colour, for the
+            # exit rule's call and the entry's alike, so a flipped trade is held while they keep holding.
+            level, now_ts = pressure_exit.flip_pct(cfg), self._now().timestamp()
+
+            def overruled(c):
+                found = pressure_exit.flip_side(symbol, c.side, now_ts, level) if c.side is not None else None
+                return (replace(c, side=found[0], note=f"{c.note}; {found[1]}"), True) if found else (c, False)
+
+            same = entry_call is call
+            call, turned = overruled(call)
+            entry_call = call if same else overruled(entry_call)[0]
+            if turned:
+                why = pressure_exit.FLIP_REASON
         waiting = self._pullback.get(symbol)
         if pos is None and waiting is not None and waiting.note == colour_pull.NOTE and call.side in (None, waiting.direction):
             # A colour entry already waits for its pullback (colour_pull.py): keep its level and its wait.
@@ -2652,7 +2669,7 @@ class StrategyEngine:
                 return text
         signal = "BULLISH" if call.side == "LONG" else "BEARISH"
         # No Telegram for a refused candle: one closes every few minutes.
-        result = await self.apply_signal(signal, frame, cfg, now, alert=False, why="CANDLE_COLOUR")
+        result = await self.apply_signal(signal, frame, cfg, now, alert=False, why=why)
         if result.startswith(("opened", "reversed")):
             result = f"{result} — {call.note}"
             self._signals[symbol] = result

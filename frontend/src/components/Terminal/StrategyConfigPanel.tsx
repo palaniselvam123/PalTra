@@ -480,6 +480,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     pressure_over_counter: Boolean(form.pressure_over_counter),
     pressure_entry: (["OFF", "CHECK", "AT_ARM"].includes(String(form.pressure_entry)) ? form.pressure_entry : "OFF") as SmaConfig["pressure_entry"],
     pressure_entry_pct: Math.min(95, Math.max(30, Number(form.pressure_entry_pct ?? 65) || 65)),
+    pressure_flip: Boolean(form.pressure_flip),
+    pressure_flip_pct: Math.min(95, Math.max(55, Number(form.pressure_flip_pct ?? 65) || 65)),
     stop_plan: Boolean(form.stop_plan),
     decel_exit: Boolean(form.decel_exit),
     decel_lookback: Math.min(10, Math.max(1, Math.round(Number(form.decel_lookback ?? 2) || 2))),
@@ -3848,6 +3850,8 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "exit", key: "pressure_exit", text: `Most active stocks close when the buyers (a buy) / sellers (a sell) fade to ${f.pressure_exit_pct ?? 55}% or below`, off: { pressure_exit: false } });
   if (f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM")
     add({ group: "enter", key: "pressure_entry", text: `Most active stocks: ${f.pressure_entry === "AT_ARM" ? "entered at once while" : "enter only while"} the buyers (a buy) / sellers (a sell) hold ${f.pressure_entry_pct ?? 65}% or more`, off: { pressure_entry: "OFF" } });
+  if (f.pressure_flip)
+    add({ group: "enter", key: "pressure_flip", text: `Most active stocks, candle colour: sellers (against a buy) / buyers (against a sell) at ${f.pressure_flip_pct ?? 65}% or more turn the order their way`, off: { pressure_flip: false } });
   if (f.pressure_exit && f.pressure_over_counter)
     add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
@@ -5080,6 +5084,59 @@ function PressureEntry({
       <p className="mt-1 text-xs text-slate-400">
         Example at {shown}%: a stock armed when buyers were 78% is bought only while buyers are still {shown}% or more; once they
         drop under it, no new buy goes in.
+      </p>
+      <PressureFlip form={form} set={set} isOwn={isOwn} />
+    </div>
+  );
+}
+
+function PressureFlip({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const on = Boolean(form.pressure_flip);
+  const pct = Number(form.pressure_flip_pct ?? 65);
+  const shown = Number.isFinite(pct) ? pct : 65;
+  const colour = String(form.entry_mode ?? "SMA") === "COLOUR";
+  return (
+    <div id="sma-pressure-flip" className="mt-3 border-t border-white/10 pt-2">
+      <label className="flex items-start gap-2 text-sm text-slate-200">
+        <input type="checkbox" className="mt-1" checked={on} onChange={(e) => set("pressure_flip", e.target.checked)} />
+        <span>
+          {(isOwn("pressure_flip") || isOwn("pressure_flip_pct")) && <OwnTag />}
+          Candle colour: let buyers / sellers overrule it (go their way) <NewTag id="pressure-flip" />{" "}
+          <InfoTip label="About buyers / sellers overruling the candle colour">
+            Only in candle-colour mode, only for stocks armed from Most active. When a colour candle asks for a buy but the
+            sellers hold this % or more of the waiting orders in a Most active read of the last 20 minutes, the bot sells
+            instead (and buys when a red candle meets buyers at this % or more). A trade it already holds on that side is kept;
+            one on the other side is closed and turned. No fresh read (scans paused) = the colour decides as usual. Every entry
+            check, the stop, flip, cut-off, caps and one LIVE bot per stock still apply. Entry reason &quot;Buyers / sellers
+            flip&quot;. Backtests read the day&apos;s saved Most active scans.
+          </InfoTip>
+          {!colour && <span className="block text-xs text-amber-300">Works only with Enter on: candle colour.</span>}
+        </span>
+      </label>
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        The other side at least
+        <input
+          type="number"
+          min={55}
+          max={95}
+          step={1}
+          disabled={!on}
+          value={shown}
+          onChange={(e) => set("pressure_flip_pct", e.target.value)}
+          className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        />
+        %
+      </label>
+      <p className="mt-1 text-xs text-slate-400">
+        Example at {shown}%: a green candle on a stock whose sellers hold 71% (read 09:56) sells instead of buying.
       </p>
     </div>
   );

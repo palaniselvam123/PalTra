@@ -293,6 +293,42 @@ def entry_side(symbol: str, now_ts: float, level: float) -> tuple[str, float, st
     return None
 
 
+# --- Buyers / sellers overrule the candle colour (`pressure_flip`, off by default; `pressure_flip_pct` 65, 55-95) --------
+# Owner's case (SOLARINDS, 11 Nov): a candle-colour bot bought a Most active stock on a green candle while sellers held 71 %
+# of the waiting orders. With this on, for Most active stocks in candle-colour mode, a colour that points one way while
+# the other side holds at least that % in a fresh read is turned to their side (`StrategyEngine._colour_minute`).
+FLIP_REASON = "PRESSURE_FLIP"
+DEFAULT_FLIP_PCT = 65.0
+MIN_FLIP_PCT = 55.0
+
+
+def flip_on(cfg) -> bool:
+    return bool(getattr(cfg, "pressure_flip", False))
+
+
+def flip_pct(cfg) -> float:
+    value = getattr(cfg, "pressure_flip_pct", None)
+    try:
+        value = float(DEFAULT_FLIP_PCT if value is None else value)
+    except (TypeError, ValueError):
+        value = DEFAULT_FLIP_PCT
+    return min(MAX_PCT, max(MIN_FLIP_PCT, value))
+
+
+def flip_side(symbol: str, side: str, now_ts: float, level: float) -> tuple[str, str] | None:
+    """(the other side, plain note) when the other side holds at least `level` % in a fresh read, else None."""
+    read = fresh_read(symbol, now_ts)
+    if read is None:
+        return None
+    other = "SHORT" if side == "LONG" else "LONG"
+    share = side_share(read[1], other)
+    if share < level:
+        return None
+    at = dt.datetime.fromtimestamp(read[0], IST).strftime("%H:%M")
+    who = "sellers" if other == "SHORT" else "buyers"
+    return other, f"{who} {share:g}% (read {at}) overrule the candle colour"
+
+
 def reset() -> None:
     _READS.clear()
     _EXTRA.clear()
