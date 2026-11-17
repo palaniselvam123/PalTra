@@ -90,7 +90,10 @@ async def test_engine_closes_only_most_active_stocks(monkeypatch, tmp_path, sour
     database.reset_engine()
     database.init_db()
     eng = StrategyEngine(broker=_FakeBroker())
-    now = dt.datetime.now(IST)
+    # A fixed mid-session clock: reads count only within one IST day, so the wall clock just after midnight IST
+    # (18:30 UTC) put the read before the entry on the day before.
+    now = dt.datetime(2026, 11, 16, 11, 0, tzinfo=IST)
+    monkeypatch.setattr(eng, "_now", lambda: now)
     entry = now - dt.timedelta(minutes=10)
     pressure_exit.note_scan(_scan(entry - dt.timedelta(minutes=2), ACME=0.80))
     pressure_exit.note_scan(_scan(now - dt.timedelta(minutes=1), ACME=0.50))
