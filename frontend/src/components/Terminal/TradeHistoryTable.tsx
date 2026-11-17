@@ -2,7 +2,7 @@
 
 import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, FileDown, LineChart, Loader2, Sigma } from "lucide-react";
 import clsx from "clsx";
 import { istStamp, parseClock } from "@/lib/format";
@@ -44,6 +44,7 @@ const REASON: Record<string, string> = {
   SMA9_TURN_AGAINST: "SMA 9 TURNED AGAINST",
   PIVOT_TARGET: "PIVOT TARGET",
   PRESSURE_FADE: "BUYERS / SELLERS FADED",
+  FLOW_EXIT: "EXECUTED VOLUME",
   SLOW_SMA_BREACH: "SLOW SMA BREACH",
   PROFITABLE_TREND_EXHAUSTION: "TREND EXHAUSTED (PROFIT)",
   RECOVERY_TARGET_HIT: "RECOVERY TARGET",
@@ -366,6 +367,15 @@ export function TradeHistoryTable({
     }
     if (inBox !== boxed) setBoxed(inBox);
   });
+  // The bar's height, so the Backtests tab can pin its Compare bar right under it (BacktestRuns).
+  const [barH, setBarH] = useState(0);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setBarH(Math.round(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // The Backtests tab shows replay runs instead of a trade book.
   const [backtests, setBacktests] = useState(false);
   const [picked, setPicked] = useState(false);
@@ -652,6 +662,11 @@ export function TradeHistoryTable({
         "min-w-0 max-w-full rounded-xl border bg-[#151921]",
         simulation ? "border-[#F59E0B]/40" : book === "REPLAY" ? "border-violet-400/40" : "border-[#F43F5E]/40"
       )}
+      style={
+        {
+          "--blotter-pin-top": `calc(${boxed ? "0px" : "var(--sma-header-bottom, 0px)"} + ${barPinned ? barH : 0}px)`,
+        } as CSSProperties
+      }
     >
       {/* Pinned under the terminal's sticky header while the blotter scrolls by. */}
       <div
@@ -1066,6 +1081,7 @@ const REASON_COLOR: Record<string, "sky" | "amber" | "violet" | "red" | "blue" |
   SMA9_TURN_AGAINST: "sky",
   PIVOT_TARGET: "sky",
   PRESSURE_FADE: "sky",
+  FLOW_EXIT: "sky",
   SLOW_SMA_BREACH: "sky",
   PROFITABLE_TREND_EXHAUSTION: "sky",
   RECOVERY_TARGET_HIT: "sky",
@@ -1115,6 +1131,7 @@ export const REASON_SHORT: Record<string, string> = {
   SMA9_TURN_AGAINST: "SMA 9 turned against",
   PIVOT_TARGET: "Pivot target",
   PRESSURE_FADE: "Most active: the buyers (a buy) / sellers (a sell) faded to the set %",
+  FLOW_EXIT: "Executed volume exit: the other side did the set % of the shares traded at market over the window (estimated)",
   SLOW_SMA_BREACH: "Slow SMA",
   PROFITABLE_TREND_EXHAUSTION: "Trend exhausted",
   RECOVERY_TARGET_HIT: "Recovered",

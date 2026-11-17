@@ -8,6 +8,7 @@ import pytest
 
 import pressure_exit
 from strategy_engine import IST
+from tests.test_gap_mode import db  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -89,7 +90,10 @@ async def test_engine_closes_only_most_active_stocks(monkeypatch, tmp_path, sour
     database.reset_engine()
     database.init_db()
     eng = StrategyEngine(broker=_FakeBroker())
-    now = dt.datetime.now(IST)
+    # A fixed mid-session clock: reads count only within one IST day, so the wall clock just after midnight IST
+    # (18:30 UTC) put the read before the entry on the day before.
+    now = dt.datetime(2026, 11, 16, 11, 0, tzinfo=IST)
+    monkeypatch.setattr(eng, "_now", lambda: now)
     entry = now - dt.timedelta(minutes=10)
     pressure_exit.note_scan(_scan(entry - dt.timedelta(minutes=2), ACME=0.80))
     pressure_exit.note_scan(_scan(now - dt.timedelta(minutes=1), ACME=0.50))
@@ -187,6 +191,22 @@ def test_series_and_entry_read_carry_volume_and_money(tmp_path, monkeypatch):
     pressure_exit.reset()
 
 
+def test_one_sided_reads_are_left_out_of_the_fade_exit_and_the_chart(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCAN_HISTORY_FILE", str(tmp_path / "sh.db"))
+    import scan_history
+
+    scan_history._ACTIVE_CACHE.clear()
+    pressure_exit.reset()
+    assert pressure_exit.usable_share(0.0) is None and pressure_exit.usable_share(1) is None
+    assert pressure_exit.usable_share("x") is None and pressure_exit.usable_share(0.4) == 0.4
+    scan_history.save("active", _scan(BASE - dt.timedelta(minutes=30), ACME=0.0))
+    scan_history.save("active", _scan(BASE - dt.timedelta(minutes=20), ACME=0.6))
+    assert pressure_exit.note_scan(_scan(BASE, ACME=1.0)) == 0
+    out = pressure_exit.series("ACME", (BASE - dt.timedelta(hours=1)).timestamp(), (BASE + dt.timedelta(hours=1)).timestamp())
+    assert [p["buy_pct"] for p in out] == [60.0]
+    scan_history._ACTIVE_CACHE.clear()
+
+
 def test_judge_reads_the_days_saved_scans(tmp_path, monkeypatch):
     """A replay of a saved day (and a desk whose scan runs elsewhere) sees the saved Most active reads."""
     monkeypatch.setenv("SCAN_HISTORY_FILE", str(tmp_path / "sh.db"))
@@ -261,3 +281,59 @@ async def test_entry_at_arm_orders_once(monkeypatch, tmp_path, mode, source, sha
     await eng._pressure_entry_pass("ACME", cfg, now)      # once a day
     assert sent == orders
     database.reset_engine()
+
+
+def test_flip_side_and_level():
+    entry = BASE.timestamp()
+    assert not pressure_exit.flip_on(type("C", (), {})())
+    assert pressure_exit.flip_pct(type("C", (), {"pressure_flip_pct": None})()) == 65.0
+    assert pressure_exit.flip_pct(type("C", (), {"pressure_flip_pct": 20})()) == 55.0
+    under = (429.0, 432.0)                                                     # close under the VWAP
+    assert pressure_exit.flip_side("ACME", "LONG", entry, 65, *under) is None  # no read: the colour decides
+    pressure_exit.note_scan(_scan(BASE - dt.timedelta(minutes=4), ACME=0.29))  # sellers 71 %
+    side, note = pressure_exit.flip_side("ACME", "LONG", entry, 65, *under)
+    assert side == "SHORT" and "sellers 71%" in note and "under VWAP 432.00" in note
+    assert pressure_exit.flip_side("ACME", "LONG", entry, 65, 433.0, 432.0) is None  # the price is over the VWAP
+    assert pressure_exit.flip_side("ACME", "LONG", entry, 65) is None          # VWAP unknown: never flips
+    assert pressure_exit.flip_side("ACME", "LONG", entry, 75, *under) is None  # under the level
+    assert pressure_exit.flip_side("ACME", "SHORT", entry, 65, 433.0, 432.0) is None  # buyers only 29 %
+    assert pressure_exit.flip_side("ACME", "LONG", entry + 30 * 60, 65, *under) is None  # too old
+    pressure_exit.note_scan(_scan(BASE - dt.timedelta(minutes=2), ACME=0.79))  # buyers 79 % (owner's 12:30 case)
+    assert pressure_exit.flip_side("ACME", "SHORT", entry, 65, *under) is None  # but the price is under the VWAP
+    assert pressure_exit.flip_side("ACME", "SHORT", entry, 65, 433.0, 432.0)[0] == "LONG"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("on,source,share,base,want", [
+    (True, "Auto-arm: Most active", 0.29, 995.0, ("SHORT", "PRESSURE_FLIP")),   # sellers 71 %, under the VWAP
+    (True, "Auto-arm: Most active", 0.29, 1001.0, ("LONG", "CANDLE_COLOUR")),   # over the VWAP: the price disagrees
+    (True, "Auto-arm: Most active", 0.50, 995.0, ("LONG", "CANDLE_COLOUR")),    # nobody holds 65 %
+    (True, "Trend quality", 0.29, 995.0, ("LONG", "CANDLE_COLOUR")),            # not a Most active stock
+    (False, "Auto-arm: Most active", 0.29, 995.0, ("LONG", "CANDLE_COLOUR")),   # switch off
+])
+async def test_colour_entry_flips_to_the_side_holding_the_orders(db, on, source, share, base, want):  # noqa: F811
+    import pandas as pd
+    from sma_research.replayer import replay_symbol
+    from tests.test_candle_patterns import DAY, DAY0, _quiet, _rows
+    from tests.test_gap_mode import _settings
+
+    pressure_exit.note_scan(_scan(dt.datetime.combine(DAY, dt.time(9, 40), tzinfo=IST), COL=share))
+    greens = [(base, base + 0.3), (base + 0.3, base + 0.6), (base + 0.6, base + 0.9)]
+    frame = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(30) + greens + _quiet(342, base + 0.9)))
+    trades = await replay_symbol(frame, "COL", [DAY], _settings(
+        db, entry_mode="COLOUR", pattern_tf=1, qty=1, use_stop=False, pressure_flip=on, pressure_flip_pct=65,
+        trade_sources=json.dumps({"COL": source})))
+    assert (trades[0]["direction"], trades[0]["entry_reason"]) == want
+
+
+def test_replay_marks_most_active_picks():
+    from types import SimpleNamespace
+
+    import replay
+
+    picked = [{"symbol": "acme", "source": "Most active"}, {"symbol": "BETA", "source": "Trend quality"}]
+    got = replay.pick_sources(SimpleNamespace(kind="AUTOARM"), picked)
+    assert got == {"ACME": "Auto-arm: Most active", "BETA": "Auto-arm: Trend quality"}
+    assert pressure_exit.from_most_active(got["ACME"]) and not pressure_exit.from_most_active(got["BETA"])
+    assert pressure_exit.from_most_active(replay.pick_sources(SimpleNamespace(kind="ACTIVE"), [{"symbol": "X"}])["X"])
+    assert replay.pick_sources(SimpleNamespace(kind="TREND"), [{"symbol": "X"}]) == {}

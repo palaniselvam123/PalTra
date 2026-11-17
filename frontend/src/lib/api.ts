@@ -595,6 +595,12 @@ export type ActiveStock = {
   speed_pct_min?: number | null;
 };
 
+/** A buyers' share worth showing: a one-sided order book (no buy or no sell orders waiting, exactly 0 or 1) is a
+ * bad quote, not 0 % / 100 % (backend pressure_exit.usable_share). Older saved scans still hold such reads. */
+export function usableShare(v: number | null | undefined): number | null {
+  return v != null && Number.isFinite(v) && v > 0 && v < 1 ? v : null;
+}
+
 export type ActiveSort = "value" | "rvol" | "change" | "pressure" | "speed" | "vwap";
 
 /** One saved most-active scan (without its rows). */

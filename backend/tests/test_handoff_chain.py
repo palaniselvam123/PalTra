@@ -43,12 +43,34 @@ def test_a_chain_of_hand_offs_goes_back_to_where_it_started(db):  # noqa: F811
     class Held:
         positions = {"SBIN": object()}
 
-    lines = handoff_chain.send_back({3: Held()})
+    lines = handoff_chain.send_back({3: Held()}, mode="BACK")
     assert "still held" in lines[0] and "SBIN" in handoff_chain.moved()  # a held stock waits
-    lines = handoff_chain.send_back({})
+    lines = handoff_chain.send_back({}, mode="BACK")
     assert lines == ["SBIN: back on Bot 1 from Bot 3"]
     assert handoff_chain.moved() == {}
     assert _lists(db) == {1: ["TCS", "SBIN"], 2: [], 3: []}
+
+
+def test_by_default_a_handed_off_stock_is_unarmed_after_the_close(db):  # noqa: F811
+    import bots
+
+    bots.ensure_bot_config(3)
+    _seed_bots(db)
+    recovery.handoff(1, "SBIN", source_live=False)
+    assert handoff_chain.load().mode == "UNARM"
+    assert handoff_chain.backtest_eod() == "UNARM"  # backtests unarm too unless send-back is on in BACK mode
+
+    class Held:
+        positions = {"SBIN": object()}
+
+    assert "unarmed later" in handoff_chain.send_back({2: Held()})[0] and "SBIN" in handoff_chain.moved()
+    assert handoff_chain.send_back({}) == ["SBIN: unarmed from Bot 2 at the end of the day"]
+    assert handoff_chain.moved() == {}
+    assert _lists(db) == {1: ["TCS"], 2: [], 3: []}  # on no bot: the next day starts with what is armed fresh
+    handoff_chain.save(True, mode="BACK")
+    assert handoff_chain.backtest_eod() == "BACK"
+    with pytest.raises(ValueError):
+        handoff_chain.save(True, mode="SOMEWHERE")
 
 
 def test_a_stock_handed_home_is_no_longer_noted_and_bot5_is_left_out(db):  # noqa: F811
@@ -181,4 +203,22 @@ def test_api_reads_and_saves_the_send_back_switch(tmp_path, monkeypatch):
         assert got["on"] is True and got["at"] == "15:45"
         assert client.put("/api/bots/handoff-return", json={"on": True, "at": "11:00"}).status_code == 422
         assert client.post("/api/bots/handoff-return/now").json()["lines"] == []
+        assert client.put("/api/bots/handoff-return", json={"on": True, "mode": "BACK"}).json()["mode"] == "BACK"
+        assert client.put("/api/bots/handoff-return", json={"on": True, "mode": "NOPE"}).status_code == 422
     database.reset_engine()
+
+
+def test_backtest_days_unarm_handed_off_stocks_at_the_end_of_the_day():
+    from replay import day_symbols, unarm_at_day_end
+
+    # Day 1 ended with SBIN on Bot 2 and TCS back on the replayed bot 1.
+    gone = unarm_at_day_end({"SBIN": 2, "TCS": 1}, 1, "UNARM", [])
+    assert gone == ["SBIN"]
+    # A plain replay never trades SBIN again; a pick run trades it again only when that day picks it.
+    assert day_symbols(["SBIN", "TCS"], gone, "UNARM", pick_run=False) == ["TCS"]
+    assert day_symbols(["SBIN", "INFY"], gone, "UNARM", pick_run=True) == ["SBIN", "INFY"]
+    # BACK: nothing is unarmed (each day starts with them back on the replayed bot).
+    assert unarm_at_day_end({"SBIN": 2}, 1, "BACK", []) == []
+    # Runs saved before the rule (no handoff_eod) play the old way.
+    assert unarm_at_day_end({"SBIN": 2}, 1, None, []) == []
+    assert day_symbols(["SBIN", "TCS"], ["SBIN"], None, pick_run=True) == ["TCS"]

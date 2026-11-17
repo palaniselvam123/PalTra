@@ -9,7 +9,7 @@
  * its rank, so changing the base or the basis never repaints a run.
  */
 import clsx from "clsx";
-import { ArrowLeft, Download, Loader2 } from "lucide-react";
+import { ArrowLeft, Download, FileDown, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { C, money, short, ticks, Tip, useWidth } from "@/components/PnlDashboard/charts";
@@ -21,8 +21,10 @@ import {
   type CompareMetrics,
   type CompareRank,
 } from "@/lib/smaApi";
+import { isLiveBook, runName } from "@/lib/liveBook";
 import { useTitle } from "@/lib/useTitle";
 import { strategyLabel, type Settings } from "./BacktestRuns";
+import { CompareDetailRest, CompareDetailTop, useCompareDetail } from "./CompareDetail";
 import { ThemeToggle } from "./Header";
 import { SortTh, useSort } from "./sortable";
 import { REASON_SHORT } from "./TradeHistoryTable";
@@ -122,9 +124,34 @@ function RunTag({ run, i, base }: { run: Run; i: number; base?: boolean }) {
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap normal-case tracking-normal">
       <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: colorOf(i) }} />
-      <span className="font-semibold text-slate-100">#{run.id}</span>
-      <span className="text-xs font-normal text-slate-400">{run.bot_name}</span>
+      {isLiveBook(run.id) ? (
+        <>
+          <span className="font-semibold text-slate-100">{run.label ?? runName(run.id)}</span>
+          <LiveChip settings={run.settings} />
+        </>
+      ) : (
+        <>
+          <span className="font-semibold text-slate-100">#{run.id}</span>
+          <span className="text-xs font-normal text-slate-400">{run.bot_name}</span>
+        </>
+      )}
       {base ? <span className="rounded bg-white/10 px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300">base</span> : null}
+    </span>
+  );
+}
+
+/** "Real trades" chip on a live book: red for NSE live (real Groww orders), amber for practice / research. */
+function LiveChip({ settings }: { settings: Run["settings"] }) {
+  const live = settings?.book === "LIVE";
+  return (
+    <span
+      className={clsx(
+        "rounded px-1 text-[10px] font-semibold uppercase tracking-wider",
+        live ? "bg-rose-500/15 text-rose-300" : "bg-amber-500/15 text-amber-300"
+      )}
+      title="Real trades from the bot's own book on those days, not a backtest"
+    >
+      {live ? "real trades" : "practice trades"}
     </span>
   );
 }
@@ -170,10 +197,10 @@ export function BacktestCompare() {
     const list = (q.get("runs") ?? "")
       .split(",")
       .map((x) => Number(x))
-      .filter((n) => Number.isInteger(n) && n > 0);
+      .filter((n) => Number.isInteger(n) && n !== 0);
     setIds(Array.from(new Set(list)));
     const b = Number(q.get("base"));
-    if (Number.isInteger(b) && b > 0) setBase(b);
+    if (Number.isInteger(b) && b !== 0) setBase(b);
     if (q.get("basis") === "net") setBasis("net");
   }, []);
 
@@ -205,17 +232,38 @@ export function BacktestCompare() {
   }, [ids, base, basis]);
 
   const meta = useMemo(() => new Map((data?.runs ?? []).map((r, i) => [r.id, { run: r, i }])), [data]);
+  const loaded = useCompareDetail(data, basis);
+  // Save as PDF = the browser's own print dialog ("Save as PDF"), on the light theme so it reads on paper;
+  // every folded list is opened first so the PDF holds what the page holds.
+  const savePdf = () => {
+    const root = document.documentElement;
+    const theme = root.getAttribute("data-theme");
+    const folds = Array.from(document.querySelectorAll<HTMLDetailsElement>("details.cmp-fold:not([open])"));
+    const title = document.title;
+    const restore = () => {
+      if (theme) root.setAttribute("data-theme", theme);
+      else root.removeAttribute("data-theme");
+      folds.forEach((d) => (d.open = false));
+      document.title = title;
+      window.removeEventListener("afterprint", restore);
+    };
+    root.setAttribute("data-theme", "light");
+    folds.forEach((d) => (d.open = true));
+    document.title = `Compare backtests ${(ids ?? []).map(runName).join(" ")}`;
+    window.addEventListener("afterprint", restore);
+    window.setTimeout(() => window.print(), 150);
+  };
   const tag = (id: number | null | undefined) => {
     const m = id == null ? undefined : meta.get(id);
-    return m ? <RunTag run={m.run} i={m.i} base={data?.base === id} /> : <span>#{id}</span>;
+    return m ? <RunTag run={m.run} i={m.i} base={data?.base === id} /> : <span>{id == null ? "—" : runName(id)}</span>;
   };
 
   return (
-    <main className="cmp-series mx-auto max-w-[1500px] space-y-4 px-3 py-4 sm:px-6">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+    <main className="cmp-series cmp-page mx-auto max-w-[1500px] space-y-4 px-3 py-4 sm:px-6">
+      <header className="cmp-hero flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-sky-500/30 p-3">
         <a
           href="/terminal/"
-          className="inline-flex min-h-9 items-center gap-1 rounded-md border border-white/10 px-2 text-sm text-slate-300 hover:bg-white/5"
+          className="cmp-noprint inline-flex min-h-9 items-center gap-1 rounded-md border border-white/10 px-2 text-sm text-slate-300 hover:bg-white/5"
         >
           <ArrowLeft size={14} aria-hidden /> Terminal
         </a>
@@ -226,7 +274,17 @@ export function BacktestCompare() {
             changes a setting or places an order.
           </p>
         </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="cmp-noprint ml-auto flex flex-wrap items-center gap-2">
+          {data ? (
+            <button
+              type="button"
+              onClick={savePdf}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-accentSky px-3 text-sm font-semibold text-on-accent hover:opacity-90"
+              title="Opens the print dialog with the whole page laid out for paper: choose “Save as PDF” as the printer"
+            >
+              <FileDown size={14} aria-hidden /> Save as PDF
+            </button>
+          ) : null}
           {loading ? <Loader2 size={16} aria-label="Loading" className="animate-spin text-slate-400" /> : null}
           {data ? (
             <label className="flex items-center gap-1.5 text-xs text-slate-400">
@@ -239,7 +297,7 @@ export function BacktestCompare() {
               >
                 {data.runs.map((r) => (
                   <option key={r.id} value={r.id}>
-                    #{r.id} · {r.bot_name}
+                    {isLiveBook(r.id) ? r.label ?? runName(r.id) : `#${r.id} · ${r.bot_name}`}
                   </option>
                 ))}
               </select>
@@ -278,7 +336,9 @@ export function BacktestCompare() {
       {data ? (
         <>
           <RunCards data={data} />
+          <LiveBacktest data={data} onAdd={(id) => setIds((now) => (now && !now.includes(id) ? [...now, id] : now))} />
           <Answer data={data} tag={tag} />
+          <CompareDetailTop data={data} loaded={loaded} />
           <Ranking data={data} meta={meta} />
           <Section
             title="Running total, day by day"
@@ -295,6 +355,7 @@ export function BacktestCompare() {
             </div>
             <RunningTotals data={data} />
           </Section>
+          <CompareDetailRest data={data} loaded={loaded} />
           <Differences data={data} tag={tag} />
           <ByStock data={data} tag={tag} />
           <ByDay data={data} />
@@ -302,6 +363,95 @@ export function BacktestCompare() {
         </>
       ) : null}
     </main>
+  );
+}
+
+/**
+ * "Backtest this live day": for each live book on the page, start the same bot's replay of those days "as armed live"
+ * (the stocks it had armed, only while armed) with hand-offs played, follow it, and add the run to the comparison when
+ * it finishes. Practice money: a replay never orders. A LIVE bot cannot replay (the terminal refuses it), so the
+ * refusal is shown with what to do.
+ */
+function LiveBacktest({ data, onAdd }: { data: Compare; onAdd: (id: number) => void }) {
+  const books = data.runs.filter((r) => isLiveBook(r.id) && r.settings?.book !== "RESEARCH");
+  const [state, setState] = useState<Record<number, { note: string; busy: boolean; error?: boolean }>>({});
+  if (!books.length) return null;
+  const note = (id: number, v: { note: string; busy: boolean; error?: boolean }) => setState((s) => ({ ...s, [id]: v }));
+
+  const start = async (run: Run) => {
+    const bot = Number(run.settings?.bot ?? run.bot ?? 1);
+    note(run.id, { note: "Starting the backtest…", busy: true });
+    try {
+      await smaApi.replayStart(run.start_date, "09:15", 0, run.end_date !== run.start_date ? run.end_date : undefined, undefined, bot, true, true);
+    } catch (err) {
+      const text = err instanceof Error ? err.message : "The backtest did not start";
+      note(run.id, {
+        busy: false,
+        error: true,
+        note: /live/i.test(text)
+          ? `${text} A LIVE bot cannot replay. After the close, switch Bot ${bot} to PAPER (nothing held), press this again, and switch it back to LIVE before the next session; or copy its settings to a PAPER bot and backtest that one.`
+          : text,
+      });
+      return;
+    }
+    for (let i = 0; i < 900; i++) {
+      await new Promise((r) => setTimeout(r, 4000));
+      let info;
+      try {
+        info = await smaApi.replayInfoFor(bot);
+      } catch {
+        continue;
+      }
+      if (info.status === "ERROR") {
+        note(run.id, { busy: false, error: true, note: info.error || "The backtest stopped with an error." });
+        return;
+      }
+      if (info.status === "FINISHED" && info.run_id) {
+        note(run.id, { busy: false, note: `Backtest #${info.run_id} finished and was added below.` });
+        onAdd(info.run_id);
+        return;
+      }
+      const day = info.days_total ? ` day ${(info.day_index ?? 0) + 1} of ${info.days_total}` : "";
+      note(run.id, {
+        busy: true,
+        note: info.status === "LOADING" ? `Loading candles ${info.loaded}/${info.total}…` : `Playing${day} ${info.clock ? info.clock.slice(11, 16) : ""}…`,
+      });
+    }
+  };
+
+  return (
+    <Section
+      title="Backtest the same days"
+      hint="Plays the same bot's settings over these days with the stocks it really had armed, each only while it was armed (As armed live), hand-offs played. Practice money: no order is sent. The finished run is added to this comparison."
+    >
+      <ul className="space-y-2">
+        {books.map((run) => {
+          const st = state[run.id];
+          const bot = Number(run.settings?.bot ?? run.bot ?? 1);
+          return (
+            <li key={run.id} className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-semibold text-slate-100">{run.label ?? runName(run.id)}</span>
+              <button
+                type="button"
+                disabled={st?.busy}
+                onClick={() => void start(run)}
+                className="cmp-noprint inline-flex min-h-9 items-center gap-1.5 rounded-md bg-accentSky px-3 font-semibold text-on-accent hover:opacity-90 disabled:opacity-50"
+              >
+                {st?.busy ? <Loader2 size={14} className="animate-spin" aria-hidden /> : null}
+                Backtest {run.start_date === run.end_date ? "this day" : "these days"} on Bot {bot}
+              </button>
+              {st ? (
+                <span role={st.error ? "alert" : "status"} className={st.error ? "text-rose-300" : "text-slate-300"}>
+                  {st.note}
+                </span>
+              ) : (
+                <span className="text-slate-400">Uses Bot {bot}&apos;s settings as they are now: if you changed them since, the backtest plays the new ones.</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Section>
   );
 }
 
@@ -316,8 +466,14 @@ function RunCards({ data }: { data: Compare }) {
             {dayLabel(r.start_date, false)}
             {r.end_date !== r.start_date ? ` → ${dayLabel(r.end_date, false)}` : ""} · {r.finished_days} day(s) finished
             {r.days_total > r.finished_days ? ` of ${r.days_total}` : ""} · {r.symbols.length} stock(s)
-            {r.status !== "FINISHED" ? ` · ${r.status.toLowerCase()}` : ""}
+            {r.status !== "FINISHED" && !isLiveBook(r.id) ? ` · ${r.status.toLowerCase()}` : ""}
           </div>
+          {isLiveBook(r.id) ? (
+            <div className="mt-1 text-amber-300">
+              Real trades from the bot&apos;s own book. Settings shown are the ones saved on its trades at entry
+              {r.settings_variants && r.settings_variants > 1 ? ` (${r.settings_variants} different sets: settings changed or per-stock settings)` : ""}.
+            </div>
+          ) : null}
           <div className="mt-1 line-clamp-3 text-slate-300" title={strategyLabel(r.settings as Settings)}>
             {strategyLabel(r.settings as Settings)}
           </div>
@@ -466,7 +622,7 @@ function Answer({ data, tag }: { data: Compare; tag: (id: number | null | undefi
         body: "These runs traded different stocks (for example Scalp-page pick runs): compared on the common days with each run's own stocks.",
       });
     if (note.code === "no_finished_day")
-      lines.push({ tone: "warn", body: `Run ${(note.runs ?? []).map((r) => `#${r}`).join(", ")} has no finished day yet and is left out of the ranking.` });
+      lines.push({ tone: "warn", body: `Run ${(note.runs ?? []).map(runName).join(", ")} has no finished day yet and is left out of the ranking.` });
   }
   if (v.good_on_all?.length) lines.push({ tone: "good", body: `Good on every strategy: ${names(v.good_on_all)}.` });
   if (v.bad_on_all?.length)
@@ -595,7 +751,7 @@ function Ranking({ data, meta }: { data: Compare; meta: Map<number, { run: Run; 
                   <td className="px-2 py-2 font-semibold text-slate-100" title={placeText(r)}>
                     {r.rank ?? "—"}
                   </td>
-                  <td className="px-2 py-2">{info ? <RunTag run={info.run} i={info.i} base={r.run_id === data.base} /> : `#${r.run_id}`}</td>
+                  <td className="px-2 py-2">{info ? <RunTag run={info.run} i={info.i} base={r.run_id === data.base} /> : runName(r.run_id)}</td>
                   <td className={clsx("px-2 py-2 text-right font-mono", pnlTone(x.pnl))}>{mark(x.pnl === bests.pnl && r.rank != null, money(x.pnl))}</td>
                   <td
                     className={clsx("px-2 py-2 text-right font-mono", r.run_id === data.base ? "text-slate-500" : pnlTone(r.vs_base.pnl_diff))}
@@ -716,7 +872,7 @@ function RunningTotals({ data }: { data: Compare }) {
           <g key={s.run.id}>
             <line x1={w - pad.r + 4} x2={w - pad.r + 14} y1={y} y2={y} stroke={colorOf(s.i)} strokeWidth={2} />
             <text x={w - pad.r + 17} y={y + 4} fontSize="11" fill="rgb(var(--c-body-text))">
-              #{s.run.id}
+              {isLiveBook(s.run.id) ? "live" : `#${s.run.id}`}
             </text>
           </g>
         ))}
@@ -737,7 +893,7 @@ function RunningTotals({ data }: { data: Compare }) {
             .map((s) => (
               <div key={s.run.id} className="flex justify-between gap-3">
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-sm" style={{ background: colorOf(s.i) }} />#{s.run.id}
+                  <span className="h-2 w-2 rounded-sm" style={{ background: colorOf(s.i) }} />{runName(s.run.id)}
                 </span>
                 <span className="font-mono tabular-nums">{money(s.values[hover])}</span>
               </div>
@@ -852,7 +1008,7 @@ function Differences({ data, tag }: { data: Compare; tag: (id: number | null | u
                           <span key={k} className="inline-flex items-center gap-1.5">
                             <span className="font-mono text-slate-200">{fmtValue(g.value)}</span>
                             <span className={clsx("font-mono", pnlTone(g.avg_pnl))}>{money(g.avg_pnl)}</span>
-                            <span className="text-slate-500">avg of {g.runs.map((id) => `#${id}`).join(", ")}</span>
+                            <span className="text-slate-500">avg of {g.runs.map(runName).join(", ")}</span>
                           </span>
                         ))}
                       </div>
@@ -928,11 +1084,11 @@ function ByStock({ data, tag }: { data: Compare; tag: (id: number | null | undef
   );
   const csv = () =>
     downloadCsv(`compare-stocks-${data.runs.map((r) => r.id).join("-")}.csv`, [
-      ["stock", "verdict", "best run", ...data.runs.flatMap((r) => [`#${r.id} P&L`, `#${r.id} trades`])],
+      ["stock", "verdict", "best run", ...data.runs.flatMap((r) => [`${runName(r.id)} P&L`, `${runName(r.id)} trades`])],
       ...sorted.map((r) => [
         r.symbol,
         STOCK_VERDICT[r.verdict].text,
-        r.best ? `#${r.best}` : "",
+        r.best ? runName(r.best) : "",
         ...data.runs.flatMap((run): (string | number)[] => {
           const c = cellOf(r.cells, run.id);
           return c ? [c.pnl, c.trades] : ["", ""];
@@ -1031,10 +1187,10 @@ function ByDay({ data }: { data: Compare }) {
   );
   const csv = () =>
     downloadCsv(`compare-days-${data.runs.map((r) => r.id).join("-")}.csv`, [
-      ["day", "best run", ...data.runs.flatMap((r) => [`#${r.id} P&L`, `#${r.id} trades`])],
+      ["day", "best run", ...data.runs.flatMap((r) => [`${runName(r.id)} P&L`, `${runName(r.id)} trades`])],
       ...sorted.map((r) => [
         r.date,
-        r.best ? `#${r.best}` : "",
+        r.best ? runName(r.best) : "",
         ...data.runs.flatMap((run): (string | number)[] => {
           const c = cellOf(r.cells, run.id);
           return c ? [c.pnl, c.trades] : ["", ""];

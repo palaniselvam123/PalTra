@@ -14,6 +14,10 @@ import {
   type Show,
   type Width,
 } from "@/lib/chartStyle";
+import { NewTag } from "@/components/ui/NewTag";
+
+/** The four buyers / sellers lines of the bottom strip (waiting and executed). */
+const FOUR_LINES = new Set<LineKey>(["pressure", "pressureSell", "flow", "flowSell"]);
 
 const SELECT =
   "min-h-9 rounded-md border border-white/15 bg-black/30 px-1.5 text-xs text-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400";
@@ -150,7 +154,15 @@ export function ChartIndicators({
                     <Swatch look={look} color={look.color} />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className={clsx("block truncate font-semibold", off ? "text-slate-500" : "text-slate-100")}>{meta.name}</span>
+                    <span className={clsx("block truncate font-semibold", off ? "text-slate-500" : "text-slate-100")}>
+                      {meta.name}
+                      {FOUR_LINES.has(key) ? (
+                        <>
+                          {" "}
+                          <NewTag id="chart-four-lines" link={false} />
+                        </>
+                      ) : null}
+                    </span>
                     {look.show === "auto" ? (
                       <span className="line-clamp-2 text-slate-500">
                         {key === "st" && !stAvailable ? "needs its check or exit on" : meta.auto}

@@ -11,6 +11,7 @@ import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder
 import { Badge, Skeleton, pnlTone } from "./ui";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { chartHref } from "./StockTabs";
+import { runName } from "@/lib/liveBook";
 import { NewTag } from "@/components/ui/NewTag";
 
 /** Opens one stock's chart for one day of a finished (or playing) run, in a new tab. */
@@ -174,6 +175,117 @@ function numOr(v: number | null | undefined, digits: number, suffix = ""): strin
 }
 
 /** One line naming the strategy a run used. */
+/**
+ * "Add a real day" in the Compare bar: a bot's own book (NSE live, practice, research desk) on a day it traded, added
+ * to the ticked runs like a backtest (live_book.py: a negative id), so the Compare page sets what really happened
+ * next to a backtest of the same day.
+ */
+function LiveDayPicker({ picked, full, onAdd }: { picked: number[]; full: boolean; onAdd: (id: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const [bot, setBot] = useState(1);
+  const [book, setBook] = useState<"LIVE" | "PAPER" | "RESEARCH">("LIVE");
+  const [days, setDays] = useState<{ day: string; id: number; trades: number; gross: number }[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let stop = false;
+    setDays(null);
+    setError(null);
+    smaApi
+      .replayCompareLiveDays(bot, book)
+      .then((d) => !stop && setDays(d))
+      .catch((err: unknown) => !stop && setError(err instanceof Error ? err.message : "Could not read the trade book"));
+    return () => {
+      stop = true;
+    };
+  }, [open, bot, book]);
+
+  return (
+    <span className="relative">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex min-h-9 items-center gap-1 rounded-md border border-rose-400/40 bg-rose-500/10 px-2 font-semibold text-slate-100 hover:bg-rose-500/20"
+        title="Add the trades a bot really made on a day (NSE live or practice) to compare with a backtest of it"
+      >
+        + Add a real day <NewTag id="term-compare-live" link={false} />
+      </button>
+      {open ? (
+        <div className="absolute left-0 top-full z-30 mt-1 w-[min(92vw,360px)] rounded-lg border border-white/10 bg-[#1b2130] p-3 shadow-card">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1 text-slate-400">
+              Book
+              <select
+                value={book}
+                onChange={(e) => setBook(e.target.value as typeof book)}
+                className="min-h-8 rounded-md border border-white/10 bg-surface px-1.5 text-slate-100"
+              >
+                <option value="LIVE">NSE live (real orders)</option>
+                <option value="PAPER">Practice (paper)</option>
+                <option value="RESEARCH">Research desk</option>
+              </select>
+            </label>
+            {book !== "RESEARCH" ? (
+              <label className="flex items-center gap-1 text-slate-400">
+                Bot
+                <select
+                  value={bot}
+                  onChange={(e) => setBot(Number(e.target.value))}
+                  className="min-h-8 rounded-md border border-white/10 bg-surface px-1.5 text-slate-100"
+                >
+                  {[1, 2, 3, 4, 5].map((b) => (
+                    <option key={b} value={b}>
+                      Bot {b}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <button type="button" onClick={() => setOpen(false)} className="ml-auto text-slate-400 hover:text-slate-200" aria-label="Close">
+              ×
+            </button>
+          </div>
+          {error ? <p role="alert" className="mt-2 text-rose-300">{error}</p> : null}
+          {days === null && !error ? <p className="mt-2 text-slate-400">Reading the trade book…</p> : null}
+          {days?.length === 0 ? <p className="mt-2 text-slate-400">No closed trades in this book yet.</p> : null}
+          {days?.length ? (
+            <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto pr-1">
+              {days.map((d) => {
+                const on = picked.includes(d.id);
+                return (
+                  <li key={d.id}>
+                    <button
+                      type="button"
+                      disabled={on || full}
+                      onClick={() => onAdd(d.id)}
+                      className="flex w-full items-center justify-between gap-2 rounded-md border border-white/10 px-2 py-1.5 text-left hover:bg-white/5 disabled:opacity-50"
+                    >
+                      <span className="font-semibold text-slate-100">
+                        {new Date(`${d.day}T00:00:00`).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })}
+                      </span>
+                      <span className="text-slate-400">{d.trades} trades</span>
+                      <span className={clsx("font-mono", d.gross > 0 ? "text-emerald-400" : d.gross < 0 ? "text-rose-400" : "text-slate-300")}>
+                        {d.gross > 0 ? "+" : d.gross < 0 ? "−" : ""}₹{Math.abs(d.gross).toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                      </span>
+                      <span className="text-sky-300">{on ? "added" : "add"}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+          <p className="mt-2 text-[11px] text-slate-400">
+            Tick the backtest of the same day too (or press &quot;Backtest the same days&quot; on the Compare page). P&amp;L before
+            charges.
+          </p>
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
 export function strategyLabel(s: Settings): string {
   const pick = scalpPickOf(s);
   const parts: string[] = pick ? [pickHeadline(pick)] : [];
@@ -725,13 +837,13 @@ export function BacktestRuns() {
       ) : (
         <>
         <RunFilterBar filters={filters} onChange={setFilters} shown={shownRuns.length} total={runs.length} />
-        <div className="flex flex-wrap items-center gap-2 px-4 pt-2 text-xs">
+        {/* Pinned under the blotter bar, so runs far down the list can be ticked and compared without scrolling back. */}
+        <div
+          className="z-10 flex flex-wrap items-center gap-2 border-b border-white/10 bg-[#151921] px-4 py-2 text-xs md:sticky"
+          style={{ top: "var(--blotter-pin-top, 0px)" }}
+        >
           {picked.length ? (
             <>
-              <span className="text-slate-300">
-                {picked.length} run{picked.length === 1 ? "" : "s"} ticked: {picked.map((id) => `#${id}`).join(", ")}
-                {picked.length >= 2 ? ` (base #${picked[0]}, the first you ticked)` : ". Tick at least one more."}
-              </span>
               {picked.length >= 2 ? (
                 <a
                   href={`/terminal/compare/?runs=${picked.join(",")}`}
@@ -740,9 +852,27 @@ export function BacktestRuns() {
                   className="inline-flex min-h-9 items-center gap-1 rounded-md bg-accentSky px-3 font-semibold text-on-accent hover:opacity-90"
                   title="Opens a new page: which strategy did best, on which stocks and which days"
                 >
-                  Compare {picked.length} runs <NewTag id="term-compare" link={false} />
+                  Compare {picked.length} runs <NewTag id="term-compare-detail" link={false} />
                 </a>
-              ) : null}
+              ) : (
+                <span className="text-slate-300">Tick at least one more run.</span>
+              )}
+              <span className="flex flex-wrap items-center gap-1">
+                {picked.map((id, i) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => togglePick(id)}
+                    title={`Untick ${runName(id)}`}
+                    className="inline-flex min-h-8 items-center gap-1 rounded-md border border-sky-400/40 bg-sky-500/10 px-2 font-semibold text-slate-100 hover:bg-sky-500/20"
+                  >
+                    {runName(id)}
+                    {i === 0 && picked.length >= 2 ? <span className="font-normal text-slate-400">base</span> : null}
+                    <span aria-hidden className="text-slate-400">×</span>
+                    <span className="sr-only">untick</span>
+                  </button>
+                ))}
+              </span>
               <button
                 type="button"
                 onClick={() => setPicked([])}
@@ -753,10 +883,15 @@ export function BacktestRuns() {
             </>
           ) : (
             <span className="text-slate-400">
-              Tick 2 to {COMPARE_MAX} runs to compare them on one page: which strategy is best, on which stocks and which days.{" "}
-              <NewTag id="term-compare" />
+              Tick 2 to {COMPARE_MAX} runs to compare them on one page: which strategy is best, on which stocks and which days.
+              This bar stays in view while you scroll. <NewTag id="term-compare-detail" />
             </span>
           )}
+          <LiveDayPicker
+            full={picked.length >= COMPARE_MAX}
+            picked={picked}
+            onAdd={(id) => setPicked((now) => (now.includes(id) || now.length >= COMPARE_MAX ? now : [...now, id]))}
+          />
         </div>
         {filtering && shownRuns.length === 0 ? (
           <p className="px-4 py-4 text-sm text-slate-400">No runs match these filters.</p>

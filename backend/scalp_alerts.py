@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from groww_client import IST, market_is_open
+from pressure_exit import usable_share
 
 log = logging.getLogger("sma.scalp_alerts")
 
@@ -284,7 +285,7 @@ def pressure_picks(rows: list[dict], s: Settings, now: dt.datetime, alerting: bo
     need = s.pressure_pct / 100.0
     out = []
     for r in rows:
-        share = _num(r.get("buy_share"))
+        share = usable_share(r.get("buy_share"))
         if share is None:
             continue
         if share >= need:

@@ -33,6 +33,7 @@ import all_bots_guard
 import pnl_alerts
 import pivots
 import pressure_exit as pressure_exit_mod
+import flow_exit as flow_exit_mod
 import auto_start
 import scalp_alerts
 import auto_arm
@@ -43,6 +44,8 @@ import scan_arm
 import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
 import backtest_compare
+import backtest_detail
+import live_book
 import fast_bot
 import tsl_calc as tsl_calc_mod
 import regime_study
@@ -108,6 +111,7 @@ from chop_scan import ChopScanner
 from cross_scan import CrossScanner, MAX_SYMBOLS as CROSS_SCAN_MAX
 from stall_tracer import tracer as stall_tracer
 import deep_health as deep_health_mod
+import replay as replay_mod
 from replay import (
     SPEEDS,
     ReplaySession,
@@ -465,6 +469,10 @@ def _boot_backtest_server() -> asyncio.Task:
         ensure_bot_config(eng.bot_id)
         bots_mod.register(eng)
     engine.broker.set_mode("PAPER")
+    try:
+        backtest_server.note_boot()
+    except Exception:  # noqa: BLE001
+        logging.getLogger("sma.backtest").exception("boot note not written")
     # A scan pass (on demand, its own Groww login) keeps the machine awake like a playing replay.
     backtest_server.add_busy_check(
         lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner, high52_scanner, carry_scanner, turn_scanner, first_candle_scanner))
@@ -484,7 +492,45 @@ def _boot_backtest_server() -> asyncio.Task:
     scan_arm_runner.start_loop(_scan_arm_scheduled, _scan_arm_can_scan)
     _start_trend_picks_loop()
     _task = asyncio.create_task(backtest_server.run(import_bot_settings, lambda: replays))
+    if backtest_server.auto_resume_on() and replay_mod.cut_short_at_boot:
+        global _auto_resume_task
+        _auto_resume_task = asyncio.create_task(_auto_resume_replays(list(replay_mod.cut_short_at_boot)))
     return _task
+
+
+_auto_resume_task: asyncio.Task | None = None
+AUTO_RESUME_SPEED = 300
+auto_resume_notes: list[str] = []
+
+
+async def _auto_resume_replays(run_ids: list[int], wait: float = 20.0) -> None:
+    """Backtest server: carry on by itself the backtests a restart (a deploy, a crash) cut short, each on its own
+    bot's player at full speed, from the first day it had not finished (ReplaySession.resume: the same result as
+    if it never stopped). At most backtest_server.AUTO_RESUME_MAX times per run. Practice money; no order path."""
+    await asyncio.sleep(wait)  # the start-up copy of the settings and the Groww session first
+    for run_id in run_ids:
+        try:
+            found = {r["id"]: r for r in await asyncio.to_thread(resumable_runs, None)}.get(run_id)
+            if found is None or found["status"] != "INTERRUPTED":
+                continue
+            bot = int(found["bot"])
+            session = _replay_for(bot)
+            if session.active:
+                continue
+            if not backtest_server.take_auto_resume(run_id):
+                auto_resume_notes.append(f"Run #{run_id}: not resumed again (already resumed {backtest_server.AUTO_RESUME_MAX} times).")
+                continue
+            if not engine.broker.token:
+                engine.broker.adopt_saved_session()
+            if not engine.broker.token:
+                auto_resume_notes.append(f"Run #{run_id}: not resumed, no Groww session yet.")
+                continue
+            await session.resume(engine.broker, run_id, AUTO_RESUME_SPEED)
+            auto_resume_notes.append(f"Run #{run_id} (Bot {bot}) resumed by itself after the restart.")
+            logging.getLogger("sma.backtest").warning("resumed run #%s on bot %s after a restart", run_id, bot)
+        except Exception as exc:  # noqa: BLE001
+            auto_resume_notes.append(f"Run #{run_id}: could not resume ({exc}).")
+            logging.getLogger("sma.backtest").warning("auto-resume of run #%s failed: %s", run_id, exc)
 
 
 _backtest_bots_on = False
@@ -826,6 +872,23 @@ class ConfigUpdate(BaseModel):
     pressure_over_counter: bool | None = None
     pressure_entry: Literal["OFF", "CHECK", "AT_ARM"] | None = None
     pressure_entry_pct: float | None = Field(default=None, ge=30, le=95)
+    # Candle-colour mode, Most active stocks: buyers / sellers at this % overrule the colour (pressure_exit.py).
+    pressure_flip: bool | None = None
+    pressure_flip_pct: float | None = Field(default=None, ge=55, le=95)
+    # ... and the other side's % of the colour candle's executed volume, estimated (trade_flow.py); 0 = off.
+    pressure_flip_flow: float | None = Field(default=None, ge=0, le=95)
+    # Close once the other side did this % of the shares traded at market over the window (flow_exit.py).
+    flow_exit: bool | None = None
+    flow_exit_pct: float | None = Field(default=None, ge=flow_exit_mod.MIN_PCT, le=flow_exit_mod.MAX_PCT)
+    flow_exit_window: int | None = Field(default=None, ge=0, le=flow_exit_mod.MAX_WINDOW)
+    flow_exit_loss: bool | None = None
+    flow_exit_book: bool | None = None
+    # EXIT = close the trade itself; CONFIRM = only let the other signal exits close when it agrees (flow_exit.py).
+    flow_exit_mode: Literal["EXIT", "CONFIRM"] | None = None
+    # Enter only when the order's own side did this % of the shares traded over the window (flow_exit.py).
+    flow_entry: bool | None = None
+    flow_entry_pct: float | None = Field(default=None, ge=flow_exit_mod.MIN_PCT, le=flow_exit_mod.MAX_PCT)
+    flow_entry_window: int | None = Field(default=None, ge=0, le=flow_exit_mod.MAX_WINDOW)
     stop_plan: bool | None = None
     plan_be_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
     plan_trail_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
@@ -1889,6 +1952,18 @@ def _gap_dict(row) -> dict:
         "pressure_over_counter": bool(getattr(row, "pressure_over_counter", False)),
         "pressure_entry": pressure_exit_mod.entry_mode(row),
         "pressure_entry_pct": pressure_exit_mod.entry_pct(row),
+        "pressure_flip": pressure_exit_mod.flip_on(row),
+        "pressure_flip_pct": pressure_exit_mod.flip_pct(row),
+        "pressure_flip_flow": pressure_exit_mod.flip_flow_pct(row),
+        "flow_exit": flow_exit_mod.on(row),
+        "flow_exit_pct": flow_exit_mod.pct(row),
+        "flow_exit_window": flow_exit_mod.window(row),
+        "flow_exit_loss": flow_exit_mod.loss_only(row),
+        "flow_exit_book": flow_exit_mod.book_agree(row),
+        "flow_exit_mode": flow_exit_mod.mode(row),
+        "flow_entry": flow_exit_mod.entry_on(row),
+        "flow_entry_pct": flow_exit_mod.entry_pct(row),
+        "flow_entry_window": flow_exit_mod.entry_window(row),
         "stop_plan": stop_plan_mod.on(row),
         "plan_be_r": stop_plan_mod.be_r(row),
         "plan_trail_r": stop_plan_mod.trail_r(row),
@@ -2262,7 +2337,7 @@ def _backtest_only() -> None:
 @app.get("/api/backtest/status")
 async def backtest_status():
     _backtest_only()
-    return backtest_server.status(replays)
+    return {**backtest_server.status(replays), "auto_resume": backtest_server.auto_resume_on(), "resumed": auto_resume_notes[-5:]}
 
 
 @app.post("/api/backtest/sync")
@@ -2295,6 +2370,8 @@ async def backtest_idle(body: IdleUpdate):
 class HandoffReturnUpdate(BaseModel):
     on: bool
     at: str | None = None
+    #: UNARM = take handed-off stocks off Bot 2 / Bot 3 after the close; BACK = send them back where they came from.
+    mode: Literal["UNARM", "BACK"] | None = None
 
 
 @app.get("/api/bots/handoff-return")
@@ -2307,7 +2384,7 @@ async def handoff_return_get():
 async def handoff_return_put(body: HandoffReturnUpdate):
     """Turn the end-of-day send-back on or off (arming only: no order is placed)."""
     try:
-        await asyncio.to_thread(handoff_chain.save, body.on, body.at)
+        await asyncio.to_thread(handoff_chain.save, body.on, body.at, body.mode)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return await asyncio.to_thread(handoff_chain.state)
@@ -3313,6 +3390,41 @@ async def replay_compare(runs: str, base: int | None = None, basis: Literal["gro
         raise HTTPException(400, "runs must be run numbers separated by commas, e.g. 12,15,18") from exc
     try:
         return await asyncio.to_thread(backtest_compare.compare, ids, base, basis)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+def _run_ids(runs: str) -> list[int]:
+    try:
+        return [int(x) for x in runs.replace(" ", "").split(",") if x]
+    except ValueError as exc:
+        raise HTTPException(400, "runs must be run numbers separated by commas, e.g. 12,15,18") from exc
+
+
+@app.get("/api/replay/compare/trades")
+async def replay_compare_trades(runs: str, base: int | None = None, basis: Literal["gross", "net"] = "gross"):
+    """The comparison trade by trade (backtest_detail.py): each run's wins and losers, time in the trade, every
+    trade with its entry / exit reason and the buyers % at its entry, how far the runs took the same trades, and
+    plain-words takeaways. Read-only."""
+    try:
+        return await asyncio.to_thread(backtest_detail.detail, _run_ids(runs), base, basis)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/replay/compare/stock")
+async def replay_compare_stock(runs: str, symbol: str, day: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$")):
+    """One stock on one replayed day in each run: P&L minute by minute, its trades, and the buyers % reads. Read-only."""
+    return await asyncio.to_thread(backtest_detail.stock_day, _run_ids(runs), symbol, day)
+
+
+@app.get("/api/replay/compare/live-days")
+async def replay_compare_live_days(bot: int = Query(1, ge=1, le=5), book: Literal["LIVE", "PAPER", "RESEARCH"] = "LIVE",
+                                   limit: int = Query(60, ge=1, le=200)):
+    """The recent days a bot's own book (NSE live, practice or the research desk) traded, each with the id the Compare
+    page takes for it (live_book.py: negative), so a real day can be compared with a backtest of it. Read-only."""
+    try:
+        return await asyncio.to_thread(live_book.days_with_trades, bot, book, limit)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

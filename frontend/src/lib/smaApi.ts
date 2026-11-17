@@ -322,6 +322,26 @@ export type SmaConfig = {
   /** Most active stocks: OFF | CHECK (entries need their side still >= pressure_entry_pct) | AT_ARM (also enter at once). */
   pressure_entry?: "OFF" | "CHECK" | "AT_ARM";
   pressure_entry_pct?: number;
+  /** Candle-colour mode, Most active stocks: the other side at pressure_flip_pct % or more overrules the colour. */
+  pressure_flip?: boolean;
+  pressure_flip_pct?: number;
+  /** ... and the other side's % of the colour candle's executed volume (estimated); 0 = not checked. */
+  pressure_flip_flow?: number;
+  /** Executed volume exit (flow_exit.py): the other side's % of the shares traded over the window closes the trade. */
+  flow_exit?: boolean;
+  flow_exit_pct?: number;
+  /** Minutes (1, 2, 3, 5, 10, 15), or 0 = the exit candle just closed. */
+  /** 0 = the exit candle; else the last N closed minutes (1-60). */
+  flow_exit_window?: number;
+  flow_exit_loss?: boolean;
+  flow_exit_book?: boolean;
+  /** EXIT = close the trade itself; CONFIRM = only let the other signal exits close when it agrees. */
+  flow_exit_mode?: "EXIT" | "CONFIRM";
+  /** Executed volume entry check (flow_exit.py): the order's own side's % of the shares traded over the window. */
+  flow_entry?: boolean;
+  flow_entry_pct?: number;
+  /** Minutes 1-15, or 0 = one exit candle's length. */
+  flow_entry_window?: number;
   /** Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R. */
   stop_plan?: boolean;
   /** SMA 9 deceleration guard (decel_guard.py): slope in ATR per candle. */
@@ -1999,6 +2019,8 @@ export type ChartPayload = {
   /** Buyers' share of the waiting orders from the Most active scans (live and saved), oldest first; display only. */
   /** Saved Most active reads: buyers %, and volume vs usual (×) / money traded (₹ cr) when that read had them. */
   pressure?: { time: number; buy_pct: number; rvol?: number; value_cr?: number }[];
+  /** Executed buy / sell shares per 1-minute candle, estimated (trade_flow.py); display only. */
+  flow?: { time: number; buy: number; sell: number; src: "T" | "C" }[];
 };
 
 export type TradeRow = {
@@ -2154,6 +2176,8 @@ export type TslBasketResult = {
 export type HandoffReturn = {
   on: boolean;
   at: string;
+  /** UNARM = taken off Bot 2 / Bot 3 after the close (default); BACK = sent back to the bot it came from. */
+  mode: "UNARM" | "BACK";
   /** Stocks handed off and not yet sent back: where they came from and which bot has them now. */
   moved: Record<string, { origin: number; on: number; at: string }>;
   last: { at: string; lines: string[] } | [];
@@ -2445,12 +2469,141 @@ export type CompareVerdict = {
   bad_on_all?: string[];
 };
 
+/** One closed trade of a compared run (backend/backtest_detail.py). `pnl` follows the basis asked for. */
+export type CmpTrade = {
+  id: number;
+  run_id: number;
+  date: string;
+  symbol: string;
+  side: "LONG" | "SHORT";
+  qty: number;
+  entry_at: string;
+  exit_at: string;
+  entry_ts: number;
+  exit_ts: number;
+  entry_price: number | null;
+  exit_price: number | null;
+  gross: number;
+  net: number;
+  pnl: number;
+  entry_reason: string;
+  exit_reason: string;
+  hold_min: number;
+  best_pts: number | null;
+  worst_pts: number | null;
+  trend: string | null;
+  /** Buyers' share of the waiting orders in the latest saved Most active read before the entry (0-100). */
+  buy_pct: number | null;
+  rvol: number | null;
+  value_cr: number | null;
+  read_at?: string;
+};
+export type CmpReasonRow = { name: string; trades: number; wins: number; losses: number; pnl: number; avg_hold: number | null };
+export type CmpStats = {
+  trades: number;
+  wins: number;
+  losses: number;
+  flat: number;
+  win_rate: number | null;
+  pnl: number;
+  avg_win: number | null;
+  avg_loss: number | null;
+  stocks: number;
+  stocks_won: number;
+  stocks_lost: number;
+  avg_hold: number | null;
+  median_hold: number | null;
+  avg_hold_win: number | null;
+  avg_hold_loss: number | null;
+  longs: number;
+  long_wins: number;
+  long_pnl: number;
+  shorts: number;
+  short_wins: number;
+  short_pnl: number;
+  best_trade: { symbol: string; date: string; pnl: number } | null;
+  worst_trade: { symbol: string; date: string; pnl: number } | null;
+  by_entry: CmpReasonRow[];
+  by_exit: CmpReasonRow[];
+};
+export type CmpBrief = {
+  date: string;
+  symbol: string;
+  side: "LONG" | "SHORT";
+  entry_at: string;
+  exit_at: string;
+  entry_reason: string;
+  exit_reason: string;
+  hold_min: number;
+  pnl: number;
+};
+export type CmpPair = { a: CmpBrief; b: CmpBrief; diff: number };
+/** How far another run took the base run's trades (a = the base, b = the other run). */
+export type CmpOverlap = {
+  tol_min: number;
+  same: number;
+  opposite: number;
+  only_a: number;
+  only_b: number;
+  union: number;
+  rate: number | null;
+  same_exit: number;
+  diff_exit_reason: number;
+  diff_exit_time: number;
+  same_pnl_a: number;
+  same_pnl_b: number;
+  opposite_pnl_a: number;
+  opposite_pnl_b: number;
+  only_a_pnl: number;
+  only_b_pnl: number;
+  /** Run B's entry fill against run A's on the same trades, ₹ a share (+ = worse) and in total; minutes apart. */
+  entry_worse_rs?: number | null;
+  entry_worse_total?: number | null;
+  entry_later_min?: number | null;
+  exit_later_min?: number | null;
+  stocks_both: number;
+  stocks_only_a: string[];
+  stocks_only_b: string[];
+  apart: CmpPair[];
+  apart_total: number;
+  opposite_rows: CmpPair[];
+  only_a_rows: CmpBrief[];
+  only_b_rows: CmpBrief[];
+};
+export type CompareDetail = {
+  runs: number[];
+  /** With a live book in the comparison: the real days every run is read on (else empty). */
+  days?: string[];
+  labels?: Record<string, string>;
+  base: number;
+  basis: "gross" | "net";
+  match_min: number;
+  stats: Record<string, CmpStats>;
+  overlap: Record<string, CmpOverlap>;
+  takeaways: { tone: "good" | "bad" | "info"; title: string; text: string }[];
+  trades: CmpTrade[];
+  trades_total: number;
+  reads: number;
+};
+export type CompareStockDay = {
+  symbol: string;
+  day: string;
+  runs: { run_id: number; trades: CmpTrade[]; curve: { t: string; pnl: number }[] }[];
+  pressure: { t: string; buy_pct: number }[];
+};
+
 export type BacktestCompare = {
   basis: "gross" | "net";
   base: number;
   made_at?: string;
   runs: {
+    /** Negative = a bot's own book of real days (live_book.py), not a backtest run. */
     id: number;
+    kind?: "replay" | "live";
+    /** "#12", or the live book's name ("Bot 1 NSE live · 17 Nov"). */
+    label?: string;
+    /** Live books: how many different strategy snapshots its trades were opened with (settings changed, or per stock). */
+    settings_variants?: number | null;
     status: string;
     start_date: string;
     end_date: string;
@@ -2704,6 +2857,11 @@ export type BacktestServerStatus = {
   stop_at?: string;
   after_hours?: boolean;
   up_sec: number;
+  /** Why this server last started: its own idle stop, or a restart that cut it off (a deploy or a crash). */
+  boot?: { kind?: "idle" | "restart"; note?: string; at?: string };
+  /** Backtests a restart cut short are carried on by themselves; what happened to them at this start. */
+  auto_resume?: boolean;
+  resumed?: string[];
 };
 
 /** A named copy of a desk's strategy settings, or one automatic snapshot of a Save (strategy_presets.py). */
@@ -3090,8 +3248,8 @@ export const smaApi = {
   /** Fast-move alerts (fast_move.py): armed / held stocks moving fast, and fast movers in the Trend quality scans. */
   /** Send handed-off stocks back to the bot they came from at the end of the day (handoff_chain.py). */
   handoffReturn: () => request<HandoffReturn>("/api/bots/handoff-return"),
-  handoffReturnSave: (on: boolean, at?: string) =>
-    request<HandoffReturn>("/api/bots/handoff-return", { method: "PUT", body: JSON.stringify({ on, at }) }),
+  handoffReturnSave: (on: boolean, at?: string, mode?: "UNARM" | "BACK") =>
+    request<HandoffReturn>("/api/bots/handoff-return", { method: "PUT", body: JSON.stringify({ on, at, mode }) }),
   handoffReturnNow: () =>
     request<HandoffReturn & { lines: string[] }>("/api/bots/handoff-return/now", { method: "POST" }, 20000),
   fastBot: () => request<FastBotSettings>("/api/bots/fast-mover"),
@@ -3375,6 +3533,32 @@ export const smaApi = {
       `/api/replay/compare?runs=${runIds.join(",")}${base ? `&base=${base}` : ""}&basis=${basis}`,
       undefined,
       60000,
+      false
+    ),
+  /** The same runs trade by trade: wins / losers, time in trade, overlap with the base, takeaways, every trade. */
+  replayCompareTrades: (runIds: number[], base?: number | null, basis: "gross" | "net" = "gross") =>
+    request<CompareDetail>(
+      `/api/replay/compare/trades?runs=${runIds.join(",")}${base ? `&base=${base}` : ""}&basis=${basis}`,
+      undefined,
+      60000,
+      false
+    ),
+  /** The recent days a bot's own book (NSE live, practice, research) traded, each with its Compare id (negative). */
+  replayCompareLiveDays: (bot: number, book: "LIVE" | "PAPER" | "RESEARCH") =>
+    request<{ day: string; id: number; trades: number; gross: number }[]>(
+      `/api/replay/compare/live-days?bot=${bot}&book=${book}`,
+      undefined,
+      20000,
+      false
+    ),
+  /** One bot's replay, whichever desk the page is on (the Compare page's "Backtest this live day"). */
+  replayInfoFor: (bot: number) => request<ReplayInfo>(`/api/replay?bot=${bot}`, undefined, 15000, false),
+  /** One stock on one replayed day in each run: P&L minute by minute, its trades, the day's buyers % reads. */
+  replayCompareStock: (runIds: number[], symbol: string, day: string) =>
+    request<CompareStockDay>(
+      `/api/replay/compare/stock?runs=${runIds.join(",")}&symbol=${encodeURIComponent(symbol)}&day=${day}`,
+      undefined,
+      30000,
       false
     ),
   /** `seek` moves the replayed day's clock to `at` (IST HH:MM): forward = fast-forward, back = the day replays to there. */

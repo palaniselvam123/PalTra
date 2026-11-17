@@ -43,6 +43,17 @@ def _opt(value) -> float | None:
     return out if out == out and out >= 0 else None
 
 
+def usable_share(value) -> float | None:
+    """A buyers' share (0..1) worth reading, else None. A one-sided order book (no buy orders or no sell orders
+    waiting, so exactly 0 or 1) is a bad quote, not a real 100 % (owner's KAYNES case: 0 buy orders read at 09:31 on
+    a stock trading ₹500 cr armed it as "sellers 100%"). Saved scans from before this rule still hold such reads."""
+    try:
+        share = float(value)
+    except (TypeError, ValueError):
+        return None
+    return share if 0.0 < share < 1.0 else None
+
+
 def on(cfg) -> bool:
     return bool(getattr(cfg, "pressure_exit", False))
 
@@ -78,15 +89,9 @@ def note_scan(snapshot: dict) -> int:
     kept = 0
     for row in snapshot.get("rows") or []:
         symbol = str(row.get("symbol") or "").upper()
-        share = row.get("buy_share")
+        share = usable_share(row.get("buy_share"))
         at = _ts(row.get("read_at")) or start
         if not symbol or share is None or at is None:
-            continue
-        try:
-            share = float(share)
-        except (TypeError, ValueError):
-            continue
-        if not 0.0 <= share <= 1.0:
             continue
         reads = _READS.setdefault(symbol, [])
         if reads and reads[-1][0] >= at:
@@ -286,6 +291,70 @@ def entry_side(symbol: str, now_ts: float, level: float) -> tuple[str, float, st
         if share >= level:
             return side, share, at
     return None
+
+
+# --- Buyers / sellers overrule the candle colour (`pressure_flip`, off by default; `pressure_flip_pct` 65, 55-95) --------
+# Owner's case (SOLARINDS, 11 Nov): a candle-colour bot bought a Most active stock on a green candle while sellers held 71 %
+# of the waiting orders. With this on, for Most active stocks in candle-colour mode, a colour that points one way while
+# the other side holds at least that % in a fresh read is turned to their side (`StrategyEngine._colour_minute`).
+FLIP_REASON = "PRESSURE_FLIP"
+DEFAULT_FLIP_PCT = 65.0
+MIN_FLIP_PCT = 55.0
+
+
+def flip_on(cfg) -> bool:
+    return bool(getattr(cfg, "pressure_flip", False))
+
+
+def flip_pct(cfg) -> float:
+    value = getattr(cfg, "pressure_flip_pct", None)
+    try:
+        value = float(DEFAULT_FLIP_PCT if value is None else value)
+    except (TypeError, ValueError):
+        value = DEFAULT_FLIP_PCT
+    return min(MAX_PCT, max(MIN_FLIP_PCT, value))
+
+
+def flip_flow_pct(cfg) -> float:
+    """The executed-volume share the other side needs too (trade_flow.py), 0 = not checked."""
+    value = getattr(cfg, "pressure_flip_flow", None)
+    try:
+        value = float(value or 0.0)
+    except (TypeError, ValueError):
+        value = 0.0
+    return 0.0 if value <= 0 else min(MAX_PCT, max(MIN_PCT, value))
+
+
+def flip_side(symbol: str, side: str, now_ts: float, level: float,
+              close: float | None = None, vwap: float | None = None,
+              flow: tuple[float | None, str] | None = None, flow_level: float = 0.0) -> tuple[str, str] | None:
+    """(the other side, plain note) when the other side holds at least `level` % in a fresh read AND the price
+    agrees: the last closed candle's close under today's VWAP to sell, over it to buy (owner's case: buyers read
+    79 % while sellers were hitting the bids under the VWAP; the waiting orders alone are not proof). An unknown
+    close or VWAP never flips. Else None: the colour decides."""
+    read = fresh_read(symbol, now_ts)
+    if read is None:
+        return None
+    other = "SHORT" if side == "LONG" else "LONG"
+    share = side_share(read[1], other)
+    if share < level:
+        return None
+    if close is None or vwap is None or not (close < vwap if other == "SHORT" else close > vwap):
+        return None
+    done = ""
+    if flow_level > 0:
+        # Executed volume too (trade_flow.py): the other side's share of the colour candle's estimated volume.
+        # `flow` = (the LONG side's % of it, how it was read); unknown never flips.
+        if flow is None or flow[0] is None:
+            return None
+        executed = flow[0] if other == "LONG" else round(100.0 - flow[0], 1)
+        if executed < flow_level:
+            return None
+        done = f", {executed:g}% of the executed volume ({flow[1]})"
+    at = dt.datetime.fromtimestamp(read[0], IST).strftime("%H:%M")
+    who = "sellers" if other == "SHORT" else "buyers"
+    where = "under" if other == "SHORT" else "over"
+    return other, f"{who} {share:g}% (read {at}){done} and the price {where} VWAP {vwap:.2f} overrule the candle colour"
 
 
 def reset() -> None:

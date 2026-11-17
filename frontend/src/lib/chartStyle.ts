@@ -33,7 +33,7 @@ export type LineLook = {
   style: Pattern;
 };
 
-export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "cvd" | "pressure" | "pivots";
+export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "cvd" | "pressure" | "pressureSell" | "flow" | "flowSell" | "pivots";
 
 export type ChartStyle = Record<LineKey, LineLook> & {
   candleUp: string;
@@ -52,7 +52,10 @@ export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: 
   atr: { name: "ATR 14 (strip)", auto: "while the stop type is ATR" },
   rsi: { name: "RSI 14 (strip)", auto: "while the RSI check is ticked" },
   cvd: { name: "Cumulative delta (strip)", auto: "while the cumulative delta check or divergence exit is on" },
-  pressure: { name: "Buyers / sellers % (strip)", auto: "while a Most active scan has read the stock" },
+  pressure: { name: "Buyers waiting % (strip)", auto: "while a Most active scan has read the stock" },
+  pressureSell: { name: "Sellers waiting % (strip)", auto: "while a Most active scan has read the stock" },
+  flow: { name: "Buyers executed % (strip, estimated)", auto: "with the waiting lines" },
+  flowSell: { name: "Sellers executed % (strip, estimated)", auto: "with the waiting lines" },
   pivots: { name: "Pivot points (P, R1/S1, R2/S2)", auto: "while the pivot target is on", color2: "P" },
 };
 
@@ -69,7 +72,10 @@ export const DEFAULT_CHART_STYLE: ChartStyle = {
   atr: { show: "auto", color: "#A78BFA", width: 2, style: 0 },
   rsi: { show: "auto", color: "#F472B6", width: 2, style: 0 },
   cvd: { show: "auto", color: "#2DD4BF", width: 2, style: 0 },
-  pressure: { show: "auto", color: "#FB923C", width: 2, style: 0 },
+  pressure: { show: "auto", color: "#10B981", width: 2, style: 0 },
+  pressureSell: { show: "auto", color: "#F43F5E", width: 2, style: 0 },
+  flow: { show: "auto", color: "#6EE7B7", width: 2, style: 2 },
+  flowSell: { show: "auto", color: "#FDA4AF", width: 2, style: 2 },
   pivots: { show: "auto", color: "#EAB308", color2: "#94A3B8", width: 1, style: 2 },
 };
 
@@ -199,6 +205,34 @@ export function pressureReads<P extends { time: number; buy_pct: number }>(
     const end = i + 1 < rows.length ? rows[i + 1].time : Number.POSITIVE_INFINITY;
     while (j < points.length && points[j].time < end) last = points[j++];
     return last && dayOf(last.time) === dayOf(c.time) ? last : null;
+  });
+}
+
+/** One minute's executed volume split, estimated by the server (trade_flow.py): "T" from the recorded seconds, "C" from
+ * the candle's shape. */
+export type FlowPoint = { time: number; buy: number; sell: number; src: "T" | "C" };
+
+export type FlowRead = { buyPct: number; buy: number; sell: number; src: "ticks" | "candles" | "ticks + candles" };
+
+/** Each candle's executed buy % (shares bought at market ÷ all traded in it, estimated): the minutes inside it added
+ * up. Null for a candle with no volume known. Sell % = 100 − it. */
+export function flowReads(rows: { time: number }[], points: FlowPoint[] | null | undefined, minutes = 1): (FlowRead | null)[] {
+  if (!points?.length) return rows.map(() => null);
+  let j = 0;
+  return rows.map((c, i) => {
+    const end = i + 1 < rows.length ? Math.min(rows[i + 1].time, c.time + minutes * 60) : c.time + minutes * 60;
+    while (j < points.length && points[j].time < c.time) j += 1;
+    let buy = 0;
+    let sell = 0;
+    const kinds = new Set<string>();
+    for (let k = j; k < points.length && points[k].time < end; k += 1) {
+      buy += points[k].buy;
+      sell += points[k].sell;
+      kinds.add(points[k].src);
+    }
+    if (buy + sell <= 0) return null;
+    const src = kinds.size > 1 ? "ticks + candles" : kinds.has("T") ? "ticks" : "candles";
+    return { buyPct: (100 * buy) / (buy + sell), buy, sell, src };
   });
 }
 

@@ -671,3 +671,55 @@ def test_bots_on_the_backtest_server_send_no_alert(monkeypatch, backtest):
     monkeypatch.delenv("PALTRA_ROLE")
     strategy_engine.StrategyEngine._alert(eng, "fill")
     assert sent == ["fill"]
+
+
+def test_boot_note_and_auto_resume_count(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/b.db")
+    import backtest_server
+
+    backtest_server._boot.clear()
+    assert backtest_server.note_boot()["kind"] == "restart"          # no clean stop recorded: a deploy or a crash
+    backtest_server._write_file(last_stop={"reason": "idle for 30 minutes", "at": "2026-11-17T16:10:00+05:30"})
+    note = backtest_server.note_boot()
+    assert note["kind"] == "idle" and "16:10" in note["note"] and "idle for 30 minutes" in note["note"]
+    assert backtest_server.note_boot()["kind"] == "restart"          # read once
+    # A run is carried on by itself at most AUTO_RESUME_MAX times.
+    assert [backtest_server.take_auto_resume(7) for _ in range(4)] == [True, True, True, False]
+    assert backtest_server.take_auto_resume(8)
+    monkeypatch.setenv("BACKTEST_AUTO_RESUME", "off")
+    assert not backtest_server.auto_resume_on()
+
+
+def test_a_run_cut_short_is_resumed_by_itself(tmp_path, monkeypatch):
+    """main._auto_resume_replays: only INTERRUPTED runs, on their own bot's player, counted per run."""
+    import asyncio
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/r.db")
+    import backtest_server
+    import main
+
+    resumed = []
+
+    class Player:
+        active = False
+
+        async def resume(self, broker, run_id, speed):
+            resumed.append((run_id, speed))
+
+    runs = [
+        {"id": 11, "bot": 2, "status": "INTERRUPTED"},
+        {"id": 12, "bot": 1, "status": "STOPPED"},       # stopped by hand: left alone
+    ]
+    monkeypatch.setattr(main, "resumable_runs", lambda bot=None: runs)
+    monkeypatch.setattr(main, "_replay_for", lambda bot: Player())
+    monkeypatch.setattr(main, "engine", SimpleNamespace(broker=SimpleNamespace(token="t", adopt_saved_session=lambda: None)))
+    main.auto_resume_notes.clear()
+    asyncio.run(main._auto_resume_replays([11, 12, 13], wait=0))
+    assert resumed == [(11, main.AUTO_RESUME_SPEED)]
+    assert "Run #11 (Bot 2) resumed" in main.auto_resume_notes[0]
+    # After AUTO_RESUME_MAX times the same run is not started again.
+    for _ in range(backtest_server.AUTO_RESUME_MAX):
+        asyncio.run(main._auto_resume_replays([11], wait=0))
+    assert len(resumed) == backtest_server.AUTO_RESUME_MAX
+    assert "not resumed again" in main.auto_resume_notes[-1]

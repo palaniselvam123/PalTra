@@ -198,6 +198,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   / S2 only; no level beyond the entry = no pivot target), via `_exit_now` (`PIVOT_TARGET`; a LIVE stop is cancelled
   first, a LIVE position restored without its stop id is left to that stop). Settings → 5. Stop-loss and target. Counts
   as an exit for `strategyChecks.noExitOn`. The stock research baseline keeps it off.
+- **One-sided order books** (`pressure_exit.usable_share`, frontend `api.usableShare`; owner's KAYNES case: 0 buy
+  orders read at 09:31 on a stock trading ₹500 cr armed it as "sellers 100%"): a buyers' share of exactly 0 or 1 (no buy
+  or no sell orders waiting) is a bad quote and reads as unknown. The Most active scan saves it as None
+  (`active_stocks.row_from_quote`), and every reader skips old saved ones: the alert (`scalp_alerts.pressure_picks`), the
+  live auto-arm, the auto-arm replay (`auto_arm.active_hits`), the fade exit (`note_scan`), the chart
+  (`scan_history.active_reads`), the buyers / sellers test, the column test, "Trade a saved scan" and the Most active
+  History tables.
 - `backend/pressure_exit.py` – **buyers / sellers fade exit for Most active stocks** (`pressure_exit`, off by default;
   `pressure_exit_pct` 55, 30-95; per bot and per stock, PAPER and LIVE; Settings → 3. When to exit, under the SMA cross
   exit, `StrategyConfigPanel.PressureExit`, anchor `#sma-pressure-exit`; owner's case: Most active trades held to the
@@ -210,7 +217,75 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Most active scan's: every finished pass goes `routes_scalp._pressure_alert` → terminal `pressure_note` → `note_scan`
   (memory only, keyed by the row's `read_at`), so it reacts as often as that scan's auto interval; with scans paused or
   `SCANS=off` it never fires. The reads are the live ones joined with the day's saved Most active scans (`pressure_exit._rows`: this server's own and the copies other servers send, `scan_history.active_shares`, re-read at most every `ACTIVE_RECHECK_SEC` 15 s), so a desk whose scan runs on another server and a replay of a day with saved scans judge the same reads the chart strip draws; a replay sees only reads up to its own clock. The colour
-  exit, stops and targets stay on; whichever comes first closes. `books[].pressure_note` carries the latest reading. **On the chart** (display only): the chart payloads (`/api/chart`, research, replay, `/api/history`) carry `pressure` (`pressure_exit.series`: the day's saved Most active scans, `scan_history.active_shares`, cached per day and read only for runs saved since, joined with the live reads, up to the engine's clock, at most `MAX_SERIES_DAYS` 3 days), drawn as a 0-100 "Buyers %" strip under the candles (`chartStyle.pressureValues`: each candle the latest read before it closed, held within the IST day; Indicators → "Buyers / sellers % (strip)", Auto = while a read exists), with a 50 line and, while the fade exit is on, its levels (`chart_filters.pressure_exit` / `pressure_exit_pct`), and Buyers / Sellers % on the hover line with the time of that read (`chartStyle.pressureReads`, "read 09:52": a long candle takes its reading from any scan inside it), plus that read's Vol vs usual × and money traded ₹ cr (points carry `rvol` / `value_cr` when the scan had them; `scan_history.active_reads`, `pressure_exit._EXTRA` for live reads). **Overrule the counter-candle exit** (`pressure_over_counter`, off by default, needs the fade exit; per bot and per stock, PAPER and LIVE): for these Most active stocks `_watch_counter_candles` holds a counter-candle hit (signal line "counter-candle exit held — …") while `pressure_exit.holds`: a read taken since the entry, at most `MAX_AGE_SEC` old, shows the trade's own side above `pressure_exit_pct`; at or below it the fade exit closes the trade, and with no fresh read (scans paused) the counter-candle exit works as usual. Settings: the tick box under the fade exit (`StrategyConfigPanel.PressureExit`). Replays read the day's saved scans the same way. **Entries** (`pressure_entry` `OFF` default | `CHECK` | `AT_ARM`, `pressure_entry_pct` 65, 30-95; per bot and per stock, PAPER and LIVE, replays too; Settings → 1. When to enter, `StrategyConfigPanel.PressureEntry`, anchor `#sma-pressure-entry`; owner's case: a stock armed while buyers held most of the orders was traded on the bot's next signal, after the demand had gone): for Most active stocks, `CHECK` adds an entry check in `apply_signal` (`pressure_exit.entry_refusal`: the real order's side at least that % in a read at most `MAX_AGE_SEC` old, else refused like the other checks, no fresh read refuses too); `AT_ARM` adds the same check and `StrategyEngine._pressure_entry_pass` (armed loop, before the always-in pass) enters a flat stock at once through `direct_order` (entry reason `MOST_ACTIVE`, no cross / colour / entry check, flip not applied; market hours, cut-off, Trade list, caps, loss lock and one LIVE bot per stock apply) on the side `entry_side` finds at or above the %, once a day per stock (`_pe_done`, memory only).
+  exit, stops and targets stay on; whichever comes first closes. `books[].pressure_note` carries the latest reading. **On the chart** (display only): the chart payloads (`/api/chart`, research, replay, `/api/history`) carry `pressure` (`pressure_exit.series`: the day's saved Most active scans, `scan_history.active_shares`, cached per day and read only for runs saved since, joined with the live reads, up to the engine's clock, at most `MAX_SERIES_DAYS` 3 days), drawn as a 0-100 "Buyers %" strip under the candles (`chartStyle.pressureValues`: each candle the latest read before it closed, held within the IST day; Indicators → "Buyers / sellers % (strip)", Auto = while a read exists), with a 50 line and, while the fade exit is on, its levels (`chart_filters.pressure_exit` / `pressure_exit_pct`), and Buyers / Sellers % on the hover line with the time of that read (`chartStyle.pressureReads`, "read 09:52": a long candle takes its reading from any scan inside it), plus that read's Vol vs usual × and money traded ₹ cr (points carry `rvol` / `value_cr` when the scan had them; `scan_history.active_reads`, `pressure_exit._EXTRA` for live reads). **Overrule the counter-candle exit** (`pressure_over_counter`, off by default, needs the fade exit; per bot and per stock, PAPER and LIVE): for these Most active stocks `_watch_counter_candles` holds a counter-candle hit (signal line "counter-candle exit held — …") while `pressure_exit.holds`: a read taken since the entry, at most `MAX_AGE_SEC` old, shows the trade's own side above `pressure_exit_pct`; at or below it the fade exit closes the trade, and with no fresh read (scans paused) the counter-candle exit works as usual. Settings: the tick box under the fade exit (`StrategyConfigPanel.PressureExit`). Replays read the day's saved scans the same way. **Entries** (`pressure_entry` `OFF` default | `CHECK` | `AT_ARM`, `pressure_entry_pct` 65, 30-95; per bot and per stock, PAPER and LIVE, replays too; Settings → 1. When to enter, `StrategyConfigPanel.PressureEntry`, anchor `#sma-pressure-entry`; owner's case: a stock armed while buyers held most of the orders was traded on the bot's next signal, after the demand had gone): for Most active stocks, `CHECK` adds an entry check in `apply_signal` (`pressure_exit.entry_refusal`: the real order's side at least that % in a read at most `MAX_AGE_SEC` old, else refused like the other checks, no fresh read refuses too); `AT_ARM` adds the same check and `StrategyEngine._pressure_entry_pass` (armed loop, before the always-in pass) enters a flat stock at once through `direct_order` (entry reason `MOST_ACTIVE`, no cross / colour / entry check, flip not applied; market hours, cut-off, Trade list, caps, loss lock and one LIVE bot per stock apply) on the side `entry_side` finds at or above the %, once a day per stock (`_pe_done`, memory only). **Overrule the candle colour** (`pressure_flip`, off by
+  default; `pressure_flip_pct` 65, 55-95; per bot and per stock, PAPER and LIVE, replays too; Settings → 1. When to enter,
+  under the Most active entries, `StrategyConfigPanel.PressureFlip`, anchor `#sma-pressure-flip`; owner's SOLARINDS case: a
+  green colour candle bought while sellers held 71 %): in candle-colour mode, for Most active stocks,
+  `StrategyEngine._colour_minute` asks `pressure_exit.flip_side` for the colour's side: when the other side holds the % or
+  more in a read at most `MAX_AGE_SEC` old **and the price agrees** (the last closed candle's close under today's VWAP,
+  `_session_vwap`, to sell, over it to buy; unknown = no flip; owner's case: buyers 79 % on a strong red candle under the
+  VWAP), the call goes that way instead (entry reason `PRESSURE_FLIP`; a trade already on
+  that side is held, one on the other side turns); no fresh read = the colour decides. Every entry check, the stop, flip,
+  cut-off, caps and one LIVE bot per stock apply. **Replayed picks count as Most active**: a pick run's stocks carry their
+  source (`replay.pick_sources`: a Most active pick backtest's stocks and an auto-arm replay's Most active arms), merged over
+  the bot's `trade_sources` in `ReplayEngine.load_config`, so every Most active rule (entry check, fade exit, flip) applies in
+  those backtests.
+  **Executed volume too** (`pressure_flip_flow`, 0 = not checked, 30-95; per bot and per stock; the box under the flip,
+  `StrategyConfigPanel.PressureFlip`): the flip also needs the other side's share of the colour candle's executed volume
+  (`trade_flow.share` of the minutes in the colour candle just closed, `pressure_exit.flip_side(..., flow, flow_level)`);
+  unknown never flips.
+- `backend/flow_exit.py` – **executed volume exit** (`flow_exit`, off by default; `flow_exit_pct` 60, 50-95;
+  `flow_exit_window` 3 = the last N closed 1-minute candles (1/2/3/5/10/15, or any custom 1-`MAX_WINDOW` 60 typed under "custom minutes…", `StrategyConfigPanel.FlowWindowPick`; the entry check's `flow_entry_window` too) or 0 = the exit candle just closed
+  (`_exit_minutes`, from 09:15); `flow_exit_loss` only while losing; `flow_exit_book` the waiting orders must agree (the
+  other side above 50 % in a Most active read at most `pressure_exit.MAX_AGE_SEC` old, `book_note`); per bot and per
+  stock, PAPER and LIVE, replays too; any stock, not only Most active; Settings → 3. When to exit, under the buyers /
+  sellers fade exit, `StrategyConfigPanel.FlowExit`, anchor `#sma-flow-exit`; owner's SOLARINDS case): a buy closes once
+  sellers did that % of the shares traded at market over the window (`judge` on `trade_flow.minutes` of the stock's
+  `_tapes`), a sell once buyers did. `StrategyEngine._watch_flow_exit` (held-stock loop, after the fade exit) judges each
+  window once (`_flow_seen`, entry time + window end), only once the window lies wholly after the entry (`span`,
+  `first_minute`: the entry minute counts when the trade opened in its first `ENTRY_GRACE_SEC` 15 s) and the last closed
+  minute is in the tape; under half the window's minutes with volume = no read. Closes via `_exit_now` (`FLOW_EXIT`, LIVE
+  stop cancelled first; a LIVE position restored without its stop id is left to that stop); the latest reading is
+  `books[].flow_note`. Groupable in "How exits combine" (`exit_join` key `FLOW`). Counts as an exit for
+  `strategyChecks.noExitOn`. The Strategy lab does not know it; the stock research baseline keeps it off.
+  **Entry check too** (`flow_entry`, off by default; `flow_entry_pct` 55, 50-95; `flow_entry_window` 3 = the last N closed
+  1-minute candles or 0 = one exit candle's length ending at the last closed minute; per bot and per stock, PAPER and LIVE,
+  replays too; any stock; Settings → 2. Checks before entering, under the fresh trend check, `StrategyConfigPanel.FlowEntry`,
+  anchor `#sma-flow-entry`): `apply_signal` (next to the smaller-candle and Most active entry checks) refuses an entry unless
+  the real order's side (after `flip_orders`) did at least that % of the shares traded over the window
+  (`flow_exit.entry_span` / `entry_refusal` on `trade_flow.minutes` of `_tapes`); too little volume refuses too. It joins
+  `entry_block`, so late entry can retry it. Direct orders (Force, news, hand-offs, fast mover) never read it.
+  **Confirm the other exits instead** (`flow_exit_mode` `EXIT` default | `CONFIRM`, per bot and per stock, PAPER and LIVE,
+  replays too; owner's request: the executed volume as a check like the entry checks, not an exit of its own; the card's
+  "Close the trade by itself" / "Use it to confirm the other exits" switch): with `CONFIRM` `_watch_flow_exit` never
+  closes (`flow_exit.closes`), and `StrategyEngine._flow_hold` holds every signal exit in `flow_exit.CONFIRM_REASONS`
+  (colour turn, counter candles, SMA cross / recovery profit exit, SMA 9 turn / bend / V-turn / deceleration / turn
+  against, smaller candles, exit candle cross, Supertrend, Bollinger, EMA, MACD, CVD, slow SMA) unless the other side did
+  at least `flow_exit_pct` % of the shares traded over `confirm_span` (the last `flow_exit_window` minutes, or 0 = the
+  last closed exit candle; cut at the entry's first minute). Checked in `_exit_now` (after the AND vote), in
+  `_colour_minute` before the colour turn (a held turn neither closes nor reverses) and in `_apply_locked` for the cross /
+  SMA 9 turn. Too little volume to read lets the exit go; "only while losing" and "waiting orders agree" are not read;
+  stops, targets, the square-off, recovery, gap fade and kill switch are never held. The held exit is judged again the
+  next time it fires; `books[].flow_note` says confirmed / held.
+- `backend/trade_flow.py` – **executed buy / sell volume, estimated** (display and the flip check above; no order path;
+  owner's SOLARINDS case: buyers held 79 % of the waiting orders while sellers kept hitting the bids). Groww's API has
+  no trade-by-trade list and never says which side started a trade, so per 1-minute candle (`minutes`): its volume
+  (`minute_volume`, else Groww's running total differenced) split by the tick rule over the per-second prices the bots
+  record (`tick_store.between`, kept `TICK_KEEP_DAYS` 10; up = buy, down = sell, unchanged keeps the last side; `src`
+  "T"), else by the candle's shape like the cumulative delta (`candle_share`: ½ + ½ × (close − open) ÷ (high − low);
+  `src` "C"). Finished minutes are cached (`_CACHE`, `FINAL_AFTER_SEC` 70). The chart payloads (`/api/chart` and the
+  research / replay forms via `StrategyEngine._flow_points` on `_tapes`, `/api/history` via `candle_history._flow`) carry
+  `flow` [{time, buy, sell, src}]; the chart draws each candle's executed buy % as a dashed line on the buyers / sellers
+  strip (`chartStyle.flowReads`, Indicators → "Executed buy % (strip, estimated)", key `flow`, Auto = with the buyers
+  strip) and "Executed buy …% sell …% (ticks / candles)" on the reading line. Stocks no bot watched and days older than the
+  tick store read the candle shape only. **Four lines** (owner's request; display only): the strip draws buyers waiting
+  (`chartStyle` key `pressure`), sellers waiting (`pressureSell`, 100 − it), buyers executed (`flow`) and sellers executed
+  (`flowSell`, 100 − it), each on / off / auto in Indicators (`StrategyChart` `pressureSellRef` / `flowSellRef`; the 50 line
+  and fade-exit levels sit on the first line that is on); the reading line shows the four for the candle under the mouse and
+  says why one is blank (no Most active read before the candle closed / no volume known). A minute is cached (`_CACHE`) only
+  once a later minute is on the tape as well as `FINAL_AFTER_SEC` by the clock: a replay's tape ends in the forming minute
+  (part of its volume), which the wall clock used to call finished, so replays kept partial numbers (blanks, wrong splits)
+  that the chart, the entry check and the exit then read.
 - Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
   PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle
   after the entry by `StrategyEngine._watch_bollinger` on `bb_period` /
@@ -340,6 +415,39 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   page: the answer in plain words, the ranking (common ground / everything), the running total chart (one colour per run
   by its place, `.cmp-series` in globals.css, end labels up to 4 runs), the differences, by stock (filters, search, CSV), by
   day (CSV), by exit reason; base picker and before / after charges. Nothing is changed or ordered.
+  **Trade by trade** (`backend/backtest_detail.py`, read-only; `GET /api/replay/compare/trades?runs=&base=&basis=` → `detail`,
+  `GET /api/replay/compare/stock?runs=&symbol=&day=` → `stock_day`; `components/Terminal/CompareDetail.tsx`,
+  `useCompareDetail` / `CompareDetailTop` / `CompareDetailRest`): every closed trade of each run (`load`; entry / exit time
+  and reason, minutes in the trade, the buyers % of the latest saved Most active read before its entry,
+  `pressure_exit.read_before`), per run `stats` (winners / losers, stocks up / down, average winner / loser, time in a
+  trade, buys vs sells, by entry / exit reason), `overlap` of each run with the base (`match`: the same stock, day and side
+  entered within `MATCH_MIN` 5 minutes = the same trade; overlap rate, same entry but a different exit, the same moment on
+  the other side, trades and stocks only one run took, P&L per bucket, the biggest differences listed) and plain-words
+  `takeaways`. The page: Key takeaways, Winners / losers / stocks cards, Each run's set-up (always shown: entry mode,
+  candle size, Heikin Ashi colours, the pick's candles, stop…, differing rows amber), Did the runs take the same trades?,
+  Stock by stock (stock and day picker, each run's trades side by side, an SVG line of each run's P&L on that stock through
+  the day from the replay P&L log, else steps at each exit, with ▲ / ▼ entries and ● exits and a buyers % / sellers %
+  strip), four scatter plots over every trade (time in the trade, entry time, own-side % at entry, best while open; each
+  vs the result), entry / exit reasons, All trades CSV. **Save as PDF** = the browser's print dialog on the light theme
+  with every folded list opened (`BacktestCompare.savePdf`, print rules under `.cmp-page` in globals.css, A3 landscape).
+  The Backtests tab's Compare bar (ticked runs as chips, Compare, Clear) is pinned under the blotter bar
+  (`--blotter-pin-top`, set by `TradeHistoryTable`).
+  **Live against a backtest** (`backend/live_book.py`, read-only; owner's request: compare the bot's real trades of a day
+  with a backtest of the same day and strategy): a bot's own book of real days is a **negative run id**
+  (`encode`: -(first day YYYYMMDD × 10 000 + span × 100 + bot × 10 + book), book 1 LIVE / 2 PAPER / 3 RESEARCH; `decode`,
+  `label` "Bot 1 NSE live · 17 Nov"; frontend `lib/liveBook.ts` the same arithmetic). `backtest_compare.load` and
+  `backtest_detail.load` read its trades straight from the trade book (`live_book.trades`: that mode, that bot (bot 1 also
+  NULL rows), those days, no `run_id`), `live_book.run` gives it a run's shape (settings = the most common strategy snapshot
+  saved on its trades at entry, `settings_variants` how many there were; stocks = the ones traded plus the arm log's), and
+  with a live book in the comparison `detail` reads every run on the live book's days only (`days`). `overlap` adds
+  `entry_worse_rs` / `entry_worse_total` / `entry_later_min` / `exit_later_min` (B's fill against A's on the same trades) and
+  `_live_takeaways` explains the gap ("Live against the backtest": trades both took, only live, only the backtest, fills
+  ₹ a share worse / better). `stock_day` draws a live book's line from the market-day open P&L log (`open_pnl_log.points`,
+  that mode). `GET /api/replay/compare/live-days?bot=&book=` lists the days a book traded with their ids; the blotter's
+  Compare bar has **+ Add a real day** (`BacktestRuns.LiveDayPicker`), and the Compare page's **Backtest the same days**
+  (`BacktestCompare.LiveBacktest`) starts that bot's replay of those days "As armed live" with hand-offs played at full
+  speed (`smaApi.replayStart`, `replayInfoFor` polled) and adds the finished run; a LIVE bot cannot replay (refused as
+  always), and the page says what to do. Nothing is ordered.
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills
@@ -1020,7 +1128,13 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   `boot_engine`, not with `server_role.no_orders()`, every `POLL_SEC` 60 s) once `due` (after `at`, before 09:00, or a
   weekend) moves each noted stock that its bot does not hold off that bot and back onto its origin's Trade list
   (`send_back` → `send_back_one`, source chip "Back from Bot N", one LIVE bot per stock checked; the origin
-  `hold_for_next_cross`). Arming only, no order. `GET/PUT /api/bots/handoff-return`, `POST /api/bots/handoff-return/now`;
+  `hold_for_next_cross`). Arming only, no order. **Unarm instead** (`mode` `UNARM` default | `BACK`; owner's request: handed-off stocks should
+  not carry to the next day): `unarm_one` only takes the stock off the bot it was handed to (no bot gets it back); the
+  card's menu "unarm them from Bot 2 / Bot 3" / "send them back", "Unarm now" (`HandoffReturnUpdate.mode`). **Backtests**
+  (new runs): `handoff_eod` on the run's settings (`backtest_eod`: BACK only while the switch is on in BACK mode, else
+  UNARM) — a stock that ends a replayed day on Bot 2 / Bot 3 is unarmed (`replay.unarm_at_day_end` adds it to
+  `handed_off`; `day_symbols`: a plain replay never trades it again, a pick / auto-arm run starts each day only with that
+  day's picks), and no stock starts a day on Bot 2 / Bot 3; runs saved before keep the old carry-over. `GET/PUT /api/bots/handoff-return`, `POST /api/bots/handoff-return/now`;
   Settings → Bots, "Hand-offs: send stocks back at the end of the day" (`components/Settings/HandoffReturn.tsx`).
   **Backtests** (`ReplayStart.play_handoffs`, on by default; the replay bar's "Play hand-offs (Bot 2 / Bot 3)"; saved as
   `play_handoffs` and the run's `chain` snapshot, `replay_snapshot`: Bot 2's and Bot 3's strategy fields and per-stock
@@ -1292,7 +1406,8 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   `components/Scalp/AutoArmReplay.tsx`; practice money, works after hours): `picks_for_day` gives each stock the minute it
   would have been armed: Trend quality every `every_min` minutes from `first` to `last` (`strong_read`: the same
   `trend_strength.read` on the candles closed before that minute as the card's Trend column, about 16 ms a read) and Most
-  active from that day's saved scans (`active_hits`, the minute after each read; `saved_scans` on this server, else on the
+  active from that day's saved scans (`active_hits`, the minute after each stock's own read, `read_at`, not the pass's
+  start, which armed stocks read late in a pass minutes early; older rows without `read_at` use the start; `saved_scans` on this server, else on the
   backtest server desk `GET /api/link/backtest/active-scans?day=&pct=&side=&min_value_cr=` behind `BACKTEST_LINK_TOKEN`,
   `main._auto_arm_scans`); the alert thresholds are the defaults. `ReplaySession` gives the engine `arm_windows`
   (`auto_arm.arm_windows`, the "as armed" path: a stock armed mid-day waits for a fresh signal) and starts the day at the
@@ -1936,6 +2051,14 @@ spinning top), body and range) / Matched / Call columns
   which copies each run the desk lacks (`find` by kind and time) with `save_copy` + `save_check`, meta `server:
   backtest`. The Scalp History tab's "Pull from backtest server" button (shown on the desk when `/api/role` has
   `backtest_url` and `backtest_link`) calls it for the last 30 days and reloads the list.
+  **Backtests carry on after a restart** (owner's case: "Can't reach the trading engine" mid-backtest, each merge to `main`
+  re-deploys this server): at boot `close_orphan_replay_rows(interrupted=True)` lists the runs it found playing
+  (`replay.cut_short_at_boot`) and `main._auto_resume_replays` resumes each `INTERRUPTED` one on its own bot's player at full
+  speed about 20 s later (`ReplaySession.resume`: the unfinished day replays, the result is as if it never stopped), at most
+  `backtest_server.AUTO_RESUME_MAX` (3) times per run (`take_auto_resume`, counted in `backtest_server.json`, so a run that
+  itself brings the server down cannot loop); `BACKTEST_AUTO_RESUME=off` turns it off; a run stopped by hand is left alone.
+  `stop_now` saves `last_stop` and `note_boot` reads it once at boot, so the status carries `boot` (kind `idle` = its own
+  stop | `restart` = a deploy or a crash), `auto_resume` and `resumed`; the bar's "Last start …" line shows them.
   Terminal `GET /api/backtest/status`, `POST /api/backtest/sync|stop[?force=true]`, `PUT /api/backtest/idle`; UI
   `components/Terminal/BacktestServerBar.tsx` (on the desk: a link when `BACKTEST_URL` is set). **Arms the desk from its Scalp
   page**: with `SCANNER_LINK_TOKEN` set here too (`/api/role` `desk_arm`), the Arm / Arm ticked dialogs have a Main desk /

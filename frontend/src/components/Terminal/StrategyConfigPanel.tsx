@@ -480,6 +480,21 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     pressure_over_counter: Boolean(form.pressure_over_counter),
     pressure_entry: (["OFF", "CHECK", "AT_ARM"].includes(String(form.pressure_entry)) ? form.pressure_entry : "OFF") as SmaConfig["pressure_entry"],
     pressure_entry_pct: Math.min(95, Math.max(30, Number(form.pressure_entry_pct ?? 65) || 65)),
+    pressure_flip: Boolean(form.pressure_flip),
+    pressure_flip_pct: Math.min(95, Math.max(55, Number(form.pressure_flip_pct ?? 65) || 65)),
+    pressure_flip_flow: (() => {
+      const v = Number(form.pressure_flip_flow ?? 0) || 0;
+      return v <= 0 ? 0 : Math.min(95, Math.max(30, v));
+    })(),
+    flow_exit: Boolean(form.flow_exit),
+    flow_exit_pct: Math.min(95, Math.max(50, Number(form.flow_exit_pct ?? 60) || 60)),
+    flow_exit_window: flowWindow(form.flow_exit_window),
+    flow_exit_loss: Boolean(form.flow_exit_loss),
+    flow_exit_book: Boolean(form.flow_exit_book),
+    flow_exit_mode: String(form.flow_exit_mode ?? "EXIT").toUpperCase() === "CONFIRM" ? "CONFIRM" : "EXIT",
+    flow_entry: Boolean(form.flow_entry),
+    flow_entry_pct: Math.min(95, Math.max(50, Number(form.flow_entry_pct ?? 55) || 55)),
+    flow_entry_window: flowWindow(form.flow_entry_window),
     stop_plan: Boolean(form.stop_plan),
     decel_exit: Boolean(form.decel_exit),
     decel_lookback: Math.min(10, Math.max(1, Math.round(Number(form.decel_lookback ?? 2) || 2))),
@@ -2093,6 +2108,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               />
             </label>
           ) : null}
+          <FlowEntry form={form} set={set} isOwn={isOwn} />
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -2208,6 +2224,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </span>
           </label>
           <PressureExit form={form} set={set} isOwn={isOwn} />
+          <FlowExit form={form} set={set} isOwn={isOwn} />
           <Only s="sma">
           <div className={clsx("mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10", !crossExitOn(form) && "opacity-50")}>
             <label htmlFor="sma-exit-candle" className="flex items-center gap-1 text-sm text-slate-300">
@@ -3734,6 +3751,7 @@ export function activeRules(f: SmaConfig): Rule[] {
     }[String(f.level_line ?? "BB_MIDDLE")] ?? "Price beyond the chosen level"
   );
   check("use_fresh", f.use_fresh, `Fresh trend only: a new cross, beyond VWAP, the gap widening${Number(f.fresh_rvol ?? 1.5) > 0 ? `, volume ${n(f.fresh_rvol, 1.5)}× usual` : ""}`);
+  check("flow_entry", f.flow_entry, `Executed volume: the order's own side did ${f.flow_entry_pct ?? 55}% of the shares traded ${Number(f.flow_entry_window ?? 3) === 0 ? "in the last exit candle" : `in the last ${f.flow_entry_window ?? 3} min`} (estimated)`);
   check(
     "use_high52",
     f.use_high52,
@@ -3848,6 +3866,12 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "exit", key: "pressure_exit", text: `Most active stocks close when the buyers (a buy) / sellers (a sell) fade to ${f.pressure_exit_pct ?? 55}% or below`, off: { pressure_exit: false } });
   if (f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM")
     add({ group: "enter", key: "pressure_entry", text: `Most active stocks: ${f.pressure_entry === "AT_ARM" ? "entered at once while" : "enter only while"} the buyers (a buy) / sellers (a sell) hold ${f.pressure_entry_pct ?? 65}% or more`, off: { pressure_entry: "OFF" } });
+  if (f.pressure_flip)
+    add({ group: "enter", key: "pressure_flip", text: `Most active stocks, candle colour: sellers (against a buy) / buyers (against a sell) at ${f.pressure_flip_pct ?? 65}% or more, with the price on their side of the VWAP${Number(f.pressure_flip_flow) > 0 ? ` and ${f.pressure_flip_flow}% of the executed volume` : ""}, turn the order their way`, off: { pressure_flip: false } });
+  if (f.flow_exit && String(f.flow_exit_mode ?? "EXIT").toUpperCase() === "CONFIRM")
+    add({ group: "exit", key: "flow_exit", text: `Exits close only when the other side did ${f.flow_exit_pct ?? 60}% of the shares traded ${Number(f.flow_exit_window ?? 3) === 0 ? "in the exit candle" : `in the last ${f.flow_exit_window ?? 3} min`} (executed volume confirms the exit)`, off: { flow_exit: false } });
+  else if (f.flow_exit)
+    add({ group: "exit", key: "flow_exit", text: `Close when the other side did ${f.flow_exit_pct ?? 60}% of the shares traded ${Number(f.flow_exit_window ?? 3) === 0 ? "in the exit candle" : `in the last ${f.flow_exit_window ?? 3} min`} (executed volume, estimated)${f.flow_exit_loss ? ", only while losing" : ""}${f.flow_exit_book ? ", waiting orders agreeing" : ""}`, off: { flow_exit: false } });
   if (f.pressure_exit && f.pressure_over_counter)
     add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
@@ -5081,6 +5105,309 @@ function PressureEntry({
         Example at {shown}%: a stock armed when buyers were 78% is bought only while buyers are still {shown}% or more; once they
         drop under it, no new buy goes in.
       </p>
+      <PressureFlip form={form} set={set} isOwn={isOwn} />
+    </div>
+  );
+}
+
+/** Executed volume entry check (flow_exit.py): the order's own side must have done the set % of the shares traded. */
+function FlowEntry({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const on = Boolean(form.flow_entry);
+  const pct = Number(form.flow_entry_pct ?? 55);
+  const shown = Number.isFinite(pct) ? pct : 55;
+  const win = Number(form.flow_entry_window ?? 3);
+  return (
+    <div id="sma-flow-entry" className="mt-4 scroll-mt-24">
+      <label className="flex items-start gap-2 text-sm text-slate-300">
+        <input type="checkbox" className="mt-1 accent-[#10B981]" checked={on} onChange={(e) => set("flow_entry", e.target.checked)} />
+        <span>
+          {(isOwn("flow_entry") || isOwn("flow_entry_pct") || isOwn("flow_entry_window")) && <OwnTag />}
+          Enter only when the order&apos;s own side is doing the trading (executed volume) <NewTag id="flow-entry" />{" "}
+          <InfoTip label="About the executed volume entry check">
+            A buy goes in only when buyers did at least this % of the shares traded at market over the window that just
+            closed (a sell only when sellers did); a flipped stock is judged on the order it really sends. It reads trades
+            that happened, not the orders still waiting. Groww gives no trade-by-trade list, so the split is estimated: each
+            minute&apos;s volume is split by how often the price ticked up vs down in the seconds the bots record (kept 10
+            days), else by the candle&apos;s shape. Too little volume to read refuses the entry. Read like the other checks,
+            so &quot;Late entry&quot; can retry on the next candles. Any stock, PAPER and LIVE, backtests too. Force, news,
+            hand-off and fast-mover orders do not read it.
+          </InfoTip>
+        </span>
+      </label>
+      <div className={clsx("mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
+        Own side at least
+        <input
+          type="number"
+          min={50}
+          max={95}
+          step={1}
+          disabled={!on}
+          value={shown}
+          onChange={(e) => set("flow_entry_pct", e.target.value)}
+          aria-label="The order's own side's share of the executed volume an entry needs, %"
+          className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        />
+        % of the shares traded in
+        <FlowWindowPick disabled={!on} value={win} candleLabel="the last exit candle" onChange={(v) => set("flow_entry_window", v)} />
+      </div>
+      <p className="mt-1 text-xs text-slate-400">
+        Example at {shown}%, {win === 0 ? "the exit candle" : `${win} min`}: a buy signal while sellers did {Math.max(5, 100 - shown + 10)}% of the
+        shares traded {win === 0 ? "in the last candle" : `in the last ${win} minutes`} is refused, even on a green cross.
+      </p>
+    </div>
+  );
+}
+
+const FLOW_WINDOWS = [1, 2, 3, 5, 10, 15];
+const FLOW_MAX_WINDOW = 60;
+
+/** The executed volume window as the API takes it: 0 (the exit candle) or 1-60 minutes, else the default 3. */
+function flowWindow(value: unknown): number {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) && n >= 0 && n <= FLOW_MAX_WINDOW ? n : 3;
+}
+
+/** The executed volume window: the ready-made minutes, the exit candle, or any number of minutes typed (1-60). */
+function FlowWindowPick({
+  value,
+  disabled,
+  candleLabel,
+  onChange,
+}: {
+  value: number;
+  disabled: boolean;
+  candleLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const preset = value === 0 || FLOW_WINDOWS.includes(value);
+  const [custom, setCustom] = useState(!preset);
+  const showBox = custom || !preset;
+  return (
+    <>
+      <select
+        disabled={disabled}
+        value={showBox ? "custom" : String(value)}
+        onChange={(e) => {
+          if (e.target.value === "custom") {
+            setCustom(true);
+            if (value === 0 || FLOW_WINDOWS.includes(value)) onChange(String(value === 0 ? 4 : value));
+          } else {
+            setCustom(false);
+            onChange(e.target.value);
+          }
+        }}
+        aria-label="Window"
+        className="min-h-11 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+      >
+        {FLOW_WINDOWS.map((m) => (
+          <option key={m} value={m}>
+            the last {m} min
+          </option>
+        ))}
+        <option value={0}>{candleLabel}</option>
+        <option value="custom">custom minutes…</option>
+      </select>
+      {showBox && (
+        <span className="inline-flex items-center gap-1">
+          the last
+          <input
+            type="number"
+            min={1}
+            max={FLOW_MAX_WINDOW}
+            step={1}
+            disabled={disabled}
+            value={value || ""}
+            onChange={(e) => onChange(e.target.value)}
+            aria-label={`Window in minutes, 1 to ${FLOW_MAX_WINDOW}`}
+            className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+          />
+          min <NewTag id="flow-window-custom" />
+        </span>
+      )}
+    </>
+  );
+}
+
+/** Executed volume exit (flow_exit.py): close once the other side did the set % of the shares traded at market. */
+function FlowExit({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const on = Boolean(form.flow_exit);
+  const pct = Number(form.flow_exit_pct ?? 60);
+  const shown = Number.isFinite(pct) ? pct : 60;
+  const win = Number(form.flow_exit_window ?? 3);
+  const confirm = String(form.flow_exit_mode ?? "EXIT").toUpperCase() === "CONFIRM";
+  return (
+    <div id="sma-flow-exit" className="mt-3 border-t border-white/10 pt-2">
+      <label className="flex items-start gap-2 text-sm text-slate-200">
+        <input type="checkbox" className="mt-1" checked={on} onChange={(e) => set("flow_exit", e.target.checked)} />
+        <span>
+          {(isOwn("flow_exit") || isOwn("flow_exit_pct") || isOwn("flow_exit_window") || isOwn("flow_exit_mode")) && <OwnTag />}
+          <b className="text-slate-100">Executed volume exit</b> — close when the other side is doing the trading{" "}
+          <NewTag id="flow-exit" />{" "}
+          <InfoTip label="About the executed volume exit">
+            A buy is closed once sellers did at least this % of the shares traded at market over the window (a sell once
+            buyers did). It reads trades that happened, not the orders still waiting (that is the buyers / sellers fade exit
+            above). Groww gives no trade-by-trade list, so the split is estimated: each minute&apos;s volume is split by how
+            often the price ticked up vs down in the seconds the bots record (kept 10 days), else by the candle&apos;s shape.
+            Judged once per closed minute (or once per exit candle with &quot;the exit candle&quot;), only on minutes after
+            the entry. Any stock, PAPER and LIVE, backtests too (older days read the candle shape only). The stop, targets
+            and the other exits stay; whichever comes first closes. Exit reason &quot;Executed volume&quot;.
+          </InfoTip>
+        </span>
+      </label>
+      <fieldset className={clsx("mt-2 text-sm text-slate-300", !on && "opacity-50")} disabled={!on}>
+        <legend className="sr-only">How the executed volume is used</legend>
+        <label className="flex items-start gap-2">
+          <input type="radio" className="mt-1" name="flow_exit_mode" checked={!confirm} onChange={() => set("flow_exit_mode", "EXIT")} />
+          <span>
+            <b className="text-slate-200">Close the trade by itself</b>, as soon as the other side does the trading
+          </span>
+        </label>
+        <label className="mt-1 flex items-start gap-2">
+          <input type="radio" className="mt-1" name="flow_exit_mode" checked={confirm} onChange={() => set("flow_exit_mode", "CONFIRM")} />
+          <span>
+            {isOwn("flow_exit_mode") && <OwnTag />}
+            <b className="text-slate-200">Use it to confirm the other exits</b> <NewTag id="flow-confirm" />, like an entry check: a colour turn, counter
+            candles, SMA cross, SMA 9 exit, Supertrend, Bollinger, EMA, MACD… closes only when the other side also did this
+            much; otherwise the trade is held. Stops, targets and the square-off are never held.
+          </span>
+        </label>
+      </fieldset>
+      <div className={clsx("mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
+        Other side at least
+        <input
+          type="number"
+          min={50}
+          max={95}
+          step={1}
+          disabled={!on}
+          value={shown}
+          onChange={(e) => set("flow_exit_pct", e.target.value)}
+          aria-label="Other side's share of the executed volume that closes the trade, %"
+          className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        />
+        % of the shares traded in
+        <FlowWindowPick disabled={!on} value={win} candleLabel="the exit candle just closed" onChange={(v) => set("flow_exit_window", v)} />
+      </div>
+      {!confirm && (
+      <>
+      <label className={clsx("mt-2 flex items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
+        <input type="checkbox" disabled={!on} checked={Boolean(form.flow_exit_loss)} onChange={(e) => set("flow_exit_loss", e.target.checked)} />
+        {isOwn("flow_exit_loss") && <OwnTag />}
+        Only while the trade is losing
+      </label>
+      <label className={clsx("mt-1 flex items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
+        <input type="checkbox" disabled={!on} checked={Boolean(form.flow_exit_book)} onChange={(e) => set("flow_exit_book", e.target.checked)} />
+        {isOwn("flow_exit_book") && <OwnTag />}
+        The waiting orders must agree too (the other side above 50% in a Most active read of the last 20 min)
+      </label>
+      </>
+      )}
+      {confirm ? (
+        <p className="mt-1 text-xs text-slate-400">
+          Example at {shown}%, {win === 0 ? "the exit candle" : `${win} min`}: a buy whose candle turns red is closed only if
+          sellers did at least {shown}% of the shares traded {win === 0 ? "in the exit candle that just closed" : `in the last ${win} minutes`};
+          if buyers were still doing most of it (sellers {Math.max(50, shown - 8)}%), the trade is held and the exit is judged again the next
+          time it fires. Too little volume to read lets the exit go.
+        </p>
+      ) : (
+        <p className="mt-1 text-xs text-slate-400">
+          Example at {shown}%, {win === 0 ? "the exit candle" : `${win} min`}: a buy where sellers did {Math.min(95, shown + 6)}% of the
+          shares traded {win === 0 ? "in the candle that just closed" : `in the last ${win} minutes`} is closed at once, even while the candles are still green.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PressureFlip({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const on = Boolean(form.pressure_flip);
+  const pct = Number(form.pressure_flip_pct ?? 65);
+  const shown = Number.isFinite(pct) ? pct : 65;
+  const colour = String(form.entry_mode ?? "SMA") === "COLOUR";
+  return (
+    <div id="sma-pressure-flip" className="mt-3 border-t border-white/10 pt-2">
+      <label className="flex items-start gap-2 text-sm text-slate-200">
+        <input type="checkbox" className="mt-1" checked={on} onChange={(e) => set("pressure_flip", e.target.checked)} />
+        <span>
+          {(isOwn("pressure_flip") || isOwn("pressure_flip_pct")) && <OwnTag />}
+          Candle colour: let buyers / sellers overrule it (go their way) <NewTag id="pressure-flip" />{" "}
+          <InfoTip label="About buyers / sellers overruling the candle colour">
+            Only in candle-colour mode, only for stocks armed from Most active. When a colour candle asks for a buy but the
+            sellers hold this % or more of the waiting orders in a Most active read of the last 20 minutes and the last
+            closed candle closed under today&apos;s VWAP, the bot sells instead (and buys when a red candle meets buyers at
+            this % or more with the close over the VWAP). The VWAP must agree because waiting orders alone can mislead:
+            buyers can show 79% while sellers keep hitting their bids. A trade it already holds on that side is kept;
+            one on the other side is closed and turned. No fresh read (scans paused) = the colour decides as usual. Every entry
+            check, the stop, flip, cut-off, caps and one LIVE bot per stock still apply. Entry reason &quot;Buyers / sellers
+            flip&quot;. Backtests read the day&apos;s saved Most active scans.
+          </InfoTip>
+          {!colour && <span className="block text-xs text-amber-300">Works only with Enter on: candle colour.</span>}
+        </span>
+      </label>
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        The other side at least
+        <input
+          type="number"
+          min={55}
+          max={95}
+          step={1}
+          disabled={!on}
+          value={shown}
+          onChange={(e) => set("pressure_flip_pct", e.target.value)}
+          className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        />
+        %
+      </label>
+      <p className="mt-1 text-xs text-slate-400">
+        Example at {shown}%: a green candle on a stock whose sellers hold 71% (read 09:56) and whose price is under the
+        VWAP sells instead of buying. Over the VWAP, the colour decides.
+      </p>
+      <label className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300">
+        {isOwn("pressure_flip_flow") && <OwnTag />}
+        And their share of the colour candle&apos;s executed volume at least
+        <input
+          type="number"
+          min={0}
+          max={95}
+          step={1}
+          disabled={!on}
+          value={Number(form.pressure_flip_flow ?? 0) || 0}
+          onChange={(e) => set("pressure_flip_flow", e.target.value)}
+          className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        />
+        % <span className="text-xs text-slate-500">(0 = not checked)</span> <NewTag id="pressure-flip-flow" />{" "}
+        <InfoTip label="About the executed volume check">
+          Waiting orders can mislead: buyers can hold 79% of the book while sellers keep selling into it. With this set, the
+          flip also needs the other side to have done this % of the shares traded in the colour candle that just closed.
+          Groww gives no trade-by-trade list, so it is estimated: each minute&apos;s volume is split by how often the price
+          ticked up vs down in the seconds the bots record (kept 10 days), else by the candle&apos;s shape. No volume known
+          = no flip. The chart shows the same estimate as a dashed &quot;Executed buy %&quot; line on the buyers strip.
+        </InfoTip>
+      </label>
     </div>
   );
 }

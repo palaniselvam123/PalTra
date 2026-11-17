@@ -23,7 +23,7 @@ import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
-import { cvdValues, emaValues, heikinAshi, pressureReads, pressureValues, shown, useChartStyle } from "@/lib/chartStyle";
+import { type FlowRead, cvdValues, emaValues, flowReads, heikinAshi, pressureReads, pressureValues, shown, useChartStyle } from "@/lib/chartStyle";
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { NewTag } from "@/components/ui/NewTag";
@@ -1018,7 +1018,12 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const slopeLines = useRef<IPriceLine[]>([]);
   const rsiBands = useRef<IPriceLine[]>([]);
   const pressureRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const pressureLines = useRef<IPriceLine[]>([]);
+  const pressureLines = useRef<[ISeriesApi<"Line">, IPriceLine][]>([]);
+  // Executed buy % (estimated, trade_flow.py), on the buyers / sellers strip.
+  const flowRef = useRef<ISeriesApi<"Line"> | null>(null);
+  // The mirrors on the same strip: sellers waiting (100 − buyers waiting) and sellers executed (100 − buyers executed).
+  const pressureSellRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const flowSellRef = useRef<ISeriesApi<"Line"> | null>(null);
   const slLine = useRef<IPriceLine | null>(null);
   const entryLine = useRef<IPriceLine | null>(null);
   const targetLine = useRef<IPriceLine | null>(null);
@@ -1619,13 +1624,32 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       priceScaleId: "pressure",
       priceLineVisible: false,
       lastValueVisible: true,
-      title: tag("Buyers %"),
+      title: tag("Buyers waiting %"),
       visible: false,
       priceFormat: { type: "custom", minMove: 1, formatter: (v: number) => `${v.toFixed(0)}%` },
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
     });
     instance.priceScale("pressure").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
     pressureRef.current = pressure;
+    // The other three lines of the same 0–100 strip: sellers waiting, and the executed buy / sell % of each candle
+    // (shares bought / sold at market, estimated).
+    const stripLine = (title: string, color: string, dashed: boolean, step: boolean) =>
+      instance.addLineSeries({
+        color,
+        lineWidth: 2,
+        lineStyle: dashed ? LineStyle.Dashed : LineStyle.Solid,
+        lineType: step ? 1 : 0,
+        priceScaleId: "pressure",
+        priceLineVisible: false,
+        lastValueVisible: true,
+        title: tag(title),
+        visible: false,
+        priceFormat: { type: "custom", minMove: 1, formatter: (v: number) => `${v.toFixed(0)}%` },
+        autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+      });
+    pressureSellRef.current = stripLine("Sellers waiting %", "#F43F5E", false, true);
+    flowRef.current = stripLine("Buyers executed %", "#6EE7B7", true, false);
+    flowSellRef.current = stripLine("Sellers executed %", "#FDA4AF", true, false);
     // SMA 9 slope (%/candle): green bars while the line rises, red while it falls.
     const slopeBars = instance.addHistogramSeries({
       priceScaleId: "slope",
@@ -1777,6 +1801,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     paint(rsiRef.current, look.rsi);
     paint(cvdRef.current, look.cvd);
     paint(pressureRef.current, look.pressure);
+    paint(flowRef.current, look.flow);
+    paint(pressureSellRef.current, look.pressureSell);
+    paint(flowSellRef.current, look.flowSell);
     paint(emaRefs.current[0], look.ema);
     paint(emaRefs.current[1], look.ema, look.ema.color2);
     paint(stRefs.current[0], look.st);
@@ -1824,8 +1851,26 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     // Both strips at once share the bottom: ATR above, RSI below; the slope strip, when on, sits under both.
     const lift = showSlopeBars ? 0.17 : 0;
     // The strips on show share the bottom band in equal slices (one alone keeps the old 0.75–0.98).
+    // The buyers / sellers strip, four lines (each on / off in Indicators): buyers and sellers waiting (the Most
+    // active reads of the order book) and buyers and sellers executed (what traded in each candle, estimated).
     const buyers = pressureValues(rows, chart.pressure);
-    const showPressure = shown(look.pressure, buyers.some((v) => v != null));
+    const anyWaiting = buyers.some((v) => v != null);
+    const showBuyerLine = shown(look.pressure, anyWaiting);
+    const showSellerLine = shown(look.pressureSell, anyWaiting);
+    const flows = flowReads(rows, chart.flow, bar);
+    const anyFlow = flows.some((v) => v != null);
+    // Auto: the executed lines go with the waiting lines (they read best together).
+    const showFlow = shown(look.flow, (showBuyerLine || showSellerLine) && anyFlow);
+    const showFlowSell = shown(look.flowSell, (showBuyerLine || showSellerLine) && anyFlow);
+    const showPressure = showBuyerLine || showSellerLine || showFlow || showFlowSell;
+    const fill = (series: ISeriesApi<"Line"> | null, on: boolean, values: (number | null)[]) => {
+      if (!series) return;
+      series.applyOptions({ visible: on });
+      series.setData(on ? rows.flatMap((c, i) => (values[i] == null ? [] : [{ time: c.time as never, value: values[i] as number }])) : []);
+    };
+    fill(pressureSellRef.current, showSellerLine, buyers.map((v) => (v == null ? null : 100 - v)));
+    fill(flowRef.current, showFlow, flows.map((f) => (f == null ? null : f.buyPct)));
+    fill(flowSellRef.current, showFlowSell, flows.map((f) => (f == null ? null : 100 - f.buyPct)));
     const strips = ([["atr", showAtr], ["rsi", showRsi], ["cvd", showCvd], ["pressure", showPressure]] as const)
       .filter(([, on]) => on)
       .map(([id]) => id);
@@ -1841,18 +1886,23 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     apiRef.current?.priceScale("cvd").applyOptions({ scaleMargins: sliceOf("cvd") });
     apiRef.current?.priceScale("pressure").applyOptions({ scaleMargins: sliceOf("pressure") });
     if (pressureRef.current) {
-      const series = pressureRef.current;
-      series.applyOptions({ visible: showPressure });
-      series.setData(
-        showPressure
-          ? rows.flatMap((c, i) => (buyers[i] == null ? [] : [{ time: c.time as never, value: buyers[i] as number }]))
-          : []
-      );
-      for (const line of pressureLines.current) series.removePriceLine(line);
+      fill(pressureRef.current, showBuyerLine, buyers);
+      // The 50 line and the fade exit's levels go on a line that is on (a hidden series hides its levels too).
+      for (const [owner, line] of pressureLines.current) owner.removePriceLine(line);
       pressureLines.current = [];
-      if (showPressure) {
-        const level = (price: number, color: string, title: string) =>
-          series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title });
+      const series = (
+        [
+          [pressureRef.current, showBuyerLine],
+          [pressureSellRef.current, showSellerLine],
+          [flowRef.current, showFlow],
+          [flowSellRef.current, showFlowSell],
+        ] as const
+      ).find(([ref, on]) => ref && on)?.[0];
+      if (showPressure && series) {
+        const level = (price: number, color: string, title: string): [ISeriesApi<"Line">, IPriceLine] => [
+          series,
+          series.createPriceLine({ price, color, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false, title }),
+        ];
         pressureLines.current = [level(50, "rgba(148, 163, 184, 0.5)", "")];
         // The fade exit's levels: a buy closes at buyers ≤ N %, a sell at sellers ≤ N % (buyers ≥ 100 − N).
         if (filters?.pressure_exit && filters.pressure_exit_pct != null) {
@@ -2142,12 +2192,22 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const shownIndex = hoverRow ? rows.indexOf(hoverRow) : rows.length - 1;
   // Buyers' share of the waiting orders on this candle (the latest Most active read before it closed).
   const buyerReads = useMemo(() => pressureReads(rows, view?.pressure), [rows, view?.pressure]);
-  const showBuyers = shown(look.pressure, buyerReads.some((v) => v != null));
+  const anyWaitRead = buyerReads.some((v) => v != null);
+  const showBuyWait = shown(look.pressure, anyWaitRead);
+  const showSellWait = shown(look.pressureSell, anyWaitRead);
+  const showBuyers = showBuyWait || showSellWait;
   const shownRead = (() => {
     for (let i = shownIndex; i >= 0; i -= 1) if (buyerReads[i] != null) return i === shownIndex || !hoverRow ? buyerReads[i] : null;
     return null;
   })();
   const shownBuyers = shownRead ? shownRead.buy_pct : null;
+  // The executed buy / sell split of this candle (estimated): what traded, next to what is waiting.
+  const flowRows = useMemo(() => flowReads(rows, view?.flow, bar), [rows, view?.flow, bar]);
+  const anyFlowRead = flowRows.some((v) => v != null);
+  const showFlowBuy = shown(look.flow, showBuyers && anyFlowRead);
+  const showFlowSell = shown(look.flowSell, showBuyers && anyFlowRead);
+  const showFlowRead = showFlowBuy || showFlowSell;
+  const shownFlow = showFlowRead ? flowRows[shownIndex] ?? null : undefined;
   const slopeRead = (() => {
     // The forming candle has no SMA: read the last closed one.
     for (let i = shownIndex; i >= 0 && i >= shownIndex - 1; i -= 1) {
@@ -2410,17 +2470,24 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
               )}
             </LegendItem>
           )}
-          {showBuyers ? (
-            <LegendItem swatch={<span className="block w-5 border-t-2" style={{ borderColor: look.pressure.color }} />}>
-              <span
-                className="cursor-help"
-                title="The bottom strip: buyers' share of the waiting orders from the Most active scans (live and the day's saved scans), 0–100. Above 50 more shares wait to be bought, below 50 more to be sold. Dashed lines: 50, and while the buyers / sellers fade exit is on its exit levels."
-              >
-                Buyers %{filters?.pressure_exit && filters.pressure_exit_pct != null ? ` · fade exit ${filters.pressure_exit_pct}%` : ""}
-              </span>{" "}
-              <NewTag id="chart-buyers-sellers" link={false} />
-            </LegendItem>
-          ) : null}
+          {(
+            [
+              [showBuyWait, look.pressure.color, false, "Buyers waiting %", "Buyers' share of the orders waiting in the book (buy quantity ÷ buy + sell quantity), from the Most active scans (live and the day's saved scans), 0–100. Each candle carries the latest read taken before it closed; a candle before the day's first read of this stock has none."],
+              [showSellWait, look.pressureSell.color, false, "Sellers waiting %", "Sellers' share of the orders waiting in the book = 100 − buyers waiting, from the same Most active reads."],
+              [showFlowBuy, look.flow.color, true, "Buyers executed %", "Shares bought at market in each candle ÷ all traded in it, estimated from the per-second prices the bots record (else the candle's shape). What actually traded, next to what is waiting."],
+              [showFlowSell, look.flowSell.color, true, "Sellers executed %", "Shares sold at market in each candle = 100 − buyers executed, estimated the same way."],
+            ] as const
+          ).map(([on, color, dashed, name, help], i) =>
+            on ? (
+              <LegendItem key={name} swatch={<span className={clsx("block w-5 border-t-2", dashed && "border-dashed")} style={{ borderColor: color }} />}>
+                <span className="cursor-help" title={`${help} The 50 line is drawn on the strip, and while the buyers / sellers fade exit is on, its exit levels.`}>
+                  {name}
+                  {i === 0 && filters?.pressure_exit && filters.pressure_exit_pct != null ? ` · fade exit ${filters.pressure_exit_pct}%` : ""}
+                </span>{" "}
+                <NewTag id="chart-four-lines" link={false} />
+              </LegendItem>
+            ) : null
+          )}
           {shown(look.bb, Boolean(filters?.use_bollinger) || (filters?.bb_exit ?? "OFF") !== "OFF") ? (
             <LegendItem swatch={<span className="block w-5 border-t-2 border-dashed" style={{ borderColor: look.bb.color }} />}>
               Bollinger {filters?.bb_period ?? 20}/{filters?.bb_std ?? 2}σ
@@ -2483,7 +2550,19 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         buyersAt={showBuyers && shownRead ? shownRead.time : null}
         rvol={showBuyers ? shownRead?.rvol ?? null : null}
         valueCr={showBuyers ? shownRead?.value_cr ?? null : null}
-        colors={{ sma9: look.sma9.color, sma21: look.sma21.color, vwap: look.vwap.color, rsi: look.rsi.color, buyers: look.pressure.color }}
+        flow={shownFlow}
+        waitOn={{ buy: showBuyWait, sell: showSellWait }}
+        flowOn={{ buy: showFlowBuy, sell: showFlowSell }}
+        colors={{
+          sma9: look.sma9.color,
+          sma21: look.sma21.color,
+          vwap: look.vwap.color,
+          rsi: look.rsi.color,
+          buyers: look.pressure.color,
+          sellers: look.pressureSell.color,
+          flowBuy: look.flow.color,
+          flowSell: look.flowSell.color,
+        }}
       />
       {whyLine && ohlc ? (
         <p className="px-3 pb-1.5 text-xs text-slate-300 sm:px-4" aria-live="off" title="Why the bot took no trade on this candle. Move the mouse over any candle to read it there.">
@@ -2976,6 +3055,9 @@ function OhlcLine({
   buyersAt,
   rvol,
   valueCr,
+  flow,
+  waitOn,
+  flowOn,
   colors,
 }: {
   ohlc: Ohlc | null;
@@ -3002,7 +3084,12 @@ function OhlcLine({
   /** Volume vs usual (×) and money traded (₹ crore) from that same Most active read. */
   rvol?: number | null;
   valueCr?: number | null;
-  colors: { sma9: string; sma21: string; vwap: string; rsi: string; buyers: string };
+  /** This candle's executed buy / sell split, estimated (undefined = not shown). */
+  flow?: FlowRead | null;
+  /** Which of the four strip lines are on (waiting buyers / sellers, executed buyers / sellers). */
+  waitOn?: { buy: boolean; sell: boolean };
+  flowOn?: { buy: boolean; sell: boolean };
+  colors: { sma9: string; sma21: string; vwap: string; rsi: string; buyers: string; sellers: string; flowBuy: string; flowSell: string };
 }) {
   if (!ohlc) return null;
   const change = ohlc.prevClose != null ? ohlc.close - ohlc.prevClose : ohlc.close - ohlc.open;
@@ -3086,12 +3173,23 @@ function OhlcLine({
           className="cursor-help whitespace-nowrap"
           title="Buyers' share of the waiting orders (buy quantity ÷ buy + sell quantity) from the latest Most active scan read before this candle closed. Sellers % = 100 − buyers %. The scan reads the order book every few minutes, so it steps."
         >
-          <LineKey color={colors.buyers}>Buyers</LineKey>{" "}
-          <span className={clsx(buyers == null ? "text-slate-400" : buyers >= 50 ? "text-emerald-300" : "text-rose-300")}>
-            {buyers == null ? "—" : `${buyers.toFixed(0)}%`}
-          </span>{" "}
-          <span className="text-slate-400">Sellers</span>{" "}
-          <span className="text-slate-100">{buyers == null ? "—" : `${(100 - buyers).toFixed(0)}%`}</span>
+          {waitOn?.buy !== false ? (
+            <>
+              <LineKey color={colors.buyers}>Buyers waiting</LineKey>{" "}
+              <span className={clsx(buyers == null ? "text-slate-400" : buyers >= 50 ? "text-emerald-300" : "text-slate-100")}>
+                {buyers == null ? "—" : `${buyers.toFixed(0)}%`}
+              </span>{" "}
+            </>
+          ) : null}
+          {waitOn?.sell !== false ? (
+            <>
+              <LineKey color={colors.sellers}>Sellers waiting</LineKey>{" "}
+              <span className={clsx(buyers == null ? "text-slate-400" : buyers < 50 ? "text-rose-300" : "text-slate-100")}>
+                {buyers == null ? "—" : `${(100 - buyers).toFixed(0)}%`}
+              </span>
+            </>
+          ) : null}
+          {buyers == null ? <span className="font-sans text-[11px] text-slate-400"> (no Most active read of this stock before this candle closed)</span> : null}
           {buyers != null && buyersAt ? (
             <span className="text-slate-400">
               {" "}
@@ -3112,6 +3210,31 @@ function OhlcLine({
           <span className="text-slate-400">Money</span>{" "}
           <span className="text-slate-100">{valueCr == null ? "—" : `₹${valueCr >= 100 ? valueCr.toFixed(0) : valueCr.toFixed(1)} cr`}</span>{" "}
           <NewTag id="chart-rvol-money" link={false} />
+        </span>
+      ) : null}
+      {flow !== undefined ? (
+        <span
+          className="cursor-help whitespace-nowrap"
+          title="Shares bought vs sold at market in this candle, estimated: Groww gives no trade-by-trade list, so each minute's volume is split by how often the price ticked up vs down in the seconds the bots recorded ('ticks'), else by the candle's shape ('candles'). Buyers % above is the orders still waiting; this is what traded."
+        >
+          {flowOn?.buy !== false ? (
+            <>
+              <LineKey color={colors.flowBuy}>Buyers executed</LineKey>{" "}
+              <span className={clsx(flow == null ? "text-slate-400" : flow.buyPct >= 50 ? "text-emerald-300" : "text-slate-100")}>
+                {flow == null ? "—" : `${flow.buyPct.toFixed(0)}%`}
+              </span>{" "}
+            </>
+          ) : null}
+          {flowOn?.sell !== false ? (
+            <>
+              <LineKey color={colors.flowSell}>Sellers executed</LineKey>{" "}
+              <span className={clsx(flow == null ? "text-slate-400" : flow.buyPct < 50 ? "text-rose-300" : "text-slate-100")}>
+                {flow == null ? "—" : `${(100 - flow.buyPct).toFixed(0)}%`}
+              </span>{" "}
+            </>
+          ) : null}
+          <span className="text-slate-400">{flow == null ? "(no volume known in this candle)" : `(${flow.src})`}</span>{" "}
+          <NewTag id="chart-executed-flow" link={false} />
         </span>
       ) : null}
     </div>

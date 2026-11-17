@@ -70,30 +70,54 @@ def _settings(raw: str | None) -> dict:
 # ---- loading --------------------------------------------------------------------------------------------------------
 
 
+def _trade_dict(t, run_id: int) -> dict:
+    return {
+        "run_id": int(run_id),
+        "date": t.date,
+        "symbol": (t.symbol or "").upper(),
+        "gross": float(t.gross_pnl or 0.0),
+        "net": float(t.net_pnl if t.net_pnl is not None else (t.gross_pnl or 0.0)),
+        "charges": float(t.brokerage_and_taxes or 0.0),
+        "exit_reason": t.exit_reason or "",
+        "entry_time": t.entry_time,
+    }
+
+
 def load(run_ids: list[int]) -> tuple[list[dict], list[dict]]:
-    """The runs (in the order asked) and their closed trades as plain dicts. Raises ValueError for unknown runs."""
+    """The runs (in the order asked) and their closed trades as plain dicts. Raises ValueError for unknown runs.
+
+    A negative id is a bot's own book of real days (live_book.py): its trades come straight from the trade book."""
+    import live_book
     from database import session_factory
     from models import ReplayRun, TradeLog
 
+    replay_ids = [i for i in run_ids if not live_book.is_live(i)]
     with session_factory()() as db:
-        rows = {r.id: r for r in db.query(ReplayRun).filter(ReplayRun.id.in_(run_ids)).all()}
-        missing = [i for i in run_ids if i not in rows]
+        rows = {r.id: r for r in db.query(ReplayRun).filter(ReplayRun.id.in_(replay_ids)).all()} if replay_ids else {}
+        missing = [i for i in replay_ids if i not in rows]
         if missing:
             raise ValueError(f"No backtest run #{', #'.join(str(i) for i in missing)} (deleted?).")
         trades = (
             db.query(TradeLog)
-            .filter(TradeLog.run_id.in_(run_ids), TradeLog.exit_price.isnot(None))
+            .filter(TradeLog.run_id.in_(replay_ids), TradeLog.exit_price.isnot(None))
             .order_by(TradeLog.id)
             .all()
-        )
+        ) if replay_ids else []
+        out = [_trade_dict(t, t.run_id) for t in trades]
         runs = []
         for run_id in run_ids:
+            if live_book.is_live(run_id):
+                book_rows = live_book.trades(db, run_id)
+                runs.append(live_book.run(db, run_id, book_rows))
+                out.extend(_trade_dict(t, run_id) for t in book_rows)
+                continue
             run = rows[run_id]
             settings = _settings(run.settings)
             days = [d for d in (run.days or "").split(",") if d]
             runs.append(
                 {
                     "id": run.id,
+                    "kind": "replay",
                     "status": run.status,
                     "start_date": run.start_date,
                     "end_date": run.end_date,
@@ -105,19 +129,6 @@ def load(run_ids: list[int]) -> tuple[list[dict], list[dict]]:
                     "settings": settings,
                 }
             )
-        out = [
-            {
-                "run_id": int(t.run_id),
-                "date": t.date,
-                "symbol": (t.symbol or "").upper(),
-                "gross": float(t.gross_pnl or 0.0),
-                "net": float(t.net_pnl if t.net_pnl is not None else (t.gross_pnl or 0.0)),
-                "charges": float(t.brokerage_and_taxes or 0.0),
-                "exit_reason": t.exit_reason or "",
-                "entry_time": t.entry_time,
-            }
-            for t in trades
-        ]
     return runs, out
 
 
@@ -687,6 +698,9 @@ def analyze(runs: list[dict], trades: list[dict], base: int | None = None, basis
         "runs": [
             {
                 "id": run["id"],
+                "kind": run.get("kind", "replay"),
+                "label": run.get("label") or f"#{run['id']}",
+                "settings_variants": run.get("settings_variants"),
                 "status": run["status"],
                 "start_date": run["start_date"],
                 "end_date": run["end_date"],

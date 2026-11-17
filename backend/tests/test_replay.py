@@ -403,7 +403,8 @@ async def test_a_multi_day_run_plays_each_day_and_records_the_run(db, monkeypatc
     assert any(d["held_points"] > 0 for d in logged)
 
     detail = get_run(info["run_id"])
-    assert detail["settings"] == {"qty": 10, "stop_type": "ATR"}
+    # New runs also keep what a stock handed to Bot 2 / Bot 3 does at the end of the day (handoff_chain.backtest_eod).
+    assert detail["settings"] == {"qty": 10, "stop_type": "ATR", "handoff_eod": "UNARM"}
     assert [d["date"] for d in detail["days"]] == sorted(d["date"] for d in detail["days"])
     assert detail["days"][-1]["cumulative"] == pytest.approx(detail["totals"]["net"], abs=0.05)
     assert detail["totals"]["trades"] == len(trades)

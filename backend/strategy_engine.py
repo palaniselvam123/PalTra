@@ -28,7 +28,7 @@ import operator
 import os
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -107,6 +107,8 @@ import recovery
 import fade_unarm
 import pivots
 import pressure_exit
+import trade_flow
+import flow_exit
 import breakout
 import review
 import paper_wallet
@@ -194,6 +196,7 @@ ENTRY_REASONS = (
     "COUNTER_REENTRY",
     "CANDLE_PATTERN",
     "CANDLE_COLOUR",
+    "PRESSURE_FLIP",
     "NTH_CANDLE",
     "BREAKOUT_ARRIVAL",
     "FORCE_ORDER",
@@ -416,6 +419,9 @@ SNAPSHOT_FIELDS = (
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
     "pressure_exit", "pressure_exit_pct", "pressure_over_counter", "pressure_entry", "pressure_entry_pct",
+    "pressure_flip", "pressure_flip_pct", "pressure_flip_flow",
+    "flow_exit", "flow_exit_pct", "flow_exit_window", "flow_exit_loss", "flow_exit_book", "flow_exit_mode",
+    "flow_entry", "flow_entry_pct", "flow_entry_window",
     "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
@@ -1376,6 +1382,9 @@ class StrategyEngine:
         self._pivot_cache: dict[tuple[str, dt.date], dict] = {}
         # Last note of the buyers / sellers fade exit per stock (pressure_exit.py), so the signal line is written once.
         self._pressure_note: dict[str, str] = {}
+        # Executed volume exit (flow_exit.py): the last window judged per stock (entry time, window end) and its reading.
+        self._flow_seen: dict[str, tuple] = {}
+        self._flow_note: dict[str, str] = {}
         # Most active entry at once (pressure_exit.entry_mode AT_ARM): symbol -> the IST day it was entered / refused.
         self._pe_done: dict[str, dt.date] = {}
         self._pe_note: dict[str, str] = {}
@@ -2021,6 +2030,7 @@ class StrategyEngine:
         await self._watch_gap_fade(symbol_cfg)
         await self._watch_pivot_target(symbol_cfg)
         await self._watch_pressure_fade(symbol_cfg)
+        await self._watch_flow_exit(symbol_cfg)
 
     def _held_error(self, symbol: str, exc: Exception) -> None:
         text = f"{symbol}: {exc}"
@@ -2616,6 +2626,34 @@ class StrategyEngine:
         if pos is not None and colour_exit.on(cfg):
             # The trade is judged by its own exit rule (colour_exit.py); entries keep the usual one.
             call = colour_call(frame, colour_exit.exit_cfg(cfg))
+        why = "CANDLE_COLOUR"
+        if pressure_exit.flip_on(cfg) and pressure_exit.from_most_active(trade_sources(cfg).get(symbol)):
+            # Most active stocks (pressure_exit.py): buyers / sellers holding the set % overrule the colour, for the
+            # exit rule's call and the entry's alike, so a flipped trade is held while they keep holding.
+            level, now_ts = pressure_exit.flip_pct(cfg), self._now().timestamp()
+            # The price must agree: the last closed candle's close on that side of today's VWAP.
+            closed = frame.iloc[:-1] if frame is not None and len(frame) > 1 else None
+            last_close = float(closed["close"].iloc[-1]) if closed is not None and len(closed) else None
+            vwap = _session_vwap(closed) if closed is not None else None
+            flow_level, flow = pressure_exit.flip_flow_pct(cfg), None
+            if flow_level > 0 and closed is not None and len(closed):
+                # Executed volume of the colour candle just closed (trade_flow.py): buyers' share of it.
+                end = int(closed["ts"].iloc[-1]) + 60
+                tf = max(1, int(pattern_setting(cfg, "pattern_tf") or 1))
+                points = trade_flow.minutes(symbol, closed, end - tf * 60, end)
+                if points:
+                    flow = (trade_flow.share(points, "LONG"), trade_flow.source_word(points))
+
+            def overruled(c):
+                found = (pressure_exit.flip_side(symbol, c.side, now_ts, level, last_close, vwap, flow, flow_level)
+                         if c.side is not None else None)
+                return (replace(c, side=found[0], note=f"{c.note}; {found[1]}"), True) if found else (c, False)
+
+            same = entry_call is call
+            call, turned = overruled(call)
+            entry_call = call if same else overruled(entry_call)[0]
+            if turned:
+                why = pressure_exit.FLIP_REASON
         waiting = self._pullback.get(symbol)
         if pos is None and waiting is not None and waiting.note == colour_pull.NOTE and call.side in (None, waiting.direction):
             # A colour entry already waits for its pullback (colour_pull.py): keep its level and its wait.
@@ -2643,6 +2681,13 @@ class StrategyEngine:
                 self.last_signal = text
                 return text
         if pos is not None:
+            held = self._flow_hold(cfg, symbol, pos, "COLOUR_TURN")
+            if held:
+                # Executed volume set to confirm the exits (flow_exit.py): no close and no reverse on this candle.
+                text = f"{symbol} holding {pos.direction} — {call.note}, but executed volume does not confirm it: {held}"
+                self._signals[symbol] = text
+                self.last_signal = text
+                return text
             self._focus = symbol
             await self._exit_now(cfg, self._exit_price(symbol, pos), "COLOUR_TURN", gate=False)
             if symbol in self.positions:
@@ -2657,7 +2702,7 @@ class StrategyEngine:
                 return text
         signal = "BULLISH" if call.side == "LONG" else "BEARISH"
         # No Telegram for a refused candle: one closes every few minutes.
-        result = await self.apply_signal(signal, frame, cfg, now, alert=False, why="CANDLE_COLOUR")
+        result = await self.apply_signal(signal, frame, cfg, now, alert=False, why=why)
         if result.startswith(("opened", "reversed")):
             result = f"{result} — {call.note}"
             self._signals[symbol] = result
@@ -3103,6 +3148,18 @@ class StrategyEngine:
             )
             if small:
                 entry_block = f"{entry_block}; {small}" if entry_block else small
+        if flow_exit.entry_on(cfg):
+            # Executed volume (flow_exit.py): the real order's own side must have done the set % of the shares traded.
+            side = "LONG" if signal == "BULLISH" else "SHORT"
+            if getattr(cfg, "flip_orders", False):
+                side = "SHORT" if side == "LONG" else "LONG"
+            start, end = flow_exit.entry_span(
+                self._now().timestamp(), flow_exit.entry_window(cfg), self._exit_minutes(self._focus, cfg)
+            )
+            points = trade_flow.minutes(self._focus or "", self._tapes.get(self._focus), start, end)
+            flow = flow_exit.entry_refusal(points, side, flow_exit.entry_pct(cfg), (end - start) // 60)
+            if flow:
+                entry_block = f"{entry_block}; {flow}" if entry_block else flow
         if pressure_exit.entry_mode(cfg) != "OFF" and pressure_exit.from_most_active(
             trade_sources(cfg).get((self._focus or "").upper())
         ):
@@ -3218,6 +3275,14 @@ class StrategyEngine:
             done, text = exit_join.vote(pos.exit_votes, cfg, "MA_CROSS", now.timestamp(), candle_minutes(cfg))
             if not done:
                 return f"holding {pos.direction} — SMA cross noted; {text}"
+        if pos is not None and pos.signal_direction != want:
+            held = self._flow_hold(
+                cfg, (cfg.symbol or self._focus or "").upper(), pos,
+                turn_entry.EXIT_REASON if why == turn_entry.ENTRY_REASON else "MA_CROSS",
+            )
+            if held:
+                # Executed volume set to confirm the exits (flow_exit.py): the cross neither closes nor reverses.
+                return f"holding {pos.direction} — executed volume does not confirm the exit: {held}"
 
         exit_reason = turn_entry.EXIT_REASON if why == turn_entry.ENTRY_REASON else "MA_CROSS"
         if pos is not None and pos.signal_direction != want and recovery.on(cfg):
@@ -5817,6 +5882,70 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} buyers / sellers exit — {note}"
         await self._exit_now(cfg, self.ltp, pressure_exit.EXIT_REASON)
 
+    def _flow_hold(self, cfg: BotConfig, symbol: str, pos: OpenPosition | None, reason: str) -> str | None:
+        """Executed volume set to confirm the other exits (flow_exit.py, `flow_exit_mode` CONFIRM): why this exit is
+        held (the other side did too little of the shares traded), or None to let it close the trade."""
+        if pos is None or reason not in flow_exit.CONFIRM_REASONS or not flow_exit.confirms(cfg):
+            return None
+        tape = self._tapes.get(symbol)
+        if tape is None or len(tape) == 0 or "ts" not in tape.columns:
+            return None
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        found = flow_exit.confirm_span(
+            self._now().timestamp(), opened.timestamp(), flow_exit.window(cfg), self._exit_minutes(symbol, cfg)
+        )
+        if found is None:
+            return None
+        start, end = found
+        minutes = (end - start) // 60
+        hit, note = flow_exit.judge(trade_flow.minutes(symbol, tape, start, end), pos.direction, flow_exit.pct(cfg), minutes)
+        note = note.replace("; exit at ", "; need ")
+        if hit is None:
+            self._flow_note[symbol] = f"{note}; {reason} exit not held"
+            return None
+        self._flow_note[symbol] = f"{note}; {reason} exit {'confirmed' if hit else 'held'}"
+        return None if hit else note
+
+    async def _watch_flow_exit(self, cfg: BotConfig) -> None:
+        """Close once the other side did the set % of the shares traded at market over the window (flow_exit.py)."""
+        pos = self.position
+        if pos is None or not flow_exit.closes(cfg) or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other exits).
+            return
+        tape = self._tapes.get(symbol)
+        if tape is None or len(tape) == 0 or "ts" not in tape.columns:
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        now_ts = self._now().timestamp()
+        win = flow_exit.window(cfg)
+        found = flow_exit.span(now_ts, opened.timestamp(), win, self._exit_minutes(symbol, cfg))
+        if found is None:
+            return
+        start, end = found
+        if float(tape["ts"].iloc[-1]) < end - 60:
+            return  # the last closed minute is not in the tape yet: judged once it is
+        key = (opened.timestamp(), end)
+        if self._flow_seen.get(symbol) == key:
+            return
+        self._flow_seen[symbol] = key
+        minutes = (end - start) // 60
+        hit, note = flow_exit.judge(trade_flow.minutes(symbol, tape, start, end), pos.direction, flow_exit.pct(cfg), minutes)
+        if hit and flow_exit.loss_only(cfg):
+            sign = 1.0 if pos.direction == "LONG" else -1.0
+            if (self.ltp - pos.entry_price) * sign >= 0:
+                hit, note = False, f"{note}; not losing, so held"
+        if hit and flow_exit.book_agree(cfg):
+            agree, why = flow_exit.book_note(symbol, pos.direction, now_ts)
+            hit, note = agree, f"{note}; {why}"
+        self._flow_note[symbol] = note
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} executed volume exit — {note}"
+        await self._exit_now(cfg, self.ltp, flow_exit.EXIT_REASON)
+
     async def _watch_supertrend_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the Supertrend flips against the trade (supertrend.py)."""
         pos = self.position
@@ -5855,6 +5984,15 @@ class StrategyEngine:
                 self._signals[symbol] = f"{symbol} {reason} exit noted, holding {self.position.direction} — {text}"
                 return
             self._signals[symbol] = f"{symbol} {text}: closed on {reason}"
+        if gate and self.position is not None:
+            symbol = (cfg.symbol or self._focus or "").upper()
+            held = self._flow_hold(cfg, symbol, self.position, reason)
+            if held:
+                self._signals[symbol] = (
+                    f"{symbol} {reason} exit held, holding {self.position.direction} — executed volume does not "
+                    f"confirm it: {held}"
+                )
+                return
         async with self.lock:
             if self.position is None or self.inflight:
                 return
@@ -6741,6 +6879,7 @@ class StrategyEngine:
                         "smart_room": book.smart_room if book and book.smart else None,
                         "smart_note": smart_stop.describe(book.smart_info) if book and book.smart else None,
                         "pressure_note": self._pressure_note.get(symbol) if book else None,
+                        "flow_note": self._flow_note.get(symbol) if book else None,
                         "smart_resized_at": (book.smart_resized_at or None) if book and book.smart else None,
                         "smart_atr_pct": (book.smart_info or {}).get("atr_pct") if book and book.smart else None,
                         # Best price since the entry (the trail tracker; display only).
@@ -7328,7 +7467,18 @@ class StrategyEngine:
             "pivot_target": pivots.target_mode(cfg) if cfg is not None else "OFF",
             # Buyers' share of the waiting orders from the Most active scans (pressure_exit.series); display only.
             "pressure": self._pressure_points(view, candles),
+            # Executed buy / sell volume per 1-minute candle, estimated (trade_flow.py); display only.
+            "flow": self._flow_points(view, candles),
         }
+
+    def _flow_points(self, symbol: str, candles: list[dict]) -> list[dict]:
+        """Estimated shares bought / sold at market per minute over the candles on screen, up to the engine's clock."""
+        if not symbol or not candles:
+            return []
+        try:
+            return trade_flow.minutes(symbol, self._tapes.get(symbol), float(candles[0]["time"]), self._now().timestamp())
+        except Exception:  # noqa: BLE001
+            return []
 
     def _pressure_points(self, symbol: str, candles: list[dict]) -> list[dict]:
         """The stock's buyers % over the candles on screen, up to the engine's clock (a replay sees no later read)."""

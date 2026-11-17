@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import clsx from "clsx";
 import { Activity, ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download, Eye, FlaskConical, Flame, History, PlayCircle, Loader2, RefreshCw, Target } from "lucide-react";
 import { ActiveAcrossDays } from "@/components/Scalp/ActiveAcrossDays";
-import { api, type ActiveHistoryResponse, type ActiveMissed, type ActiveSort, type ActiveStock, type ActiveStocksResponse, type DeliveryRow } from "@/lib/api";
+import { api, usableShare, type ActiveHistoryResponse, type ActiveMissed, type ActiveSort, type ActiveStock, type ActiveStocksResponse, type DeliveryRow } from "@/lib/api";
 import { saveFile } from "@/lib/chartTable";
 import { FilterRow, NumberFilter, SelectFilter, TextFilter, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
@@ -239,7 +239,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
       .scalpActiveHistoryRun(runId)
       .then(
         (r) =>
-          live && setSaved({ id: r.id, as_of: r.as_of, total: r.total, failed: r.failed, missed: r.meta?.missed ?? null, rows: r.rows })
+          live && setSaved({ id: r.id, as_of: r.as_of, total: r.total, failed: r.failed, missed: r.meta?.missed ?? null, rows: r.rows.map((row) => ({ ...row, buy_share: usableShare(row.buy_share) })) })
       )
       .catch((e: unknown) => live && setError(e instanceof Error ? e.message : "Could not load that scan"));
     return () => {

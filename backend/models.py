@@ -520,6 +520,26 @@ class BotConfig(Base):
     # Most active stocks: OFF | CHECK (entries need their side still >= pressure_entry_pct) | AT_ARM (also enter at once).
     pressure_entry: Mapped[str | None] = mapped_column(String(8), nullable=True, default="OFF")
     pressure_entry_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=65.0)
+    # Candle-colour mode, Most active stocks: buyers / sellers at pressure_flip_pct % or more overrule the colour.
+    pressure_flip: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    pressure_flip_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=65.0)
+    # ... and the other side's share of the colour candle's executed volume (trade_flow.py), 0 = not checked.
+    pressure_flip_flow: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    # Executed volume exit (flow_exit.py): close once the other side did flow_exit_pct % of the shares traded at
+    # market over the last flow_exit_window minutes (0 = the exit candle); optionally only while losing, and only when
+    # the waiting orders agree. Per bot and per stock.
+    flow_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    flow_exit_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=60.0)
+    flow_exit_window: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
+    flow_exit_loss: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    flow_exit_book: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # EXIT = the executed volume closes the trade itself; CONFIRM = it only lets the other signal exits close (flow_exit.py).
+    flow_exit_mode: Mapped[str | None] = mapped_column(String(10), nullable=True, default="EXIT")
+    # Executed volume entry check (flow_exit.py): the order's own side did flow_entry_pct % of the shares traded over the
+    # last flow_entry_window minutes (0 = one exit candle's length). Per bot and per stock.
+    flow_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    flow_entry_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=55.0)
+    flow_entry_window: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
     # Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R.
     stop_plan: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     plan_be_r: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)

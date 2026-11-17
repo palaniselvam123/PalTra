@@ -30,6 +30,7 @@ KEYS: dict[str, tuple[str, ...]] = {
     "MACD": ("MACD_CROSS",),
     "CVD": ("CVD_DIVERGENCE",),
     "SLOW": ("SLOW_SMA_BREACH",),
+    "FLOW": ("FLOW_EXIT",),
 }
 LABELS: dict[str, str] = {
     "CROSS": "SMA cross",
@@ -47,6 +48,7 @@ LABELS: dict[str, str] = {
     "MACD": "MACD",
     "CVD": "cumulative delta",
     "SLOW": "slow SMA",
+    "FLOW": "executed volume",
 }
 DEFAULT_WITHIN = 3
 MAX_WITHIN = 20
