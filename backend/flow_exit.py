@@ -49,7 +49,8 @@ CONFIRM_REASONS = frozenset({
     "SMA9_BEND", "SMA9_DECEL", "COUNTER_CANDLES", "SMALL_CANDLE_EXIT", "EXIT_CANDLE_CROSS", "SUPERTREND",
     "BB_MIDDLE", "BB_TARGET", "EMA_CROSS", "MACD_CROSS", "CVD_DIVERGENCE", "SLOW_SMA_BREACH",
 })
-WINDOWS = (0, 1, 2, 3, 5, 10, 15)
+WINDOWS = (0, 1, 2, 3, 5, 10, 15)  # the ready-made choices on the Settings card
+MAX_WINDOW = 60  # a custom window: any whole number of minutes from 1 to this (0 = the exit candle)
 ENTRY_GRACE_SEC = 15       # an entry this close to its minute's open counts that minute as the trade's own
 
 
@@ -72,7 +73,7 @@ def window(cfg) -> int:
         value = int(DEFAULT_WINDOW if value is None else value)
     except (TypeError, ValueError):
         value = DEFAULT_WINDOW
-    return value if value in WINDOWS else DEFAULT_WINDOW
+    return value if 0 <= value <= MAX_WINDOW else DEFAULT_WINDOW
 
 
 def mode(cfg) -> str:
@@ -212,7 +213,7 @@ def entry_window(cfg) -> int:
         value = int(DEFAULT_WINDOW if value is None else value)
     except (TypeError, ValueError):
         value = DEFAULT_WINDOW
-    return value if value in WINDOWS else DEFAULT_WINDOW
+    return value if 0 <= value <= MAX_WINDOW else DEFAULT_WINDOW
 
 
 def entry_span(now_ts: float, win: int, exit_minutes: int) -> tuple[int, int]:

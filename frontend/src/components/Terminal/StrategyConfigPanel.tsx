@@ -488,13 +488,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     })(),
     flow_exit: Boolean(form.flow_exit),
     flow_exit_pct: Math.min(95, Math.max(50, Number(form.flow_exit_pct ?? 60) || 60)),
-    flow_exit_window: ([0, 1, 2, 3, 5, 10, 15].includes(Number(form.flow_exit_window)) ? Number(form.flow_exit_window) : 3) as SmaConfig["flow_exit_window"],
+    flow_exit_window: flowWindow(form.flow_exit_window),
     flow_exit_loss: Boolean(form.flow_exit_loss),
     flow_exit_book: Boolean(form.flow_exit_book),
     flow_exit_mode: String(form.flow_exit_mode ?? "EXIT").toUpperCase() === "CONFIRM" ? "CONFIRM" : "EXIT",
     flow_entry: Boolean(form.flow_entry),
     flow_entry_pct: Math.min(95, Math.max(50, Number(form.flow_entry_pct ?? 55) || 55)),
-    flow_entry_window: ([0, 1, 2, 3, 5, 10, 15].includes(Number(form.flow_entry_window)) ? Number(form.flow_entry_window) : 3) as SmaConfig["flow_entry_window"],
+    flow_entry_window: flowWindow(form.flow_entry_window),
     stop_plan: Boolean(form.stop_plan),
     decel_exit: Boolean(form.decel_exit),
     decel_lookback: Math.min(10, Math.max(1, Math.round(Number(form.decel_lookback ?? 2) || 2))),
@@ -5156,26 +5156,83 @@ function FlowEntry({
           className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
         />
         % of the shares traded in
-        <select
-          disabled={!on}
-          value={String(win)}
-          onChange={(e) => set("flow_entry_window", e.target.value)}
-          aria-label="Window"
-          className="min-h-11 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
-        >
-          {[1, 2, 3, 5, 10, 15].map((m) => (
-            <option key={m} value={m}>
-              the last {m} min
-            </option>
-          ))}
-          <option value={0}>the last exit candle</option>
-        </select>
+        <FlowWindowPick disabled={!on} value={win} candleLabel="the last exit candle" onChange={(v) => set("flow_entry_window", v)} />
       </div>
       <p className="mt-1 text-xs text-slate-400">
         Example at {shown}%, {win === 0 ? "the exit candle" : `${win} min`}: a buy signal while sellers did {Math.max(5, 100 - shown + 10)}% of the
         shares traded {win === 0 ? "in the last candle" : `in the last ${win} minutes`} is refused, even on a green cross.
       </p>
     </div>
+  );
+}
+
+const FLOW_WINDOWS = [1, 2, 3, 5, 10, 15];
+const FLOW_MAX_WINDOW = 60;
+
+/** The executed volume window as the API takes it: 0 (the exit candle) or 1-60 minutes, else the default 3. */
+function flowWindow(value: unknown): number {
+  const n = Math.round(Number(value));
+  return Number.isFinite(n) && n >= 0 && n <= FLOW_MAX_WINDOW ? n : 3;
+}
+
+/** The executed volume window: the ready-made minutes, the exit candle, or any number of minutes typed (1-60). */
+function FlowWindowPick({
+  value,
+  disabled,
+  candleLabel,
+  onChange,
+}: {
+  value: number;
+  disabled: boolean;
+  candleLabel: string;
+  onChange: (value: string) => void;
+}) {
+  const preset = value === 0 || FLOW_WINDOWS.includes(value);
+  const [custom, setCustom] = useState(!preset);
+  const showBox = custom || !preset;
+  return (
+    <>
+      <select
+        disabled={disabled}
+        value={showBox ? "custom" : String(value)}
+        onChange={(e) => {
+          if (e.target.value === "custom") {
+            setCustom(true);
+            if (value === 0 || FLOW_WINDOWS.includes(value)) onChange(String(value === 0 ? 4 : value));
+          } else {
+            setCustom(false);
+            onChange(e.target.value);
+          }
+        }}
+        aria-label="Window"
+        className="min-h-11 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+      >
+        {FLOW_WINDOWS.map((m) => (
+          <option key={m} value={m}>
+            the last {m} min
+          </option>
+        ))}
+        <option value={0}>{candleLabel}</option>
+        <option value="custom">custom minutes…</option>
+      </select>
+      {showBox && (
+        <span className="inline-flex items-center gap-1">
+          the last
+          <input
+            type="number"
+            min={1}
+            max={FLOW_MAX_WINDOW}
+            step={1}
+            disabled={disabled}
+            value={value || ""}
+            onChange={(e) => onChange(e.target.value)}
+            aria-label={`Window in minutes, 1 to ${FLOW_MAX_WINDOW}`}
+            className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+          />
+          min <NewTag id="flow-window-custom" />
+        </span>
+      )}
+    </>
   );
 }
 
@@ -5225,7 +5282,7 @@ function FlowExit({
           <input type="radio" className="mt-1" name="flow_exit_mode" checked={confirm} onChange={() => set("flow_exit_mode", "CONFIRM")} />
           <span>
             {isOwn("flow_exit_mode") && <OwnTag />}
-            <b className="text-slate-200">Use it to confirm the other exits</b>, like an entry check: a colour turn, counter
+            <b className="text-slate-200">Use it to confirm the other exits</b> <NewTag id="flow-confirm" />, like an entry check: a colour turn, counter
             candles, SMA cross, SMA 9 exit, Supertrend, Bollinger, EMA, MACD… closes only when the other side also did this
             much; otherwise the trade is held. Stops, targets and the square-off are never held.
           </span>
@@ -5245,20 +5302,7 @@ function FlowExit({
           className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
         />
         % of the shares traded in
-        <select
-          disabled={!on}
-          value={String(win)}
-          onChange={(e) => set("flow_exit_window", e.target.value)}
-          aria-label="Window"
-          className="min-h-11 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
-        >
-          {[1, 2, 3, 5, 10, 15].map((m) => (
-            <option key={m} value={m}>
-              the last {m} min
-            </option>
-          ))}
-          <option value={0}>the exit candle just closed</option>
-        </select>
+        <FlowWindowPick disabled={!on} value={win} candleLabel="the exit candle just closed" onChange={(v) => set("flow_exit_window", v)} />
       </div>
       {!confirm && (
       <>

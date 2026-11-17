@@ -33,7 +33,8 @@ def test_settings_are_read_safely():
     cfg = type("C", (), {})()
     assert not flow_exit.on(cfg) and flow_exit.pct(cfg) == 60.0 and flow_exit.window(cfg) == 3
     odd = type("C", (), {"flow_exit_pct": 120, "flow_exit_window": 4})()
-    assert flow_exit.pct(odd) == 95.0 and flow_exit.window(odd) == 3
+    assert flow_exit.pct(odd) == 95.0 and flow_exit.window(odd) == 4          # a custom window of 4 minutes
+    assert flow_exit.window(type("C", (), {"flow_exit_window": 61})()) == 3    # past MAX_WINDOW: the default
 
 
 def test_the_window_lies_wholly_after_the_entry():
@@ -94,7 +95,8 @@ def test_entry_settings_and_window():
     cfg = type("C", (), {})()
     assert not flow_exit.entry_on(cfg) and flow_exit.entry_pct(cfg) == 55.0 and flow_exit.entry_window(cfg) == 3
     odd = type("C", (), {"flow_entry_pct": 10, "flow_entry_window": 7})()
-    assert flow_exit.entry_pct(odd) == 50.0 and flow_exit.entry_window(odd) == 3
+    assert flow_exit.entry_pct(odd) == 50.0 and flow_exit.entry_window(odd) == 7
+    assert flow_exit.entry_window(type("C", (), {"flow_entry_window": -1})()) == 3
     assert flow_exit.entry_span(_ts(10, 3, 20), 3, 5) == (int(_ts(10, 0)), int(_ts(10, 3)))
     assert flow_exit.entry_span(_ts(10, 5, 2), 0, 5) == (int(_ts(10, 0)), int(_ts(10, 5)))
 
@@ -172,3 +174,11 @@ async def test_a_colour_turn_waits_for_the_executed_volume(db, mode, falling, he
         assert first["exit_reason"] != "COLOUR_TURN" and first["exit_time"].strftime("%H:%M") > "10:00"
     else:
         assert first["exit_reason"] == "COLOUR_TURN" and first["exit_time"].strftime("%H:%M") < "09:59"
+
+
+def test_custom_windows_are_accepted_by_the_settings_api():
+    from main import ConfigUpdate
+    assert ConfigUpdate(flow_exit_window=7, flow_entry_window=45).flow_entry_window == 45
+    with pytest.raises(Exception):
+        ConfigUpdate(flow_exit_window=61)
+    assert flow_exit.confirm_span(_ts(10, 20, 5), _ts(10, 0, 5), 7, 15) == (int(_ts(10, 13)), int(_ts(10, 20)))

@@ -235,7 +235,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`trade_flow.share` of the minutes in the colour candle just closed, `pressure_exit.flip_side(..., flow, flow_level)`);
   unknown never flips.
 - `backend/flow_exit.py` – **executed volume exit** (`flow_exit`, off by default; `flow_exit_pct` 60, 50-95;
-  `flow_exit_window` 3 = the last N closed 1-minute candles (1/2/3/5/10/15) or 0 = the exit candle just closed
+  `flow_exit_window` 3 = the last N closed 1-minute candles (1/2/3/5/10/15, or any custom 1-`MAX_WINDOW` 60 typed under "custom minutes…", `StrategyConfigPanel.FlowWindowPick`; the entry check's `flow_entry_window` too) or 0 = the exit candle just closed
   (`_exit_minutes`, from 09:15); `flow_exit_loss` only while losing; `flow_exit_book` the waiting orders must agree (the
   other side above 50 % in a Most active read at most `pressure_exit.MAX_AGE_SEC` old, `book_note`); per bot and per
   stock, PAPER and LIVE, replays too; any stock, not only Most active; Settings → 3. When to exit, under the buyers /
