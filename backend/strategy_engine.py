@@ -420,6 +420,7 @@ SNAPSHOT_FIELDS = (
     "pressure_exit", "pressure_exit_pct", "pressure_over_counter", "pressure_entry", "pressure_entry_pct",
     "pressure_flip", "pressure_flip_pct", "pressure_flip_flow",
     "flow_exit", "flow_exit_pct", "flow_exit_window", "flow_exit_loss", "flow_exit_book",
+    "flow_entry", "flow_entry_pct", "flow_entry_window",
     "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
@@ -3135,6 +3136,18 @@ class StrategyEngine:
             )
             if small:
                 entry_block = f"{entry_block}; {small}" if entry_block else small
+        if flow_exit.entry_on(cfg):
+            # Executed volume (flow_exit.py): the real order's own side must have done the set % of the shares traded.
+            side = "LONG" if signal == "BULLISH" else "SHORT"
+            if getattr(cfg, "flip_orders", False):
+                side = "SHORT" if side == "LONG" else "LONG"
+            start, end = flow_exit.entry_span(
+                self._now().timestamp(), flow_exit.entry_window(cfg), self._exit_minutes(self._focus, cfg)
+            )
+            points = trade_flow.minutes(self._focus or "", self._tapes.get(self._focus), start, end)
+            flow = flow_exit.entry_refusal(points, side, flow_exit.entry_pct(cfg), (end - start) // 60)
+            if flow:
+                entry_block = f"{entry_block}; {flow}" if entry_block else flow
         if pressure_exit.entry_mode(cfg) != "OFF" and pressure_exit.from_most_active(
             trade_sources(cfg).get((self._focus or "").upper())
         ):
