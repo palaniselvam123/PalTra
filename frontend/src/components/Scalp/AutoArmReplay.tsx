@@ -6,10 +6,12 @@ import { Bot, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from "@/components/Scalp/ScanLists";
 import { replayActive, smaApi, type ScalpAlerts } from "@/lib/smaApi";
-import { lastClosedWeekdays } from "@/lib/tradingDays";
+import { lastClosedWeekdays, todayInSession } from "@/lib/tradingDays";
 import { ResumePickRuns } from "@/components/Scalp/ResumePickRuns";
 
 const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
+// The longest range one replay run takes (replay.MAX_RANGE_DAYS).
+const MAX_SPAN = 45;
 const STEPS = [1, 2, 3, 5, 10, 15, 30];
 const SIZES = [1, 3, 5, 10, 15];
 const SPEEDS: { value: number; label: string }[] = [
@@ -53,8 +55,34 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
       .catch(() => undefined);
   }, []);
 
+  // 0 = today so far (the market is open): played up to the last closed minute, then squared off there.
+  const today = todayInSession();
+  // -1 = custom dates: From / To (weekdays in between are played; at most MAX_SPAN calendar days, as the server allows).
+  const [from, setFrom] = useState(() => lastClosedWeekdays(5)[0]);
+  const [to, setTo] = useState(() => todayInSession() ?? lastClosedWeekdays(1)[0]);
+  const latest = today ?? lastClosedWeekdays(1)[0];
   const run = async () => {
-    const range = lastClosedWeekdays(days);
+    const todayNow = todayInSession();
+    if (days === 0 && !todayNow) {
+      setNote({ ok: false, text: "Today's session is not on now: pick Last 1 trading day (after 15:30 it is today)." });
+      return;
+    }
+    if (days === -1) {
+      const span = (Date.parse(to) - Date.parse(from)) / 86_400_000;
+      if (!from || !to || !(span >= 0)) {
+        setNote({ ok: false, text: "Pick a From date on or before the To date." });
+        return;
+      }
+      if (span > MAX_SPAN) {
+        setNote({ ok: false, text: `At most ${MAX_SPAN} calendar days (about 30 trading days) in one run.` });
+        return;
+      }
+      if (to > (todayNow ?? lastClosedWeekdays(1)[0])) {
+        setNote({ ok: false, text: "The To date cannot be after the last day with candles (today only while the market is open, from 09:20)." });
+        return;
+      }
+    }
+    const range = days === -1 ? [from, to] : days === 0 ? [todayNow as string] : lastClosedWeekdays(days);
     setBusy(true);
     setNote(null);
     try {
@@ -136,15 +164,37 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
           </label>
         ) : null}
         <label className="flex flex-col gap-1">
-          Last
+          <span>
+            Last <NewTag id="autoarm-today" />
+          </span>
           <select value={days} onChange={(e) => setDays(Number(e.target.value))} className={select}>
+            {today || days === 0 ? (
+              <option value={0} title="Today's session up to the last minute that has closed; positions are squared off there.">
+                Today so far{today ? ` (${today.slice(8)} ${new Date(`${today}T00:00:00Z`).toLocaleString("en-IN", { month: "short", timeZone: "UTC" })})` : ""}
+              </option>
+            ) : null}
             {DAYS.map((d) => (
               <option key={d} value={d}>
                 {d} trading day{d === 1 ? "" : "s"}
               </option>
             ))}
+            <option value={-1}>Custom dates…</option>
           </select>
         </label>
+        {days === -1 ? (
+          <>
+            <label className="flex flex-col gap-1">
+              <span>
+                From <NewTag id="autoarm-dates" />
+              </span>
+              <input type="date" value={from} max={to || latest} onChange={(e) => setFrom(e.target.value)} className={select} />
+            </label>
+            <label className="flex flex-col gap-1">
+              To
+              <input type="date" value={to} min={from} max={latest} onChange={(e) => setTo(e.target.value)} className={select} />
+            </label>
+          </>
+        ) : null}
         <label className="flex flex-col gap-1">
           Arm from
           <select value={first} onChange={(e) => setFirst(e.target.value)} className={select}>
