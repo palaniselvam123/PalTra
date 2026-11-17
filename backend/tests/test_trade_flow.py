@@ -61,6 +61,17 @@ def test_minutes_use_the_recorded_seconds_else_the_candle(db):  # noqa: F811
     assert trade_flow.share([], "LONG") is None
 
 
+def test_a_forming_minute_is_never_kept():
+    # A replay's tape ends in the minute still forming: no volume yet at its first tick. Read again once that minute
+    # has closed (a later minute is on the tape), it must give the real numbers, not the blank of its first read.
+    forming = _tape([(100, 100, 100, 100, 500), (100, 100, 100, 100, 0)])
+    assert [p["time"] for p in trade_flow.minutes("ACME", forming, T0, T0 + 120)] == [T0]
+    closed = _tape([(100, 100, 100, 100, 500), (100, 101, 99.5, 101, 900), (101, 101, 101, 101, 0)])
+    points = trade_flow.minutes("ACME", closed, T0, T0 + 180)
+    assert [p["time"] for p in points] == [T0, T0 + 60]
+    assert points[1]["buy"] + points[1]["sell"] == 900
+
+
 def test_flip_needs_the_executed_volume_when_set():
     now = dt.datetime(2026, 11, 16, 10, 0, tzinfo=IST)
     pressure_exit.note_scan({"as_of": now.isoformat(), "rows": [

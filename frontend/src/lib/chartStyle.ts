@@ -33,7 +33,7 @@ export type LineLook = {
   style: Pattern;
 };
 
-export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "cvd" | "pressure" | "flow" | "pivots";
+export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "cvd" | "pressure" | "pressureSell" | "flow" | "flowSell" | "pivots";
 
 export type ChartStyle = Record<LineKey, LineLook> & {
   candleUp: string;
@@ -52,8 +52,10 @@ export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: 
   atr: { name: "ATR 14 (strip)", auto: "while the stop type is ATR" },
   rsi: { name: "RSI 14 (strip)", auto: "while the RSI check is ticked" },
   cvd: { name: "Cumulative delta (strip)", auto: "while the cumulative delta check or divergence exit is on" },
-  pressure: { name: "Buyers / sellers % (strip)", auto: "while a Most active scan has read the stock" },
-  flow: { name: "Executed buy % (strip, estimated)", auto: "with the buyers / sellers strip" },
+  pressure: { name: "Buyers waiting % (strip)", auto: "while a Most active scan has read the stock" },
+  pressureSell: { name: "Sellers waiting % (strip)", auto: "while a Most active scan has read the stock" },
+  flow: { name: "Buyers executed % (strip, estimated)", auto: "with the waiting lines" },
+  flowSell: { name: "Sellers executed % (strip, estimated)", auto: "with the waiting lines" },
   pivots: { name: "Pivot points (P, R1/S1, R2/S2)", auto: "while the pivot target is on", color2: "P" },
 };
 
@@ -70,8 +72,10 @@ export const DEFAULT_CHART_STYLE: ChartStyle = {
   atr: { show: "auto", color: "#A78BFA", width: 2, style: 0 },
   rsi: { show: "auto", color: "#F472B6", width: 2, style: 0 },
   cvd: { show: "auto", color: "#2DD4BF", width: 2, style: 0 },
-  pressure: { show: "auto", color: "#FB923C", width: 2, style: 0 },
-  flow: { show: "auto", color: "#38BDF8", width: 2, style: 2 },
+  pressure: { show: "auto", color: "#10B981", width: 2, style: 0 },
+  pressureSell: { show: "auto", color: "#F43F5E", width: 2, style: 0 },
+  flow: { show: "auto", color: "#6EE7B7", width: 2, style: 2 },
+  flowSell: { show: "auto", color: "#FDA4AF", width: 2, style: 2 },
   pivots: { show: "auto", color: "#EAB308", color2: "#94A3B8", width: 1, style: 2 },
 };
 

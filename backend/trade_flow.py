@@ -23,7 +23,8 @@ import pandas as pd
 from indicators import derive_minute_volume
 import tick_store
 
-# Finished minutes are kept, so a chart refresh only reads the seconds of the minute still forming.
+# Finished minutes are kept, so a chart refresh only reads the seconds of the minute still forming. A minute is
+# finished once a later minute is on the tape and FINAL_AFTER_SEC have passed.
 _CACHE: dict[tuple[str, int], dict | None] = {}
 _CACHE_MAX = 60_000
 # A minute is final once its seconds have been flushed (tick_store.FLUSH_EVERY_SEC) after its end.
@@ -92,6 +93,7 @@ def minutes(symbol: str, tape: pd.DataFrame | None, start: float, end: float) ->
         for sec, price in seconds:
             by_minute.setdefault(int(sec) - int(sec) % 60, []).append([sec, price])
         now = time.time()
+        last_ts = int(max(ts_all[~pd.isna(ts_all)])) if len(ts_all) else 0
         for t, o, h, low, c in zip(
             rows["ts"].astype("int64").tolist(), rows["open"].tolist(), rows["high"].tolist(),
             rows["low"].tolist(), rows["close"].tolist(),
@@ -108,7 +110,10 @@ def minutes(symbol: str, tape: pd.DataFrame | None, start: float, end: float) ->
                 buy = round(float(vol) * got)
                 point = {"time": t, "buy": int(buy), "sell": int(round(float(vol)) - buy), "src": src}
             out[t] = point
-            if t + FINAL_AFTER_SEC < now:
+            # Final only once a later minute is on the tape as well as by the clock: a replay's tape ends in the minute
+            # still forming (part of its volume, a price on its way), which the wall clock always calls finished, so
+            # it used to be kept with those partial numbers (often no volume yet = a blank) for good.
+            if t < last_ts and t + FINAL_AFTER_SEC < now:
                 if len(_CACHE) > _CACHE_MAX:
                     _CACHE.clear()
                 _CACHE[(name, t)] = point
