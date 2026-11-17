@@ -6,7 +6,7 @@ import { Bot, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from "@/components/Scalp/ScanLists";
 import { replayActive, smaApi, type ScalpAlerts } from "@/lib/smaApi";
-import { lastClosedWeekdays } from "@/lib/tradingDays";
+import { lastClosedWeekdays, todayInSession } from "@/lib/tradingDays";
 import { ResumePickRuns } from "@/components/Scalp/ResumePickRuns";
 
 const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
@@ -53,8 +53,15 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
       .catch(() => undefined);
   }, []);
 
+  // 0 = today so far (the market is open): played up to the last closed minute, then squared off there.
+  const today = todayInSession();
   const run = async () => {
-    const range = lastClosedWeekdays(days);
+    const todayNow = todayInSession();
+    if (days === 0 && !todayNow) {
+      setNote({ ok: false, text: "Today's session is not on now: pick Last 1 trading day (after 15:30 it is today)." });
+      return;
+    }
+    const range = days === 0 ? [todayNow as string] : lastClosedWeekdays(days);
     setBusy(true);
     setNote(null);
     try {
@@ -136,8 +143,15 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
           </label>
         ) : null}
         <label className="flex flex-col gap-1">
-          Last
+          <span>
+            Last <NewTag id="autoarm-today" />
+          </span>
           <select value={days} onChange={(e) => setDays(Number(e.target.value))} className={select}>
+            {today || days === 0 ? (
+              <option value={0} title="Today's session up to the last minute that has closed; positions are squared off there.">
+                Today so far{today ? ` (${today.slice(8)} ${new Date(`${today}T00:00:00Z`).toLocaleString("en-IN", { month: "short", timeZone: "UTC" })})` : ""}
+              </option>
+            ) : null}
             {DAYS.map((d) => (
               <option key={d} value={d}>
                 {d} trading day{d === 1 ? "" : "s"}
