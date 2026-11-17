@@ -5,6 +5,7 @@ import { ExternalLink, FlaskConical, Loader2, Power, RefreshCw, Rocket } from "l
 import { useCallback, useEffect, useState } from "react";
 import { api, type ServerRole } from "@/lib/api";
 import { smaApi, type BacktestServerStatus } from "@/lib/smaApi";
+import { NewTag } from "@/components/ui/NewTag";
 
 const STOP_CHOICES = ["15:30", "15:45", "16:00", "16:30", "17:00", "18:00"];
 const IDLE_CHOICES = [10, 15, 30, 60, 120, 240];
@@ -100,6 +101,16 @@ export function BacktestServerBar() {
         ; nothing here sends an order. Settings and armed stocks are copied from the desk when you press Sync from desk
         {" "}(or at every start, if ticked below); the scanner&apos;s Arm can also arm stocks here.
       </p>
+      {st?.boot?.note || st?.resumed?.length ? (
+        <p className="text-xs text-slate-300" title="Why this server last started, and what happened to a backtest that was playing then.">
+          <span className="font-semibold text-slate-200">Last start{st?.boot?.at ? ` ${st.boot.at.slice(11, 16)}` : ""}:</span>{" "}
+          <span className={st?.boot?.kind === "restart" ? "text-amber-300" : undefined}>{st?.boot?.note}</span>
+          {(st?.resumed ?? []).map((line) => (
+            <span key={line} className="text-emerald-300"> {line}</span>
+          ))}{" "}
+          <NewTag id="backtest-auto-resume" link={false} />
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-400">
         <span>
           Settings copied {st ? ago(st.synced_at) : "…"}

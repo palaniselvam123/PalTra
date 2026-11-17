@@ -1978,6 +1978,14 @@ spinning top), body and range) / Matched / Call columns
   which copies each run the desk lacks (`find` by kind and time) with `save_copy` + `save_check`, meta `server:
   backtest`. The Scalp History tab's "Pull from backtest server" button (shown on the desk when `/api/role` has
   `backtest_url` and `backtest_link`) calls it for the last 30 days and reloads the list.
+  **Backtests carry on after a restart** (owner's case: "Can't reach the trading engine" mid-backtest, each merge to `main`
+  re-deploys this server): at boot `close_orphan_replay_rows(interrupted=True)` lists the runs it found playing
+  (`replay.cut_short_at_boot`) and `main._auto_resume_replays` resumes each `INTERRUPTED` one on its own bot's player at full
+  speed about 20 s later (`ReplaySession.resume`: the unfinished day replays, the result is as if it never stopped), at most
+  `backtest_server.AUTO_RESUME_MAX` (3) times per run (`take_auto_resume`, counted in `backtest_server.json`, so a run that
+  itself brings the server down cannot loop); `BACKTEST_AUTO_RESUME=off` turns it off; a run stopped by hand is left alone.
+  `stop_now` saves `last_stop` and `note_boot` reads it once at boot, so the status carries `boot` (kind `idle` = its own
+  stop | `restart` = a deploy or a crash), `auto_resume` and `resumed`; the bar's "Last start …" line shows them.
   Terminal `GET /api/backtest/status`, `POST /api/backtest/sync|stop[?force=true]`, `PUT /api/backtest/idle`; UI
   `components/Terminal/BacktestServerBar.tsx` (on the desk: a link when `BACKTEST_URL` is set). **Arms the desk from its Scalp
   page**: with `SCANNER_LINK_TOKEN` set here too (`/api/role` `desk_arm`), the Arm / Arm ticked dialogs have a Main desk /

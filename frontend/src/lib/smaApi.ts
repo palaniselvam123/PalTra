@@ -2709,6 +2709,11 @@ export type BacktestServerStatus = {
   stop_at?: string;
   after_hours?: boolean;
   up_sec: number;
+  /** Why this server last started: its own idle stop, or a restart that cut it off (a deploy or a crash). */
+  boot?: { kind?: "idle" | "restart"; note?: string; at?: string };
+  /** Backtests a restart cut short are carried on by themselves; what happened to them at this start. */
+  auto_resume?: boolean;
+  resumed?: string[];
 };
 
 /** A named copy of a desk's strategy settings, or one automatic snapshot of a Save (strategy_presets.py). */

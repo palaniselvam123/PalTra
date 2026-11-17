@@ -108,6 +108,7 @@ from chop_scan import ChopScanner
 from cross_scan import CrossScanner, MAX_SYMBOLS as CROSS_SCAN_MAX
 from stall_tracer import tracer as stall_tracer
 import deep_health as deep_health_mod
+import replay as replay_mod
 from replay import (
     SPEEDS,
     ReplaySession,
@@ -465,6 +466,10 @@ def _boot_backtest_server() -> asyncio.Task:
         ensure_bot_config(eng.bot_id)
         bots_mod.register(eng)
     engine.broker.set_mode("PAPER")
+    try:
+        backtest_server.note_boot()
+    except Exception:  # noqa: BLE001
+        logging.getLogger("sma.backtest").exception("boot note not written")
     # A scan pass (on demand, its own Groww login) keeps the machine awake like a playing replay.
     backtest_server.add_busy_check(
         lambda: any(s.snapshot().get("running") for s in (cross_scanner, chop_scanner, morning_scanner, high52_scanner, carry_scanner, turn_scanner, first_candle_scanner))
@@ -484,7 +489,45 @@ def _boot_backtest_server() -> asyncio.Task:
     scan_arm_runner.start_loop(_scan_arm_scheduled, _scan_arm_can_scan)
     _start_trend_picks_loop()
     _task = asyncio.create_task(backtest_server.run(import_bot_settings, lambda: replays))
+    if backtest_server.auto_resume_on() and replay_mod.cut_short_at_boot:
+        global _auto_resume_task
+        _auto_resume_task = asyncio.create_task(_auto_resume_replays(list(replay_mod.cut_short_at_boot)))
     return _task
+
+
+_auto_resume_task: asyncio.Task | None = None
+AUTO_RESUME_SPEED = 300
+auto_resume_notes: list[str] = []
+
+
+async def _auto_resume_replays(run_ids: list[int], wait: float = 20.0) -> None:
+    """Backtest server: carry on by itself the backtests a restart (a deploy, a crash) cut short, each on its own
+    bot's player at full speed, from the first day it had not finished (ReplaySession.resume: the same result as
+    if it never stopped). At most backtest_server.AUTO_RESUME_MAX times per run. Practice money; no order path."""
+    await asyncio.sleep(wait)  # the start-up copy of the settings and the Groww session first
+    for run_id in run_ids:
+        try:
+            found = {r["id"]: r for r in await asyncio.to_thread(resumable_runs, None)}.get(run_id)
+            if found is None or found["status"] != "INTERRUPTED":
+                continue
+            bot = int(found["bot"])
+            session = _replay_for(bot)
+            if session.active:
+                continue
+            if not backtest_server.take_auto_resume(run_id):
+                auto_resume_notes.append(f"Run #{run_id}: not resumed again (already resumed {backtest_server.AUTO_RESUME_MAX} times).")
+                continue
+            if not engine.broker.token:
+                engine.broker.adopt_saved_session()
+            if not engine.broker.token:
+                auto_resume_notes.append(f"Run #{run_id}: not resumed, no Groww session yet.")
+                continue
+            await session.resume(engine.broker, run_id, AUTO_RESUME_SPEED)
+            auto_resume_notes.append(f"Run #{run_id} (Bot {bot}) resumed by itself after the restart.")
+            logging.getLogger("sma.backtest").warning("resumed run #%s on bot %s after a restart", run_id, bot)
+        except Exception as exc:  # noqa: BLE001
+            auto_resume_notes.append(f"Run #{run_id}: could not resume ({exc}).")
+            logging.getLogger("sma.backtest").warning("auto-resume of run #%s failed: %s", run_id, exc)
 
 
 _backtest_bots_on = False
@@ -2270,7 +2313,7 @@ def _backtest_only() -> None:
 @app.get("/api/backtest/status")
 async def backtest_status():
     _backtest_only()
-    return backtest_server.status(replays)
+    return {**backtest_server.status(replays), "auto_resume": backtest_server.auto_resume_on(), "resumed": auto_resume_notes[-5:]}
 
 
 @app.post("/api/backtest/sync")

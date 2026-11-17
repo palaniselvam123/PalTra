@@ -313,6 +313,8 @@ export const FEATURES: Feature[] = [
     purpose: "Chart links on each backtest stock and a By stock list you can fold away." },
   { id: "pressure-entry", area: "settings", added: "2026-11-16", pr: 446, href: S("sma-pressure-entry"), where: "Settings → Strategy → 1. When to enter → Most active stocks: when to enter", title: "Most active stocks: enter only while buyers / sellers hold",
     purpose: "A stock armed from Most active is entered only while its buyers (a buy) or sellers (a sell) still hold your %, or at once as soon as it is armed, so the trade does not go in after the demand has gone." },
+  { id: "backtest-auto-resume", area: "terminal", added: "2026-11-17", pr: 456, href: TERM, where: "Backtest server → the bar under the header → Last start", title: "Backtests carry on by themselves after a restart",
+    purpose: "On the backtest server a backtest cut short by a restart (a deploy or a crash) now resumes by itself from the day it had reached, and the bar says why the server last started." },
   { id: "autoarm-dates", area: "trend", added: "2026-11-17", pr: 455, href: "/scalp/#backtest", where: "Scalp → Backtest → Auto-arm replay → Last → Custom dates…", title: "Auto-arm replay on dates you pick",
     purpose: "Pick a From and To date for the auto-arm replay instead of the last N trading days (up to 45 calendar days; weekends and holidays are skipped). Today counts while the market is open." },
   { id: "autoarm-today", area: "trend", added: "2026-11-17", pr: 455, href: "/scalp/#backtest", where: "Scalp → Backtest → Auto-arm replay → Last → Today so far", title: "Auto-arm replay of today, during the market",

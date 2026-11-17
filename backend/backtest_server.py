@@ -172,6 +172,46 @@ def set_auto_sync(on: bool) -> None:
     _write_file(auto_sync=bool(on))
 
 
+# A backtest cut short by a restart is carried on by itself, at most this many times per run (so a run that
+# itself brings the server down cannot restart it for ever). BACKTEST_AUTO_RESUME=off turns it off.
+AUTO_RESUME_MAX = 3
+
+# Why this process started (read once at boot): {"kind": "idle" | "restart", "note": plain words, "at": boot time}.
+_boot: dict = {}
+
+
+def note_boot() -> dict:
+    """Called once at boot: was the last stop this server's own (idle), or was it cut off (a deploy or a crash)?"""
+    last = _read_file().get("last_stop")
+    from groww_client import IST
+
+    now = dt.datetime.now(IST).isoformat(timespec="seconds")
+    if isinstance(last, dict) and last.get("reason"):
+        _boot.update(kind="idle", note=f"Stopped itself at {str(last.get('at', ''))[11:16]}: {last['reason']}", at=now)
+        _write_file(last_stop=None)
+    else:
+        _boot.update(kind="restart", note="The server was restarted without stopping itself (a deploy, or a crash such as running out of memory).", at=now)
+    return dict(_boot)
+
+
+def auto_resume_on() -> bool:
+    return os.environ.get("BACKTEST_AUTO_RESUME", "on").lower() != "off"
+
+
+def take_auto_resume(run_id: int) -> bool:
+    """True when this run may be resumed by itself once more (and counts it)."""
+    counts = _read_file().get("auto_resumed")
+    counts = dict(counts) if isinstance(counts, dict) else {}
+    used = int(counts.get(str(int(run_id)), 0) or 0)
+    if used >= AUTO_RESUME_MAX:
+        return False
+    counts[str(int(run_id))] = used + 1
+    # Only the newest runs are kept.
+    keep = sorted(counts, key=lambda k: int(k))[-50:]
+    _write_file(auto_resumed={k: counts[k] for k in keep})
+    return True
+
+
 def market_hours_only() -> bool:
     return bool(_read_file().get("market_hours_only", False))
 
@@ -286,6 +326,13 @@ def stop_now(reason: str) -> None:
         return
     state.stopping = True
     log.warning("backtest server stopping: %s", reason)
+    try:
+        # Kept for the next start, which then knows this was its own clean stop and not a deploy or a crash.
+        from groww_client import IST
+
+        _write_file(last_stop={"reason": reason, "at": dt.datetime.now(IST).isoformat(timespec="seconds")})
+    except Exception:  # noqa: BLE001
+        pass
     signal.raise_signal(signal.SIGTERM)
 
 
@@ -416,6 +463,7 @@ def status(replays: dict) -> dict:
         "scanner_armed": sum(len(v) for v in scanner_armed().values()),
         "auto_sync": auto_sync(),
         "up_sec": round(time.monotonic() - state.started),
+        "boot": dict(_boot),
     }
 
 
