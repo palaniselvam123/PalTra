@@ -57,6 +57,7 @@ from indicators import (
     sma_gap_pct,
     sma_gap_signed,
 )
+from candle_patterns import colour_count as _colour_count, colour_min_body as _colour_min_body
 from candle_patterns import closes_bucket, colour_call, pattern_call, per_candle, setting as pattern_setting, uses_colour, uses_nth, uses_patterns
 import nth_candle
 from candles import bucket_start, candle_minutes, last_prices, resample
@@ -1080,6 +1081,10 @@ def chart_filters(cfg) -> dict:
         "entry_cutoff_time": getattr(cfg, "entry_cutoff_time", None) or "15:00",
         "square_off_time": getattr(cfg, "square_off_time", None) or "15:15",
         "entry_mode": (getattr(cfg, "entry_mode", None) or "SMA").upper(),
+        # Candle colour / pattern mode: the candle size read and the run / body rules (the "why" line says them).
+        "pattern_tf": int(pattern_setting(cfg, "pattern_tf") or 1),
+        "colour_count": _colour_count(cfg),
+        "colour_min_body": _colour_min_body(cfg),
         "use_gap_mode": bool(getattr(cfg, "use_gap_mode", False)),
         # Always in a trade (always_in.py): the chart's "why" line says how a flat stock is entered.
         "always_in": always_in.enabled(cfg),
