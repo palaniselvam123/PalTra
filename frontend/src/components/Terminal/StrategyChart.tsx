@@ -471,6 +471,38 @@ function hhmmToMinutes(s?: string): number | null {
  * filters refused (the bot's own reason), a cross outside entry hours, or simply no cross,
  * with how long the SMAs have been on this side and what the ticked checks would say.
  */
+/** The "why" line in candle-colour mode: the colour candle, when the bot reads it and orders, and why none followed. */
+function colourWhy(c: Candle, next: Candle | undefined, markers: ChartPayload["markers"], filters: ChartFilters, bar: number): string {
+  const tf = filters.pattern_tf ?? 1;
+  const count = Math.max(1, filters.colour_count ?? 1);
+  const floor = filters.colour_min_body ?? 0;
+  const end = c.time + bar * 60;
+  const body = c.close ? (Math.abs(c.close - c.open) / c.close) * 100 : 0;
+  const colour = c.close > c.open ? "green" : c.close < c.open ? "red" : "flat (a doji)";
+  const small = floor > 0 && body < floor;
+  const closeMins = istMinutes(end);
+  const cutoffText = filters.entry_cutoff_time ?? "15:00";
+  const cutoff = hhmmToMinutes(cutoffText) ?? 15 * 60;
+  const parts: string[] = [];
+  if (bar !== tf) parts.push(`The bot reads ${tf}-min colour candles (set the chart to ${tf} min to see the ones it reads).`);
+  parts.push(
+    `Candle colour mode: this candle closed ${colour} at ${istClock(end)} (body ${body.toFixed(2)}%)` +
+      (small ? `, under the ${floor}% smallest body, so it counts as no colour` : "") +
+      `. The bot reads a candle only once it has closed and orders at the start of the next one (never before 09:20)` +
+      (count > 1 ? `, and it needs ${count} candles of one colour in a row` : "") +
+      ".",
+  );
+  const filledNext = next && markers.some((m) => m.kind === "ENTRY" && m.time >= next.time && m.time < next.time + bar * 60);
+  if (filledNext) parts.push("The entry on the next candle came from it.");
+  else if (closeMins >= cutoff) parts.push(`No order: it closed after the entry cut-off (${cutoffText}).`);
+  else if (colour.startsWith("flat") || small) parts.push("No order: no colour to follow.");
+  else
+    parts.push(
+      `No order followed it: ${count > 1 ? `the run of ${count} was not complete, ` : ""}an entry check said no (the bot's signal line says which), the stock was not armed yet, or the bot was not running.`,
+    );
+  return parts.join(" ");
+}
+
 function whyNoTrade(p: {
   rows: Candle[];
   i: number;
@@ -513,6 +545,7 @@ function whyNoTrade(p: {
   const refused = blocked.find((b) => within(b.time));
   if (refused) return `${refused.direction === "LONG" ? "Buy" : "Sell"} cross here, refused: ${refused.reason}.`;
   if (p.forming) return "This candle is still forming: the bot judges it only when it closes.";
+  if (filters?.entry_mode === "COLOUR") return colourWhy(c, rows[i + 1], markers, filters, bar);
   const sideOf = (r?: Candle) => (r && r.sma9 != null && r.sma21 != null ? Math.sign(r.sma9 - r.sma21) : 0);
   const side = sideOf(c);
   const prevSide = sideOf(rows[i - 1]);

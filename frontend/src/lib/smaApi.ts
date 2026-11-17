@@ -1806,6 +1806,10 @@ export type ChartFilters = {
   entry_cutoff_time?: string;
   square_off_time?: string;
   entry_mode?: EntryMode;
+  /** Candle colour / pattern mode: the candle size the bot reads, candles in a row and the smallest body (%). */
+  pattern_tf?: number;
+  colour_count?: number;
+  colour_min_body?: number;
   use_gap_mode?: boolean;
   /** Always in a trade (always_in.py) and its reverse-after-a-loss option, for the chart's "why" line. */
   always_in?: boolean;
