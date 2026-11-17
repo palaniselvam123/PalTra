@@ -107,6 +107,7 @@ import fade_unarm
 import pivots
 import pressure_exit
 import trade_flow
+import flow_exit
 import breakout
 import review
 import paper_wallet
@@ -418,6 +419,7 @@ SNAPSHOT_FIELDS = (
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
     "pressure_exit", "pressure_exit_pct", "pressure_over_counter", "pressure_entry", "pressure_entry_pct",
     "pressure_flip", "pressure_flip_pct", "pressure_flip_flow",
+    "flow_exit", "flow_exit_pct", "flow_exit_window", "flow_exit_loss", "flow_exit_book",
     "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
@@ -1374,6 +1376,9 @@ class StrategyEngine:
         self._pivot_cache: dict[tuple[str, dt.date], dict] = {}
         # Last note of the buyers / sellers fade exit per stock (pressure_exit.py), so the signal line is written once.
         self._pressure_note: dict[str, str] = {}
+        # Executed volume exit (flow_exit.py): the last window judged per stock (entry time, window end) and its reading.
+        self._flow_seen: dict[str, tuple] = {}
+        self._flow_note: dict[str, str] = {}
         # Most active entry at once (pressure_exit.entry_mode AT_ARM): symbol -> the IST day it was entered / refused.
         self._pe_done: dict[str, dt.date] = {}
         self._pe_note: dict[str, str] = {}
@@ -2019,6 +2024,7 @@ class StrategyEngine:
         await self._watch_gap_fade(symbol_cfg)
         await self._watch_pivot_target(symbol_cfg)
         await self._watch_pressure_fade(symbol_cfg)
+        await self._watch_flow_exit(symbol_cfg)
 
     def _held_error(self, symbol: str, exc: Exception) -> None:
         text = f"{symbol}: {exc}"
@@ -5843,6 +5849,46 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} buyers / sellers exit — {note}"
         await self._exit_now(cfg, self.ltp, pressure_exit.EXIT_REASON)
 
+    async def _watch_flow_exit(self, cfg: BotConfig) -> None:
+        """Close once the other side did the set % of the shares traded at market over the window (flow_exit.py)."""
+        pos = self.position
+        if pos is None or not flow_exit.on(cfg) or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other exits).
+            return
+        tape = self._tapes.get(symbol)
+        if tape is None or len(tape) == 0 or "ts" not in tape.columns:
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        now_ts = self._now().timestamp()
+        win = flow_exit.window(cfg)
+        found = flow_exit.span(now_ts, opened.timestamp(), win, self._exit_minutes(symbol, cfg))
+        if found is None:
+            return
+        start, end = found
+        if float(tape["ts"].iloc[-1]) < end - 60:
+            return  # the last closed minute is not in the tape yet: judged once it is
+        key = (opened.timestamp(), end)
+        if self._flow_seen.get(symbol) == key:
+            return
+        self._flow_seen[symbol] = key
+        minutes = (end - start) // 60
+        hit, note = flow_exit.judge(trade_flow.minutes(symbol, tape, start, end), pos.direction, flow_exit.pct(cfg), minutes)
+        if hit and flow_exit.loss_only(cfg):
+            sign = 1.0 if pos.direction == "LONG" else -1.0
+            if (self.ltp - pos.entry_price) * sign >= 0:
+                hit, note = False, f"{note}; not losing, so held"
+        if hit and flow_exit.book_agree(cfg):
+            agree, why = flow_exit.book_note(symbol, pos.direction, now_ts)
+            hit, note = agree, f"{note}; {why}"
+        self._flow_note[symbol] = note
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} executed volume exit — {note}"
+        await self._exit_now(cfg, self.ltp, flow_exit.EXIT_REASON)
+
     async def _watch_supertrend_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the Supertrend flips against the trade (supertrend.py)."""
         pos = self.position
@@ -6767,6 +6813,7 @@ class StrategyEngine:
                         "smart_room": book.smart_room if book and book.smart else None,
                         "smart_note": smart_stop.describe(book.smart_info) if book and book.smart else None,
                         "pressure_note": self._pressure_note.get(symbol) if book else None,
+                        "flow_note": self._flow_note.get(symbol) if book else None,
                         "smart_resized_at": (book.smart_resized_at or None) if book and book.smart else None,
                         "smart_atr_pct": (book.smart_info or {}).get("atr_pct") if book and book.smart else None,
                         # Best price since the entry (the trail tracker; display only).

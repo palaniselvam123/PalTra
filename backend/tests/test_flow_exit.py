@@ -1,0 +1,88 @@
+"""Executed volume exit (flow_exit.py): close once the other side did the set % of the shares traded at market."""
+from __future__ import annotations
+
+import datetime as dt
+
+import pandas as pd
+import pytest
+
+import flow_exit
+import pressure_exit
+import tick_store
+import trade_flow
+from strategy_engine import IST
+from tests.test_gap_mode import db  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def _clean():
+    trade_flow.reset()
+    pressure_exit.reset()
+    tick_store.take()
+    yield
+    trade_flow.reset()
+    pressure_exit.reset()
+    tick_store.take()
+
+
+def _ts(h, m, s=0):
+    return dt.datetime(2026, 11, 16, h, m, s, tzinfo=IST).timestamp()
+
+
+def test_settings_are_read_safely():
+    cfg = type("C", (), {})()
+    assert not flow_exit.on(cfg) and flow_exit.pct(cfg) == 60.0 and flow_exit.window(cfg) == 3
+    odd = type("C", (), {"flow_exit_pct": 120, "flow_exit_window": 4})()
+    assert flow_exit.pct(odd) == 95.0 and flow_exit.window(odd) == 3
+
+
+def test_the_window_lies_wholly_after_the_entry():
+    entry = _ts(10, 0, 5)                                    # inside the first 15 s: 10:00 counts
+    assert flow_exit.first_minute(entry) == int(_ts(10, 0))
+    assert flow_exit.first_minute(_ts(10, 0, 40)) == int(_ts(10, 1))
+    assert flow_exit.span(_ts(10, 2, 30), entry, 3, 5) is None          # only 2 minutes since the entry
+    assert flow_exit.span(_ts(10, 3, 10), entry, 3, 5) == (int(_ts(10, 0)), int(_ts(10, 3)))
+    # Window 0: the exit candle (5 min from 09:15) that just closed, only when it opened after the entry.
+    assert flow_exit.span(_ts(10, 4, 10), entry, 0, 5) is None          # 10:04 is not a 5-minute close
+    assert flow_exit.span(_ts(10, 5, 10), entry, 0, 5) == (int(_ts(10, 0)), int(_ts(10, 5)))
+    assert flow_exit.span(_ts(10, 5, 10), _ts(10, 1), 0, 5) is None     # that candle began before the entry
+
+
+def test_judge_reads_the_other_side_share():
+    points = [{"time": 0, "buy": 300, "sell": 700, "src": "T"}, {"time": 60, "buy": 500, "sell": 500, "src": "C"}]
+    hit, note = flow_exit.judge(points, "LONG", 60, 2)
+    assert hit and "sellers did 60% of the shares traded in 2 min (ticks + candles; exit at 60%)" in note
+    hit, _ = flow_exit.judge(points, "SHORT", 60, 2)                    # buyers did 40%
+    assert hit is False
+    assert flow_exit.judge([], "LONG", 60, 3)[0] is None               # no volume: nothing to read
+
+
+def test_waiting_orders_must_agree_when_asked():
+    now = _ts(11, 0)
+    assert flow_exit.book_note("ACME", "LONG", now)[0] is False         # no read
+    pressure_exit.note_scan({"as_of": "", "rows": [{"symbol": "ACME", "buy_share": 0.35,
+                                                    "read_at": dt.datetime.fromtimestamp(now - 120, IST).isoformat()}]})
+    agree, note = flow_exit.book_note("ACME", "LONG", now)
+    assert agree and "sellers hold 65% of the waiting orders" in note
+    assert flow_exit.book_note("ACME", "SHORT", now)[0] is False        # buyers hold only 35%
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("on,want", [(False, "COLOUR_TURN"), (True, "FLOW_EXIT")])
+async def test_a_green_run_sold_into_closes_on_the_executed_volume(db, on, want):  # noqa: F811
+    from sma_research.replayer import replay_symbol
+    from tests.test_candle_patterns import DAY, DAY0, _quiet, _rows
+    from tests.test_gap_mode import _settings
+
+    # 09:45 green buys at 09:46; the candles stay green to 09:55, but from 09:46 the seconds tick down (sellers).
+    greens = [(995.0 + 0.1 * i, 995.1 + 0.1 * i) for i in range(10)]
+    start = int(dt.datetime.combine(DAY, dt.time(9, 46), tzinfo=IST).timestamp())
+    for minute in range(6):
+        for i, price in enumerate([996.0, 995.9, 995.8, 995.7, 995.6]):
+            tick_store.add("FLW", start + minute * 60 + i * 10, price - 0.05 * minute)
+    frame = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(30) + greens + [(996.0, 995.0)] + _quiet(334, 995.0)))
+    trades = await replay_symbol(frame, "FLW", [DAY], _settings(
+        db, entry_mode="COLOUR", pattern_tf=1, qty=1, use_stop=False, flow_exit=on, flow_exit_pct=60, flow_exit_window=3))
+    assert trades[0]["direction"] == "LONG" and trades[0]["exit_reason"] == want
+    if on:
+        assert trades[0]["exit_time"].strftime("%H:%M") < "09:56"
