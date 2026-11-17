@@ -44,6 +44,7 @@ import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
 import backtest_compare
 import backtest_detail
+import live_book
 import fast_bot
 import tsl_calc as tsl_calc_mod
 import regime_study
@@ -3393,6 +3394,17 @@ async def replay_compare_trades(runs: str, base: int | None = None, basis: Liter
 async def replay_compare_stock(runs: str, symbol: str, day: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$")):
     """One stock on one replayed day in each run: P&L minute by minute, its trades, and the buyers % reads. Read-only."""
     return await asyncio.to_thread(backtest_detail.stock_day, _run_ids(runs), symbol, day)
+
+
+@app.get("/api/replay/compare/live-days")
+async def replay_compare_live_days(bot: int = Query(1, ge=1, le=5), book: Literal["LIVE", "PAPER", "RESEARCH"] = "LIVE",
+                                   limit: int = Query(60, ge=1, le=200)):
+    """The recent days a bot's own book (NSE live, practice or the research desk) traded, each with the id the Compare
+    page takes for it (live_book.py: negative), so a real day can be compared with a backtest of it. Read-only."""
+    try:
+        return await asyncio.to_thread(live_book.days_with_trades, bot, book, limit)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/replay/runs")

@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { C, money, short, ticks, useWidth } from "@/components/PnlDashboard/charts";
 import { NewTag } from "@/components/ui/NewTag";
 import { entryReasonLong, entryReasonShort } from "@/lib/entryReason";
+import { isLiveBook, runName } from "@/lib/liveBook";
 import {
   smaApi,
   type BacktestCompare as Compare,
@@ -94,8 +95,14 @@ function Tag({ run, i, base }: { run: Run; i: number; base?: boolean }) {
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
       <span aria-hidden className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: colorOf(i) }} />
-      <span className="font-semibold text-slate-100">#{run.id}</span>
-      <span className="text-xs font-normal text-slate-400">{run.bot_name}</span>
+      {isLiveBook(run.id) ? (
+        <span className="font-semibold text-slate-100">{run.label ?? runName(run.id)}</span>
+      ) : (
+        <>
+          <span className="font-semibold text-slate-100">#{run.id}</span>
+          <span className="text-xs font-normal text-slate-400">{run.bot_name}</span>
+        </>
+      )}
       {base ? <span className="rounded bg-white/10 px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-300">base</span> : null}
     </span>
   );
@@ -162,7 +169,7 @@ export function CompareDetailRest({ data, loaded }: { data: Compare; loaded: Loa
   if (!detail) return null;
   const tag = (id: number) => {
     const run = runOf.get(id);
-    return run ? <Tag run={run} i={place.get(id) ?? 0} base={id === detail.base} /> : <span>#{id}</span>;
+    return run ? <Tag run={run} i={place.get(id) ?? 0} base={id === detail.base} /> : <span>{runName(id)}</span>;
   };
   return (
     <>
@@ -248,7 +255,7 @@ function Scoreboard({ detail, runs }: { detail: Detail; runs: Run[] }) {
   return (
     <Card
       title="Winners, losers and stocks"
-      hint={`Every closed trade each run made, on all the days it finished. P&L ${detail.basis === "net" ? "after" : "before"} charges.`}
+      hint={`Every closed trade each run made, ${detail.days?.length ? `on the real day(s) compared (${detail.days.length})` : "on all the days it finished"}. P&L ${detail.basis === "net" ? "after" : "before"} charges.`}
     >
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {runs.map((run, i) => {
@@ -698,10 +705,10 @@ function StockChart({ day, lines }: { day: CompareStockDay; lines: Line[] }) {
               return (
                 <g key={t.id}>
                   <polygon points={tri} fill={l.color} stroke="rgb(var(--c-surface))" strokeWidth={1}>
-                    <title>{`#${l.id} ${up ? "Buy" : "Sell"} ${t.entry_at.slice(0, 5)} at ₹${t.entry_price} · ${entryWord(t.entry_reason)}`}</title>
+                    <title>{`${runName(l.id)} ${up ? "Buy" : "Sell"} ${t.entry_at.slice(0, 5)} at ₹${t.entry_price} · ${entryWord(t.entry_reason)}`}</title>
                   </polygon>
                   <circle cx={X(xm)} cy={Y(valueAt(l.pts, xm))} r={5} fill={t.gross >= 0 ? C.profit : C.loss} stroke={l.color} strokeWidth={2}>
-                    <title>{`#${l.id} exit ${t.exit_at.slice(0, 5)} at ₹${t.exit_price} · ${exitWord(t.exit_reason)} · ${money(t.gross)}`}</title>
+                    <title>{`${runName(l.id)} exit ${t.exit_at.slice(0, 5)} at ₹${t.exit_price} · ${exitWord(t.exit_reason)} · ${money(t.gross)}`}</title>
                   </circle>
                 </g>
               );
@@ -732,7 +739,7 @@ function StockChart({ day, lines }: { day: CompareStockDay; lines: Line[] }) {
             return (
               <div key={l.id} className="flex items-center justify-between gap-3">
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-sm" style={{ background: l.color }} />#{l.id}
+                  <span className="h-2 w-2 rounded-sm" style={{ background: l.color }} />{runName(l.id)}
                   {open ? <span className="text-slate-400">{open.side === "LONG" ? "in a buy" : "in a sell"}</span> : null}
                 </span>
                 <span className={clsx("font-mono", pnlTone(v))}>{money(v)}</span>
@@ -867,7 +874,7 @@ function StockByStock({ detail, runs, tag }: { detail: Detail; runs: Run[]; tag:
               <span className="flex flex-wrap gap-x-3 text-xs">
                 {ids.map((id) => (
                   <span key={id} className="inline-flex items-center gap-1">
-                    <span aria-hidden className="h-2 w-2 rounded-sm" style={{ background: colorOf(place.get(id) ?? 0) }} />#{id}{" "}
+                    <span aria-hidden className="h-2 w-2 rounded-sm" style={{ background: colorOf(place.get(id) ?? 0) }} />{runName(id)}{" "}
                     <span className={clsx("font-mono", totals.pnl[id] == null ? "text-slate-500" : pnlTone(totals.pnl[id]))}>
                       {totals.pnl[id] == null ? "no trade" : money(totals.pnl[id])}
                     </span>
@@ -1057,7 +1064,7 @@ function Scatter({
             style={X(hover.x) > w * 0.55 ? { right: w - X(hover.x) + 10 } : { left: X(hover.x) + 10 }}
           >
             <div className="font-semibold">
-              #{hover.t.run_id} · {hover.t.symbol} · {hover.t.side === "LONG" ? "Buy" : "Sell"}
+              {runName(hover.t.run_id)} · {hover.t.symbol} · {hover.t.side === "LONG" ? "Buy" : "Sell"}
             </div>
             <div className="text-slate-400">
               {dayShort(hover.t.date)} {hover.t.entry_at.slice(0, 5)}→{hover.t.exit_at.slice(0, 5)} ({held(hover.t.hold_min)})
@@ -1103,7 +1110,7 @@ function Scatters({ detail, runs }: { detail: Detail; runs: Run[] }) {
           </button>
           {runs.map((r, i) => (
             <button key={r.id} type="button" aria-pressed={only === r.id} onClick={() => setOnly(r.id)} className={clsx("inline-flex min-h-8 items-center gap-1 px-2.5", only === r.id ? "bg-white/10 font-semibold text-slate-100" : "text-slate-400 hover:bg-white/5")}>
-              <span aria-hidden className="h-2 w-2 rounded-sm" style={{ background: colorOf(i) }} />#{r.id}
+              <span aria-hidden className="h-2 w-2 rounded-sm" style={{ background: colorOf(i) }} />{runName(r.id)}
             </button>
           ))}
         </div>
