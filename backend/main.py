@@ -33,6 +33,7 @@ import all_bots_guard
 import pnl_alerts
 import pivots
 import pressure_exit as pressure_exit_mod
+import flow_exit as flow_exit_mod
 import auto_start
 import scalp_alerts
 import auto_arm
@@ -876,6 +877,12 @@ class ConfigUpdate(BaseModel):
     pressure_flip_pct: float | None = Field(default=None, ge=55, le=95)
     # ... and the other side's % of the colour candle's executed volume, estimated (trade_flow.py); 0 = off.
     pressure_flip_flow: float | None = Field(default=None, ge=0, le=95)
+    # Close once the other side did this % of the shares traded at market over the window (flow_exit.py).
+    flow_exit: bool | None = None
+    flow_exit_pct: float | None = Field(default=None, ge=flow_exit_mod.MIN_PCT, le=flow_exit_mod.MAX_PCT)
+    flow_exit_window: Literal[0, 1, 2, 3, 5, 10, 15] | None = None
+    flow_exit_loss: bool | None = None
+    flow_exit_book: bool | None = None
     stop_plan: bool | None = None
     plan_be_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
     plan_trail_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
@@ -1942,6 +1949,11 @@ def _gap_dict(row) -> dict:
         "pressure_flip": pressure_exit_mod.flip_on(row),
         "pressure_flip_pct": pressure_exit_mod.flip_pct(row),
         "pressure_flip_flow": pressure_exit_mod.flip_flow_pct(row),
+        "flow_exit": flow_exit_mod.on(row),
+        "flow_exit_pct": flow_exit_mod.pct(row),
+        "flow_exit_window": flow_exit_mod.window(row),
+        "flow_exit_loss": flow_exit_mod.loss_only(row),
+        "flow_exit_book": flow_exit_mod.book_agree(row),
         "stop_plan": stop_plan_mod.on(row),
         "plan_be_r": stop_plan_mod.be_r(row),
         "plan_trail_r": stop_plan_mod.trail_r(row),

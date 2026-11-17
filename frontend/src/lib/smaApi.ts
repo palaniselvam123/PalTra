@@ -327,6 +327,13 @@ export type SmaConfig = {
   pressure_flip_pct?: number;
   /** ... and the other side's % of the colour candle's executed volume (estimated); 0 = not checked. */
   pressure_flip_flow?: number;
+  /** Executed volume exit (flow_exit.py): the other side's % of the shares traded over the window closes the trade. */
+  flow_exit?: boolean;
+  flow_exit_pct?: number;
+  /** Minutes (1, 2, 3, 5, 10, 15), or 0 = the exit candle just closed. */
+  flow_exit_window?: 0 | 1 | 2 | 3 | 5 | 10 | 15;
+  flow_exit_loss?: boolean;
+  flow_exit_book?: boolean;
   /** Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R. */
   stop_plan?: boolean;
   /** SMA 9 deceleration guard (decel_guard.py): slope in ATR per candle. */

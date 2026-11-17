@@ -234,6 +234,20 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `StrategyConfigPanel.PressureFlip`): the flip also needs the other side's share of the colour candle's executed volume
   (`trade_flow.share` of the minutes in the colour candle just closed, `pressure_exit.flip_side(..., flow, flow_level)`);
   unknown never flips.
+- `backend/flow_exit.py` – **executed volume exit** (`flow_exit`, off by default; `flow_exit_pct` 60, 50-95;
+  `flow_exit_window` 3 = the last N closed 1-minute candles (1/2/3/5/10/15) or 0 = the exit candle just closed
+  (`_exit_minutes`, from 09:15); `flow_exit_loss` only while losing; `flow_exit_book` the waiting orders must agree (the
+  other side above 50 % in a Most active read at most `pressure_exit.MAX_AGE_SEC` old, `book_note`); per bot and per
+  stock, PAPER and LIVE, replays too; any stock, not only Most active; Settings → 3. When to exit, under the buyers /
+  sellers fade exit, `StrategyConfigPanel.FlowExit`, anchor `#sma-flow-exit`; owner's SOLARINDS case): a buy closes once
+  sellers did that % of the shares traded at market over the window (`judge` on `trade_flow.minutes` of the stock's
+  `_tapes`), a sell once buyers did. `StrategyEngine._watch_flow_exit` (held-stock loop, after the fade exit) judges each
+  window once (`_flow_seen`, entry time + window end), only once the window lies wholly after the entry (`span`,
+  `first_minute`: the entry minute counts when the trade opened in its first `ENTRY_GRACE_SEC` 15 s) and the last closed
+  minute is in the tape; under half the window's minutes with volume = no read. Closes via `_exit_now` (`FLOW_EXIT`, LIVE
+  stop cancelled first; a LIVE position restored without its stop id is left to that stop); the latest reading is
+  `books[].flow_note`. Groupable in "How exits combine" (`exit_join` key `FLOW`). Counts as an exit for
+  `strategyChecks.noExitOn`. The Strategy lab does not know it; the stock research baseline keeps it off.
 - `backend/trade_flow.py` – **executed buy / sell volume, estimated** (display and the flip check above; no order path;
   owner's SOLARINDS case: buyers held 79 % of the waiting orders while sellers kept hitting the bids). Groww's API has
   no trade-by-trade list and never says which side started a trade, so per 1-minute candle (`minutes`): its volume

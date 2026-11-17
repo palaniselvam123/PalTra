@@ -321,6 +321,8 @@ export const FEATURES: Feature[] = [
     purpose: "While the market is open, the auto-arm replay can play today up to the last minute that has closed (positions are squared off there), so you can test today's picks without waiting for 15:30." },
   { id: "chart-executed-flow", area: "terminal", added: "2026-11-17", pr: 454, href: TERM, where: "Terminal → chart → buyers / sellers strip (dashed line) and the reading line", title: "Executed buy / sell % on the chart (estimated)",
     purpose: "Next to the buyers % of the waiting orders, how many shares were actually bought vs sold at market in each candle, so you can see when sellers keep selling into a book full of buyers. Groww has no trade list, so it is estimated from the per-second prices the bots record, else from the candle's shape." },
+  { id: "flow-exit", area: "settings", added: "2026-11-17", pr: 459, href: S("sma-flow-exit"), where: "Settings → Strategy → 3. When to exit → Executed volume exit", title: "Exit when the other side is doing the trading",
+    purpose: "Closes a buy once sellers did the set % of the shares traded at market in the last few minutes (a sell once buyers did), estimated from the per-second prices. Optionally only while losing, and only when the waiting orders agree." },
   { id: "pressure-flip-flow", area: "settings", added: "2026-11-17", pr: 454, href: S("sma-pressure-flip"), where: "Settings → Strategy → 1. When to enter → Candle colour: let buyers / sellers overrule it → executed volume at least", title: "The colour overrule can also need the executed volume",
     purpose: "The buyers / sellers overrule of the candle colour can also require that side to have done your % of the shares traded in the colour candle (estimated), not only to hold the waiting orders." },
   { id: "pressure-flip", area: "settings", added: "2026-11-16", pr: 452, href: S("sma-pressure-flip"), where: "Settings → Strategy → 1. When to enter → Most active stocks: when to enter → Candle colour: let buyers / sellers overrule it", title: "Buyers / sellers overrule the candle colour",
@@ -617,7 +619,7 @@ export function featureById(id: string): Feature | undefined {
 const ANCHOR_GROUP: Record<string, string> = {
   "sma-candle-interval": "enter", "sma-day-extreme": "enter", "sma-colour-exit": "enter", "sma-colour-force": "enter",
   "sma-fresh": "check", "sma-exit-candle": "exit", "sma-slope-candle": "exit", "sma-small-colour": "exit",
-  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced",
+  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced",
 };
 
 /** The strategy form's group (enter, check, exit, gap, stop, risk, advanced) a Settings link opens, or null. */
