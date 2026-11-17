@@ -338,6 +338,12 @@ export type SmaConfig = {
   /** EXIT = close the trade itself; CONFIRM = only let the other signal exits close when it agrees. */
   flow_exit_mode?: "EXIT" | "CONFIRM";
   /** Executed volume entry check (flow_exit.py): the order's own side's % of the shares traded over the window. */
+  /** Executed volume starts the trade; the waiting orders are the check (flow_exit.trigger_*). */
+  flow_trigger?: boolean;
+  flow_trigger_pct?: number;
+  flow_trigger_window?: number;
+  /** The order's side's % of the waiting orders it needs, 0 = not checked. */
+  flow_trigger_book?: number;
   flow_entry?: boolean;
   flow_entry_pct?: number;
   /** Minutes 1-15, or 0 = one exit candle's length. */
@@ -2042,6 +2048,10 @@ export type TradeRow = {
   entry_reason?: string | null;
   /** Choppy or trending when it opened (stock_regime.py at entry); null on older trades. */
   entry_regime?: import("./trendAtEntry").TradeRegime | null;
+  /** What the stock showed at the entry: executed buy % over the window before it and the latest waiting-orders read. */
+  entry_flow?: { buy?: number; src?: string; from?: number; to?: number; wait_buy?: number; read_at?: number } | null;
+  /** The same, read when the trade closed (over the executed volume exit's window, else the last 3 minutes). */
+  exit_flow?: { buy?: number; src?: string; from?: number; to?: number; wait_buy?: number; read_at?: number } | null;
   /** Staged stop plan moves, "; " separated (stop_plan.py). */
   stop_log?: string | null;
   exit_time: string | null;

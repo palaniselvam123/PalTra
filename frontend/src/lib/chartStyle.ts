@@ -40,6 +40,8 @@ export type ChartStyle = Record<LineKey, LineLook> & {
   candleDown: string;
   /** Draw Heikin Ashi candles instead of the real ones (display only; the bot reads real prices). */
   heikinAshi: boolean;
+  /** Mark on the buyers / sellers strip, at each trade's entry and exit, the executed % the bot read then. */
+  tradeReads: boolean;
 };
 
 export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: string }> = {
@@ -63,6 +65,7 @@ export const DEFAULT_CHART_STYLE: ChartStyle = {
   candleUp: "#10B981",
   candleDown: "#F43F5E",
   heikinAshi: false,
+  tradeReads: true,
   sma9: { show: "on", color: "#F43F5E", width: 2, style: 0 },
   sma21: { show: "on", color: "#3B82F6", width: 2, style: 0 },
   vwap: { show: "auto", color: "#22D3EE", width: 2, style: 1 },
@@ -91,6 +94,7 @@ function clean(raw: unknown): ChartStyle {
     if (typeof src[k] === "string" && HEX.test(src[k] as string)) out[k] = src[k] as string;
   }
   out.heikinAshi = src.heikinAshi === true;
+  out.tradeReads = src.tradeReads !== false;
   for (const key of Object.keys(LINE_NAMES) as LineKey[]) {
     const v = src[key] as Partial<LineLook> | undefined;
     if (!v || typeof v !== "object") continue;

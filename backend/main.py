@@ -889,6 +889,11 @@ class ConfigUpdate(BaseModel):
     flow_entry: bool | None = None
     flow_entry_pct: float | None = Field(default=None, ge=flow_exit_mod.MIN_PCT, le=flow_exit_mod.MAX_PCT)
     flow_entry_window: int | None = Field(default=None, ge=0, le=flow_exit_mod.MAX_WINDOW)
+    # Executed volume starts the trade; the waiting orders are the check (0 = not checked).
+    flow_trigger: bool | None = None
+    flow_trigger_pct: float | None = Field(default=None, ge=flow_exit_mod.MIN_PCT, le=flow_exit_mod.MAX_PCT)
+    flow_trigger_window: int | None = Field(default=None, ge=0, le=flow_exit_mod.MAX_WINDOW)
+    flow_trigger_book: float | None = Field(default=None, ge=0, le=flow_exit_mod.MAX_PCT)
     stop_plan: bool | None = None
     plan_be_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
     plan_trail_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
@@ -1964,6 +1969,10 @@ def _gap_dict(row) -> dict:
         "flow_entry": flow_exit_mod.entry_on(row),
         "flow_entry_pct": flow_exit_mod.entry_pct(row),
         "flow_entry_window": flow_exit_mod.entry_window(row),
+        "flow_trigger": flow_exit_mod.trigger_on(row),
+        "flow_trigger_pct": flow_exit_mod.trigger_pct(row),
+        "flow_trigger_window": flow_exit_mod.trigger_window(row),
+        "flow_trigger_book": flow_exit_mod.trigger_book(row),
         "stop_plan": stop_plan_mod.on(row),
         "plan_be_r": stop_plan_mod.be_r(row),
         "plan_trail_r": stop_plan_mod.trail_r(row),

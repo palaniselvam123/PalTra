@@ -254,7 +254,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   anchor `#sma-flow-entry`): `apply_signal` (next to the smaller-candle and Most active entry checks) refuses an entry unless
   the real order's side (after `flip_orders`) did at least that % of the shares traded over the window
   (`flow_exit.entry_span` / `entry_refusal` on `trade_flow.minutes` of `_tapes`); too little volume refuses too. It joins
-  `entry_block`, so late entry can retry it. Direct orders (Force, news, hand-offs, fast mover) never read it.
+  `entry_block`, so late entry can retry it. Direct orders (Force, news, hand-offs, fast mover) never read it, except the
+  Most active "Enter at once" (`_pressure_entry_pass`), which waits while the ticked check says no (owner's KAYNES case: a
+  sell went in at once on sellers 78 % waiting while buyers did 71 % of the trading).
   **Confirm the other exits instead** (`flow_exit_mode` `EXIT` default | `CONFIRM`, per bot and per stock, PAPER and LIVE,
   replays too; owner's request: the executed volume as a check like the entry checks, not an exit of its own; the card's
   "Close the trade by itself" / "Use it to confirm the other exits" switch): with `CONFIRM` `_watch_flow_exit` never
@@ -267,6 +269,26 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   SMA 9 turn. Too little volume to read lets the exit go; "only while losing" and "waiting orders agree" are not read;
   stops, targets, the square-off, recovery, gap fade and kill switch are never held. The held exit is judged again the
   next time it fires; `books[].flow_note` says confirmed / held.
+  **Executed volume starts the trade** (`flow_trigger`, off by default; `flow_trigger_pct` 60, 50-95; `flow_trigger_window`
+  3, 0 = one exit candle; `flow_trigger_book` 55, 0 = not checked; per bot and per stock, PAPER and LIVE, replays too; any
+  stock; Settings → 1. When to enter, under the Most active entries, `StrategyConfigPanel.FlowTrigger`, anchor
+  `#sma-flow-trigger`; owner's request: the Most active entry the other way round): `StrategyEngine._flow_trigger_pass`
+  (armed loop, after `_pressure_entry_pass`), once per closed window end (`_ft_seen`), for a flat stock: buyers did at least
+  the % of the shares traded over the window (`flow_exit.split` / `trigger_side`) → a buy, sellers → a sell; then the order's
+  side must hold `flow_trigger_book` % of the waiting orders in a Most active read at most `pressure_exit.MAX_AGE_SEC` old
+  (`book_refusal`; no fresh read = no order); the order goes through `apply_signal(..., why="EXECUTED_VOLUME")`, so every
+  entry check, the stop, flip, cut-off, caps and one LIVE bot per stock apply. **Readings at entry** (display only): `_open`
+  saves `TradeLog.entry_flow` (JSON, `flow_exit.entry_reads`: executed buy % over the entry check's window before the order,
+  else the last 3 minutes, and the latest fresh waiting-orders read with its time); `_trade_dict` carries it and the chart's
+  trade card shows "Executed at entry" / "Waiting at entry", so the numbers match what the bot judged (the hover line shows a
+  whole candle, which can include minutes after the order). The same is saved at the exit (`TradeLog.exit_flow`, from
+  `_finalize_trade` over the executed volume exit's window, else 3 minutes): "Executed at exit" on the card, and with the
+  Indicators tick **Mark what the bot read at each entry and exit** (`chartStyle.tradeReads`, on by default) dots on the
+  buyers / sellers strip ("in B32 S68 09:15-09:30", "out …") on the first strip line that is on. **Same candle as the
+  chart** (owner's request): window 0 of the entry check / executed volume entry (`flow_exit.entry_span`) is the last
+  *closed* exit candle from 09:15 (the candle the chart draws at that size), no longer one candle's length back from the
+  order; each executed volume card has a "Read the same candle as the chart" tick (`StrategyConfigPanel.SameCandle`, sets
+  the window to 0).
 - `backend/trade_flow.py` – **executed buy / sell volume, estimated** (display and the flip check above; no order path;
   owner's SOLARINDS case: buyers held 79 % of the waiting orders while sellers kept hitting the bids). Groww's API has
   no trade-by-trade list and never says which side started a trade, so per 1-minute candle (`minutes`): its volume
@@ -282,7 +304,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`chartStyle` key `pressure`), sellers waiting (`pressureSell`, 100 − it), buyers executed (`flow`) and sellers executed
   (`flowSell`, 100 − it), each on / off / auto in Indicators (`StrategyChart` `pressureSellRef` / `flowSellRef`; the 50 line
   and fade-exit levels sit on the first line that is on); the reading line shows the four for the candle under the mouse and
-  says why one is blank (no Most active read before the candle closed / no volume known). A minute is cached (`_CACHE`) only
+  says why one is blank (no Most active read before the candle closed / no volume known). Indicators has a tick box per line (on / off) and
+  a Check all / Uncheck all box with "All on Auto" (`ChartIndicators.setAll`). A minute is cached (`_CACHE`) only
   once a later minute is on the tape as well as `FINAL_AFTER_SEC` by the clock: a replay's tape ends in the forming minute
   (part of its volume), which the wall clock used to call finished, so replays kept partial numbers (blanks, wrong splits)
   that the chart, the entry check and the exit then read.

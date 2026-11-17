@@ -337,3 +337,45 @@ def test_replay_marks_most_active_picks():
     assert pressure_exit.from_most_active(got["ACME"]) and not pressure_exit.from_most_active(got["BETA"])
     assert pressure_exit.from_most_active(replay.pick_sources(SimpleNamespace(kind="ACTIVE"), [{"symbol": "X"}])["X"])
     assert replay.pick_sources(SimpleNamespace(kind="TREND"), [{"symbol": "X"}]) == {}
+
+
+@pytest.mark.asyncio
+async def test_entry_at_arm_waits_for_the_executed_volume_check(monkeypatch, tmp_path):
+    # Owner's KAYNES case: sellers held 78 % of the waiting orders, so "enter at once" sold, while the ticked executed
+    # volume check (buyers did most of the trading) was never read. Now the at-once entry waits for that check too.
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/e.db")
+    import database
+    import trade_flow
+    from strategy_engine import StrategyEngine
+    from tests.test_sma_atr_terminal import _FakeBroker
+
+    database.reset_engine()
+    database.init_db()
+    eng = StrategyEngine(broker=_FakeBroker())
+    now = dt.datetime.now(IST).replace(hour=10, minute=30, second=0, microsecond=0)
+    while now.weekday() >= 5:
+        now -= dt.timedelta(days=1)
+    pressure_exit.note_scan(_scan(now - dt.timedelta(minutes=1), ACME=0.22))       # sellers 78 % waiting
+    eng.status = "RUNNING"
+    sent = []
+
+    async def fake_order(symbol, signal, why, note=""):
+        sent.append(signal)
+        return f"opened {symbol}"
+
+    flow = {"buy": 710, "sell": 290}
+    monkeypatch.setattr(eng, "direct_order", fake_order)
+    monkeypatch.setattr(eng, "_still_armed", lambda s: True)
+    monkeypatch.setattr(eng, "_exit_minutes", lambda s, c: 1)
+    monkeypatch.setattr("strategy_engine.market_is_open", lambda *_: True)
+    monkeypatch.setattr(trade_flow, "minutes", lambda *a, **k: [{"time": 0, "buy": flow["buy"], "sell": flow["sell"], "src": "C"}] * 3)
+    cfg = type("C", (), {"symbol": "ACME", "pressure_entry": "AT_ARM", "pressure_entry_pct": 65, "entry_cutoff_time": "15:00",
+                         "square_off_time": "15:15", "trade_sources": json.dumps({"ACME": "Auto-arm: Most active"}),
+                         "stock_settings": None, "flow_entry": True, "flow_entry_pct": 52, "flow_entry_window": 3})()
+    monkeypatch.setattr("strategy_engine._cfg_for", lambda c, s: c)
+    await eng._pressure_entry_pass("ACME", cfg, now)
+    assert sent == [] and "sellers did only 29%" in eng._signals["ACME"]
+    flow.update(buy=300, sell=700)                                                  # sellers now do the trading
+    await eng._pressure_entry_pass("ACME", cfg, now)
+    assert sent == ["BEARISH"]
+    database.reset_engine()

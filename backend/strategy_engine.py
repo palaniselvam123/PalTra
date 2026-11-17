@@ -186,6 +186,7 @@ def cross_exits(cfg) -> bool:
 ENTRY_REASONS = (
     "SMA_CROSS",
     "MOST_ACTIVE",
+    "EXECUTED_VOLUME",
     "GAP_MODE",
     "JOIN_TREND",
     "ALWAYS_IN",
@@ -421,6 +422,7 @@ SNAPSHOT_FIELDS = (
     "pressure_flip", "pressure_flip_pct", "pressure_flip_flow",
     "flow_exit", "flow_exit_pct", "flow_exit_window", "flow_exit_loss", "flow_exit_book", "flow_exit_mode",
     "flow_entry", "flow_entry_pct", "flow_entry_window",
+    "flow_trigger", "flow_trigger_pct", "flow_trigger_window", "flow_trigger_book",
     "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
@@ -1379,6 +1381,7 @@ class StrategyEngine:
         self._pressure_note: dict[str, str] = {}
         # Executed volume exit (flow_exit.py): the last window judged per stock (entry time, window end) and its reading.
         self._flow_seen: dict[str, tuple] = {}
+        self._ft_seen: dict[str, int] = {}  # executed volume entry: the last window end judged per stock
         self._flow_note: dict[str, str] = {}
         # Most active entry at once (pressure_exit.entry_mode AT_ARM): symbol -> the IST day it was entered / refused.
         self._pe_done: dict[str, dt.date] = {}
@@ -1894,6 +1897,9 @@ class StrategyEngine:
                 await self._pressure_entry_pass(symbol, cfg, now)
                 if self.status != "RUNNING":
                     break
+                await self._flow_trigger_pass(symbol, frame, cfg, now)
+                if self.status != "RUNNING":
+                    break
                 # Always in a trade: between candles, a stock that just went flat is entered again at once.
                 await self._always_in_pass(symbol, frame, cfg, now)
                 if self.status != "RUNNING":
@@ -1942,6 +1948,9 @@ class StrategyEngine:
             # After the candle's own signals (a fresh cross goes first): a Most active stock is entered at once while
             # its buyers / sellers hold, then still flat = always in enters now.
             await self._pressure_entry_pass(symbol, cfg, now)
+            if self.status != "RUNNING":
+                break
+            await self._flow_trigger_pass(symbol, frame, cfg, now)
             if self.status != "RUNNING":
                 break
             await self._always_in_pass(symbol, frame, cfg, now)
@@ -2213,6 +2222,22 @@ class StrategyEngine:
         side, share, at = pick
         who = "buyers" if side == "LONG" else "sellers"
         why = f"{who} {share:g}% at {at}"
+        if flow_exit.entry_on(symbol_cfg):
+            # The executed volume check, when ticked, holds this entry too (it waits; asked again on the next pass).
+            real = side if not getattr(symbol_cfg, "flip_orders", False) else ("SHORT" if side == "LONG" else "LONG")
+            start, end = flow_exit.entry_span(
+                now.timestamp(), flow_exit.entry_window(symbol_cfg), self._exit_minutes(symbol, symbol_cfg)
+            )
+            flow = flow_exit.entry_refusal(
+                trade_flow.minutes(symbol, self._tapes.get(symbol), start, end), real,
+                flow_exit.entry_pct(symbol_cfg), (end - start) // 60,
+            )
+            if flow:
+                note = f"{symbol} Most active entry ({why}) waits — {flow}"
+                if self._pe_note.get(symbol) != note:
+                    self._pe_note[symbol] = note
+                    self._signals[symbol] = note
+                return
         try:
             result = await self.direct_order(
                 symbol, "BULLISH" if side == "LONG" else "BEARISH", why=pressure_exit.ENTRY_REASON, note=why
@@ -2224,6 +2249,58 @@ class StrategyEngine:
         self._pe_done[symbol] = day
         self._pe_note.pop(symbol, None)
         text = f"{result} — Most active entry ({why})"
+        self._signals[symbol] = text
+        self.last_signal = text
+
+    async def _flow_trigger_pass(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> None:
+        """Executed volume starts the trade (flow_exit.trigger_*): a flat armed stock is bought once buyers did the set %
+        of the shares traded over the window (sold once sellers did), with the waiting orders as the check. Judged once
+        per closed window end; everything else goes through apply_signal (every entry check, stop, flip, caps)."""
+        symbol_cfg = _cfg_for(cfg, symbol)
+        if not flow_exit.trigger_on(symbol_cfg) or self.status != "RUNNING":
+            return
+        if symbol in self.positions or symbol in self._pullback:
+            return
+        if not market_is_open(now) or now.time() < OPENING_BUFFER_END or now.time() >= _entry_cutoff(symbol_cfg):
+            return
+        if not self._still_armed(symbol):
+            return
+        tape = self._tapes.get(symbol)
+        start, end = flow_exit.entry_span(
+            now.timestamp(), flow_exit.trigger_window(symbol_cfg), self._exit_minutes(symbol, symbol_cfg)
+        )
+        if self._ft_seen.get(symbol) == end:
+            return
+        if tape is None or len(tape) == 0 or int(pd.to_numeric(tape["ts"], errors="coerce").max()) < end - 60:
+            return  # the last closed minute is not on the tape yet
+        self._ft_seen[symbol] = end
+        minutes = (end - start) // 60
+        got = flow_exit.split(trade_flow.minutes(symbol, tape, start, end), minutes)
+        level = flow_exit.trigger_pct(symbol_cfg)
+        span_text = f"{dt.datetime.fromtimestamp(start, IST):%H:%M}–{dt.datetime.fromtimestamp(end, IST):%H:%M}"
+        if got is None:
+            self._signals[symbol] = f"{symbol} executed volume entry: too little volume to read {span_text}"
+            return
+        buy, src = got
+        side = flow_exit.trigger_side(buy, level)
+        read = f"buyers {buy:g}% · sellers {round(100 - buy, 1):g}% executed {span_text} ({src})"
+        if side is None:
+            self._signals[symbol] = f"{symbol} executed volume entry waits for {level:g}% one way — {read}"
+            return
+        refusal = flow_exit.book_refusal(symbol, side, now.timestamp(), flow_exit.trigger_book(symbol_cfg))
+        if refusal:
+            self._signals[symbol] = f"{symbol} executed volume {side} not taken — {refusal} ({read})"
+            return
+        enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
+        self._focus = symbol
+        self.ltp = self._ltps.get(symbol, self.ltp)
+        result = await self.apply_signal(
+            "BULLISH" if side == "LONG" else "BEARISH", enriched, symbol_cfg, now, alert=False, why=flow_exit.TRIGGER_REASON
+        )
+        if result.startswith("blocked — order PENDING"):
+            self._ft_seen.pop(symbol, None)
+            return
+        text = f"{result} — executed volume entry ({read})"
         self._signals[symbol] = text
         self.last_signal = text
 
@@ -4652,6 +4729,7 @@ class StrategyEngine:
             flipped=flipped,
             entry_reason=why,
             entry_regime=handoff_log.regime_json(self._regime_at(cfg, (cfg.symbol or "").upper())),
+            entry_flow=self._entry_flow(cfg, now),
         )
         self.trades_today += 1
         self._stock_trades[(cfg.symbol or "").upper()] = self._stock_trades.get((cfg.symbol or "").upper(), 0) + 1
@@ -6255,6 +6333,7 @@ class StrategyEngine:
         flipped: bool = False,
         entry_reason: str | None = None,
         entry_regime: str | None = None,
+        entry_flow: str | None = None,
     ) -> int:
         mode = (cfg.trading_mode or "PAPER").upper()
         run_id = getattr(self, "run_id", None)
@@ -6278,6 +6357,7 @@ class StrategyEngine:
                 flipped=bool(flipped),
                 entry_reason=entry_reason,
                 entry_regime=entry_regime,
+                entry_flow=entry_flow,
                 bot=self.bot_id,
                 run_id=run_id,
                 book_seq=seq,
@@ -6287,6 +6367,25 @@ class StrategyEngine:
             db.commit()
             db.refresh(row)
             return int(row.id)
+
+    def _entry_flow(self, cfg: BotConfig, now: dt.datetime, exit_side: bool = False) -> str | None:
+        """The executed buy / sell split and the waiting orders the stock showed when this trade opened (or, with
+        `exit_side`, closed); display only. Read over the window the bot judges: at the entry the executed volume entry
+        check's (else the executed volume entry's), at the exit the executed volume exit's; else the last 3 minutes."""
+        try:
+            sym = (cfg.symbol or "").upper()
+            if exit_side:
+                win = flow_exit.window(cfg) if flow_exit.on(cfg) else flow_exit.DEFAULT_WINDOW
+            elif flow_exit.entry_on(cfg):
+                win = flow_exit.entry_window(cfg)
+            elif flow_exit.trigger_on(cfg):
+                win = flow_exit.trigger_window(cfg)
+            else:
+                win = flow_exit.DEFAULT_WINDOW
+            reads = flow_exit.entry_reads(sym, self._tapes.get(sym), now.timestamp(), win, self._exit_minutes(sym, cfg))
+            return json.dumps(reads) if reads else None
+        except Exception:  # noqa: BLE001 - bookkeeping only
+            return None
 
     def _finalize_trade(
         self,
@@ -6309,6 +6408,12 @@ class StrategyEngine:
                 row.max_high = max(seen)
                 row.max_low = min(seen)
             row.exit_reason = reason
+            try:
+                row.exit_flow = self._entry_flow(
+                    _cfg_for(getattr(self, "_cfg_cache", None) or self.load_config(), row.symbol), now, exit_side=True
+                )
+            except Exception:  # noqa: BLE001 - bookkeeping only
+                pass
             row.gross_pnl = costs["gross_pnl"]
             row.brokerage_and_taxes = costs["total_charges"]
             row.net_pnl = costs["net_pnl"]
@@ -8319,6 +8424,13 @@ def attach_market_prices(rows: list[dict], ltps: dict[str, float]) -> list[dict]
     return stamped
 
 
+def _json_or_none(text: str | None) -> dict | None:
+    try:
+        return json.loads(text) if text else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _trade_dict(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> dict:
     points = None
     if row.exit_price is not None:
@@ -8342,6 +8454,8 @@ def _trade_dict(row: TradeLog, parsed: dict[str, dict | None] | None = None) -> 
         "exit_price": row.exit_price,
         "entry_reason": getattr(row, "entry_reason", None),
         "entry_regime": handoff_log.parse(getattr(row, "entry_regime", None)),
+        "entry_flow": _json_or_none(getattr(row, "entry_flow", None)),
+        "exit_flow": _json_or_none(getattr(row, "exit_flow", None)),
         "stop_log": getattr(row, "stop_log", None),
         "exit_reason": row.exit_reason,
         "gross_pnl": row.gross_pnl,
