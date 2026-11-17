@@ -491,6 +491,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     flow_exit_window: ([0, 1, 2, 3, 5, 10, 15].includes(Number(form.flow_exit_window)) ? Number(form.flow_exit_window) : 3) as SmaConfig["flow_exit_window"],
     flow_exit_loss: Boolean(form.flow_exit_loss),
     flow_exit_book: Boolean(form.flow_exit_book),
+    flow_exit_mode: String(form.flow_exit_mode ?? "EXIT").toUpperCase() === "CONFIRM" ? "CONFIRM" : "EXIT",
     flow_entry: Boolean(form.flow_entry),
     flow_entry_pct: Math.min(95, Math.max(50, Number(form.flow_entry_pct ?? 55) || 55)),
     flow_entry_window: ([0, 1, 2, 3, 5, 10, 15].includes(Number(form.flow_entry_window)) ? Number(form.flow_entry_window) : 3) as SmaConfig["flow_entry_window"],
@@ -3867,7 +3868,9 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "enter", key: "pressure_entry", text: `Most active stocks: ${f.pressure_entry === "AT_ARM" ? "entered at once while" : "enter only while"} the buyers (a buy) / sellers (a sell) hold ${f.pressure_entry_pct ?? 65}% or more`, off: { pressure_entry: "OFF" } });
   if (f.pressure_flip)
     add({ group: "enter", key: "pressure_flip", text: `Most active stocks, candle colour: sellers (against a buy) / buyers (against a sell) at ${f.pressure_flip_pct ?? 65}% or more, with the price on their side of the VWAP${Number(f.pressure_flip_flow) > 0 ? ` and ${f.pressure_flip_flow}% of the executed volume` : ""}, turn the order their way`, off: { pressure_flip: false } });
-  if (f.flow_exit)
+  if (f.flow_exit && String(f.flow_exit_mode ?? "EXIT").toUpperCase() === "CONFIRM")
+    add({ group: "exit", key: "flow_exit", text: `Exits close only when the other side did ${f.flow_exit_pct ?? 60}% of the shares traded ${Number(f.flow_exit_window ?? 3) === 0 ? "in the exit candle" : `in the last ${f.flow_exit_window ?? 3} min`} (executed volume confirms the exit)`, off: { flow_exit: false } });
+  else if (f.flow_exit)
     add({ group: "exit", key: "flow_exit", text: `Close when the other side did ${f.flow_exit_pct ?? 60}% of the shares traded ${Number(f.flow_exit_window ?? 3) === 0 ? "in the exit candle" : `in the last ${f.flow_exit_window ?? 3} min`} (executed volume, estimated)${f.flow_exit_loss ? ", only while losing" : ""}${f.flow_exit_book ? ", waiting orders agreeing" : ""}`, off: { flow_exit: false } });
   if (f.pressure_exit && f.pressure_over_counter)
     add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
@@ -5190,12 +5193,13 @@ function FlowExit({
   const pct = Number(form.flow_exit_pct ?? 60);
   const shown = Number.isFinite(pct) ? pct : 60;
   const win = Number(form.flow_exit_window ?? 3);
+  const confirm = String(form.flow_exit_mode ?? "EXIT").toUpperCase() === "CONFIRM";
   return (
     <div id="sma-flow-exit" className="mt-3 border-t border-white/10 pt-2">
       <label className="flex items-start gap-2 text-sm text-slate-200">
         <input type="checkbox" className="mt-1" checked={on} onChange={(e) => set("flow_exit", e.target.checked)} />
         <span>
-          {(isOwn("flow_exit") || isOwn("flow_exit_pct") || isOwn("flow_exit_window")) && <OwnTag />}
+          {(isOwn("flow_exit") || isOwn("flow_exit_pct") || isOwn("flow_exit_window") || isOwn("flow_exit_mode")) && <OwnTag />}
           <b className="text-slate-100">Executed volume exit</b> — close when the other side is doing the trading{" "}
           <NewTag id="flow-exit" />{" "}
           <InfoTip label="About the executed volume exit">
@@ -5209,6 +5213,24 @@ function FlowExit({
           </InfoTip>
         </span>
       </label>
+      <fieldset className={clsx("mt-2 text-sm text-slate-300", !on && "opacity-50")} disabled={!on}>
+        <legend className="sr-only">How the executed volume is used</legend>
+        <label className="flex items-start gap-2">
+          <input type="radio" className="mt-1" name="flow_exit_mode" checked={!confirm} onChange={() => set("flow_exit_mode", "EXIT")} />
+          <span>
+            <b className="text-slate-200">Close the trade by itself</b>, as soon as the other side does the trading
+          </span>
+        </label>
+        <label className="mt-1 flex items-start gap-2">
+          <input type="radio" className="mt-1" name="flow_exit_mode" checked={confirm} onChange={() => set("flow_exit_mode", "CONFIRM")} />
+          <span>
+            {isOwn("flow_exit_mode") && <OwnTag />}
+            <b className="text-slate-200">Use it to confirm the other exits</b>, like an entry check: a colour turn, counter
+            candles, SMA cross, SMA 9 exit, Supertrend, Bollinger, EMA, MACD… closes only when the other side also did this
+            much; otherwise the trade is held. Stops, targets and the square-off are never held.
+          </span>
+        </label>
+      </fieldset>
       <div className={clsx("mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
         Other side at least
         <input
@@ -5238,6 +5260,8 @@ function FlowExit({
           <option value={0}>the exit candle just closed</option>
         </select>
       </div>
+      {!confirm && (
+      <>
       <label className={clsx("mt-2 flex items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
         <input type="checkbox" disabled={!on} checked={Boolean(form.flow_exit_loss)} onChange={(e) => set("flow_exit_loss", e.target.checked)} />
         {isOwn("flow_exit_loss") && <OwnTag />}
@@ -5248,10 +5272,21 @@ function FlowExit({
         {isOwn("flow_exit_book") && <OwnTag />}
         The waiting orders must agree too (the other side above 50% in a Most active read of the last 20 min)
       </label>
-      <p className="mt-1 text-xs text-slate-400">
-        Example at {shown}%, {win === 0 ? "the exit candle" : `${win} min`}: a buy where sellers did {Math.min(95, shown + 6)}% of the
-        shares traded {win === 0 ? "in the candle that just closed" : `in the last ${win} minutes`} is closed at once, even while the candles are still green.
-      </p>
+      </>
+      )}
+      {confirm ? (
+        <p className="mt-1 text-xs text-slate-400">
+          Example at {shown}%, {win === 0 ? "the exit candle" : `${win} min`}: a buy whose candle turns red is closed only if
+          sellers did at least {shown}% of the shares traded {win === 0 ? "in the exit candle that just closed" : `in the last ${win} minutes`};
+          if buyers were still doing most of it (sellers {Math.max(50, shown - 8)}%), the trade is held and the exit is judged again the next
+          time it fires. Too little volume to read lets the exit go.
+        </p>
+      ) : (
+        <p className="mt-1 text-xs text-slate-400">
+          Example at {shown}%, {win === 0 ? "the exit candle" : `${win} min`}: a buy where sellers did {Math.min(95, shown + 6)}% of the
+          shares traded {win === 0 ? "in the candle that just closed" : `in the last ${win} minutes`} is closed at once, even while the candles are still green.
+        </p>
+      )}
     </div>
   );
 }

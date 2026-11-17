@@ -125,3 +125,50 @@ async def test_a_green_candle_sold_into_is_not_bought(db, on):  # noqa: F811
         db, entry_mode="COLOUR", pattern_tf=1, qty=1, use_stop=False, flow_entry=on, flow_entry_pct=55, flow_entry_window=3))
     longs = [t for t in trades if t["direction"] == "LONG" and t["entry_time"].strftime("%H:%M") < "09:56"]
     assert bool(longs) is (not on)
+
+
+# ---- confirm the other exits (flow_exit_mode = CONFIRM) ----------------------------------------------------------------
+
+def test_mode_and_confirm_span():
+    cfg = type("C", (), {"flow_exit": True})()
+    assert flow_exit.mode(cfg) == "EXIT" and flow_exit.closes(cfg) and not flow_exit.confirms(cfg)
+    cfg.flow_exit_mode = "confirm"
+    assert flow_exit.confirms(cfg) and not flow_exit.closes(cfg)
+    assert flow_exit.mode(type("C", (), {"flow_exit_mode": "odd"})()) == "EXIT"
+    entry = _ts(9, 20, 30)                                    # first minute of the trade: 09:21
+    # Window 0 on 15-minute candles: the last closed one (09:30-09:45), read at 09:52.
+    assert flow_exit.confirm_span(_ts(9, 52, 10), entry, 0, 15) == (int(_ts(9, 30)), int(_ts(9, 45)))
+    # At 09:31 the closed candle (09:15-09:30) is cut at the entry, so it reads 09:21-09:30.
+    assert flow_exit.confirm_span(_ts(9, 31, 0), entry, 0, 15) == (int(_ts(9, 21)), int(_ts(9, 30)))
+    # Minute windows are cut at the entry too; nothing closed since the entry = nothing to read.
+    assert flow_exit.confirm_span(_ts(9, 23, 5), entry, 5, 15) == (int(_ts(9, 21)), int(_ts(9, 23)))
+    assert flow_exit.confirm_span(_ts(9, 21, 40), entry, 5, 15) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,falling,held", [("CONFIRM", False, True), ("CONFIRM", True, False), (None, False, False)])
+async def test_a_colour_turn_waits_for_the_executed_volume(db, mode, falling, held):  # noqa: F811
+    from sma_research.replayer import replay_symbol
+    from tests.test_candle_patterns import DAY, DAY0, _quiet, _rows
+    from tests.test_gap_mode import _settings
+
+    # 09:45 greens buy at 09:46; red candles from 09:55. The seconds in the red minutes tick up (buyers still doing the
+    # trading) or down (sellers).
+    greens = [(995.0 + 0.1 * i, 995.1 + 0.1 * i) for i in range(10)]
+    reds = [(996.0 - 0.2 * i, 995.8 - 0.2 * i) for i in range(3)]
+    start = int(dt.datetime.combine(DAY, dt.time(9, 55), tzinfo=IST).timestamp())
+    for minute in range(3):
+        steps = [0.0, 0.05, 0.1, 0.15, 0.2]
+        for i, step in enumerate(steps):
+            base = 996.0 - 0.2 * minute
+            tick_store.add("FLC", start + minute * 60 + i * 10, base - step if falling else base - 0.2 + step)
+    frame = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(30) + greens + reds + _quiet(332, 995.4)))
+    extra = {"flow_exit": True, "flow_exit_mode": mode, "flow_exit_pct": 60, "flow_exit_window": 1} if mode else {}
+    trades = await replay_symbol(frame, "FLC", [DAY], _settings(
+        db, entry_mode="COLOUR", pattern_tf=1, qty=1, use_stop=False, **extra))
+    first = trades[0]
+    assert first["direction"] == "LONG"
+    if held:
+        assert first["exit_reason"] != "COLOUR_TURN" and first["exit_time"].strftime("%H:%M") > "10:00"
+    else:
+        assert first["exit_reason"] == "COLOUR_TURN" and first["exit_time"].strftime("%H:%M") < "09:59"

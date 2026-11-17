@@ -883,6 +883,8 @@ class ConfigUpdate(BaseModel):
     flow_exit_window: Literal[0, 1, 2, 3, 5, 10, 15] | None = None
     flow_exit_loss: bool | None = None
     flow_exit_book: bool | None = None
+    # EXIT = close the trade itself; CONFIRM = only let the other signal exits close when it agrees (flow_exit.py).
+    flow_exit_mode: Literal["EXIT", "CONFIRM"] | None = None
     # Enter only when the order's own side did this % of the shares traded over the window (flow_exit.py).
     flow_entry: bool | None = None
     flow_entry_pct: float | None = Field(default=None, ge=flow_exit_mod.MIN_PCT, le=flow_exit_mod.MAX_PCT)
@@ -1958,6 +1960,7 @@ def _gap_dict(row) -> dict:
         "flow_exit_window": flow_exit_mod.window(row),
         "flow_exit_loss": flow_exit_mod.loss_only(row),
         "flow_exit_book": flow_exit_mod.book_agree(row),
+        "flow_exit_mode": flow_exit_mod.mode(row),
         "flow_entry": flow_exit_mod.entry_on(row),
         "flow_entry_pct": flow_exit_mod.entry_pct(row),
         "flow_entry_window": flow_exit_mod.entry_window(row),

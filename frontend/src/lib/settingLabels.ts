@@ -200,6 +200,7 @@ export const SETTING_LABELS: Record<string, string> = {
   flow_exit_book: "Executed volume exit: waiting orders must agree",
   flow_entry: "Executed volume entry check",
   flow_entry_pct: "Executed volume entry: own side at least %",
+  flow_exit_mode: "Executed volume: close by itself or confirm the other exits",
   flow_entry_window: "Executed volume entry: window (min, 0 = exit candle)",
   stop_plan: "staged stop plan",
   decel_exit: "SMA 9 deceleration guard",

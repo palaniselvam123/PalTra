@@ -334,6 +334,8 @@ export type SmaConfig = {
   flow_exit_window?: 0 | 1 | 2 | 3 | 5 | 10 | 15;
   flow_exit_loss?: boolean;
   flow_exit_book?: boolean;
+  /** EXIT = close the trade itself; CONFIRM = only let the other signal exits close when it agrees. */
+  flow_exit_mode?: "EXIT" | "CONFIRM";
   /** Executed volume entry check (flow_exit.py): the order's own side's % of the shares traded over the window. */
   flow_entry?: boolean;
   flow_entry_pct?: number;
