@@ -491,6 +491,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     flow_exit_window: ([0, 1, 2, 3, 5, 10, 15].includes(Number(form.flow_exit_window)) ? Number(form.flow_exit_window) : 3) as SmaConfig["flow_exit_window"],
     flow_exit_loss: Boolean(form.flow_exit_loss),
     flow_exit_book: Boolean(form.flow_exit_book),
+    flow_entry: Boolean(form.flow_entry),
+    flow_entry_pct: Math.min(95, Math.max(50, Number(form.flow_entry_pct ?? 55) || 55)),
+    flow_entry_window: ([0, 1, 2, 3, 5, 10, 15].includes(Number(form.flow_entry_window)) ? Number(form.flow_entry_window) : 3) as SmaConfig["flow_entry_window"],
     stop_plan: Boolean(form.stop_plan),
     decel_exit: Boolean(form.decel_exit),
     decel_lookback: Math.min(10, Math.max(1, Math.round(Number(form.decel_lookback ?? 2) || 2))),
@@ -2104,6 +2107,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               />
             </label>
           ) : null}
+          <FlowEntry form={form} set={set} isOwn={isOwn} />
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -3746,6 +3750,7 @@ export function activeRules(f: SmaConfig): Rule[] {
     }[String(f.level_line ?? "BB_MIDDLE")] ?? "Price beyond the chosen level"
   );
   check("use_fresh", f.use_fresh, `Fresh trend only: a new cross, beyond VWAP, the gap widening${Number(f.fresh_rvol ?? 1.5) > 0 ? `, volume ${n(f.fresh_rvol, 1.5)}× usual` : ""}`);
+  check("flow_entry", f.flow_entry, `Executed volume: the order's own side did ${f.flow_entry_pct ?? 55}% of the shares traded ${Number(f.flow_entry_window ?? 3) === 0 ? "in the last exit candle" : `in the last ${f.flow_entry_window ?? 3} min`} (estimated)`);
   check(
     "use_high52",
     f.use_high52,
@@ -5098,6 +5103,75 @@ function PressureEntry({
         drop under it, no new buy goes in.
       </p>
       <PressureFlip form={form} set={set} isOwn={isOwn} />
+    </div>
+  );
+}
+
+/** Executed volume entry check (flow_exit.py): the order's own side must have done the set % of the shares traded. */
+function FlowEntry({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const on = Boolean(form.flow_entry);
+  const pct = Number(form.flow_entry_pct ?? 55);
+  const shown = Number.isFinite(pct) ? pct : 55;
+  const win = Number(form.flow_entry_window ?? 3);
+  return (
+    <div id="sma-flow-entry" className="mt-4 scroll-mt-24">
+      <label className="flex items-start gap-2 text-sm text-slate-300">
+        <input type="checkbox" className="mt-1 accent-[#10B981]" checked={on} onChange={(e) => set("flow_entry", e.target.checked)} />
+        <span>
+          {(isOwn("flow_entry") || isOwn("flow_entry_pct") || isOwn("flow_entry_window")) && <OwnTag />}
+          Enter only when the order&apos;s own side is doing the trading (executed volume) <NewTag id="flow-entry" />{" "}
+          <InfoTip label="About the executed volume entry check">
+            A buy goes in only when buyers did at least this % of the shares traded at market over the window that just
+            closed (a sell only when sellers did); a flipped stock is judged on the order it really sends. It reads trades
+            that happened, not the orders still waiting. Groww gives no trade-by-trade list, so the split is estimated: each
+            minute&apos;s volume is split by how often the price ticked up vs down in the seconds the bots record (kept 10
+            days), else by the candle&apos;s shape. Too little volume to read refuses the entry. Read like the other checks,
+            so &quot;Late entry&quot; can retry on the next candles. Any stock, PAPER and LIVE, backtests too. Force, news,
+            hand-off and fast-mover orders do not read it.
+          </InfoTip>
+        </span>
+      </label>
+      <div className={clsx("mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
+        Own side at least
+        <input
+          type="number"
+          min={50}
+          max={95}
+          step={1}
+          disabled={!on}
+          value={shown}
+          onChange={(e) => set("flow_entry_pct", e.target.value)}
+          aria-label="The order's own side's share of the executed volume an entry needs, %"
+          className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        />
+        % of the shares traded in
+        <select
+          disabled={!on}
+          value={String(win)}
+          onChange={(e) => set("flow_entry_window", e.target.value)}
+          aria-label="Window"
+          className="min-h-11 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        >
+          {[1, 2, 3, 5, 10, 15].map((m) => (
+            <option key={m} value={m}>
+              the last {m} min
+            </option>
+          ))}
+          <option value={0}>the last exit candle</option>
+        </select>
+      </div>
+      <p className="mt-1 text-xs text-slate-400">
+        Example at {shown}%, {win === 0 ? "the exit candle" : `${win} min`}: a buy signal while sellers did {Math.max(5, 100 - shown + 10)}% of the
+        shares traded {win === 0 ? "in the last candle" : `in the last ${win} minutes`} is refused, even on a green cross.
+      </p>
     </div>
   );
 }

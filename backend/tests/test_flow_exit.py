@@ -86,3 +86,42 @@ async def test_a_green_run_sold_into_closes_on_the_executed_volume(db, on, want)
     assert trades[0]["direction"] == "LONG" and trades[0]["exit_reason"] == want
     if on:
         assert trades[0]["exit_time"].strftime("%H:%M") < "09:56"
+
+
+# ---- entry check (flow_entry) -----------------------------------------------------------------------------------------
+
+def test_entry_settings_and_window():
+    cfg = type("C", (), {})()
+    assert not flow_exit.entry_on(cfg) and flow_exit.entry_pct(cfg) == 55.0 and flow_exit.entry_window(cfg) == 3
+    odd = type("C", (), {"flow_entry_pct": 10, "flow_entry_window": 7})()
+    assert flow_exit.entry_pct(odd) == 50.0 and flow_exit.entry_window(odd) == 3
+    assert flow_exit.entry_span(_ts(10, 3, 20), 3, 5) == (int(_ts(10, 0)), int(_ts(10, 3)))
+    assert flow_exit.entry_span(_ts(10, 5, 2), 0, 5) == (int(_ts(10, 0)), int(_ts(10, 5)))
+
+
+def test_entry_refusal_reads_the_own_side():
+    points = [{"time": 0, "buy": 300, "sell": 700, "src": "T"}, {"time": 60, "buy": 500, "sell": 500, "src": "T"}]
+    assert flow_exit.entry_refusal(points, "SHORT", 55, 2) is None                       # sellers did 60%
+    why = flow_exit.entry_refusal(points, "LONG", 55, 2)
+    assert why == "executed volume: buyers did only 40% of the shares traded in 2 min (need 55%)"
+    assert "too little volume" in flow_exit.entry_refusal([], "LONG", 55, 3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("on", [False, True])
+async def test_a_green_candle_sold_into_is_not_bought(db, on):  # noqa: F811
+    from sma_research.replayer import replay_symbol
+    from tests.test_candle_patterns import DAY, DAY0, _quiet, _rows
+    from tests.test_gap_mode import _settings
+
+    # Greens from 09:45; every second the bots recorded from 09:42 to 09:56 ticks down (sellers hitting the bids).
+    greens = [(995.0 + 0.1 * i, 995.1 + 0.1 * i) for i in range(10)]
+    start = int(dt.datetime.combine(DAY, dt.time(9, 42), tzinfo=IST).timestamp())
+    for minute in range(14):
+        for i, price in enumerate([996.0, 995.9, 995.8, 995.7, 995.6]):
+            tick_store.add("FLN", start + minute * 60 + i * 10, price - 0.05 * minute)
+    frame = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(30) + greens + [(996.0, 995.0)] + _quiet(334, 995.0)))
+    trades = await replay_symbol(frame, "FLN", [DAY], _settings(
+        db, entry_mode="COLOUR", pattern_tf=1, qty=1, use_stop=False, flow_entry=on, flow_entry_pct=55, flow_entry_window=3))
+    longs = [t for t in trades if t["direction"] == "LONG" and t["entry_time"].strftime("%H:%M") < "09:56"]
+    assert bool(longs) is (not on)

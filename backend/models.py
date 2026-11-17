@@ -533,6 +533,11 @@ class BotConfig(Base):
     flow_exit_window: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
     flow_exit_loss: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     flow_exit_book: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Executed volume entry check (flow_exit.py): the order's own side did flow_entry_pct % of the shares traded over the
+    # last flow_entry_window minutes (0 = one exit candle's length). Per bot and per stock.
+    flow_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    flow_entry_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=55.0)
+    flow_entry_window: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
     # Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R.
     stop_plan: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     plan_be_r: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)

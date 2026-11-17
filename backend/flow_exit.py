@@ -124,3 +124,56 @@ def book_note(symbol: str, direction: str, now_ts: float) -> tuple[bool, str]:
     if other > 50.0:
         return True, f"{who} hold {other:g}% of the waiting orders"
     return False, f"{who} hold only {other:g}% of the waiting orders"
+
+
+# ---- the same estimate as an entry check (flow_entry) -----------------------------------------------------------------
+# An entry (any path through StrategyEngine.apply_signal: cross, colour, join, late / early-reversal entry, turn, re-entry)
+# is refused unless the real order's own side did at least `flow_entry_pct` % (55) of the shares traded at market over
+# `flow_entry_window` closed minutes (3; 0 = the length of the candle the bot exits on, ending at the last closed minute).
+# Too little volume to read refuses too, like the other checks when a line is not ready. Direct orders (news, hand-offs,
+# Force, fast-mover) never read it.
+
+DEFAULT_ENTRY_PCT = 55.0
+
+
+def entry_on(cfg) -> bool:
+    return bool(getattr(cfg, "flow_entry", False))
+
+
+def entry_pct(cfg) -> float:
+    value = getattr(cfg, "flow_entry_pct", None)
+    try:
+        value = float(DEFAULT_ENTRY_PCT if value is None else value)
+    except (TypeError, ValueError):
+        value = DEFAULT_ENTRY_PCT
+    return min(MAX_PCT, max(MIN_PCT, value))
+
+
+def entry_window(cfg) -> int:
+    value = getattr(cfg, "flow_entry_window", None)
+    try:
+        value = int(DEFAULT_WINDOW if value is None else value)
+    except (TypeError, ValueError):
+        value = DEFAULT_WINDOW
+    return value if value in WINDOWS else DEFAULT_WINDOW
+
+
+def entry_span(now_ts: float, win: int, exit_minutes: int) -> tuple[int, int]:
+    """(start, end) of the closed minutes an entry reads: the last `win` minutes, or one exit candle's length."""
+    end = int(now_ts) - int(now_ts) % 60
+    size = (win if win > 0 else max(1, int(exit_minutes))) * 60
+    return end - size, end
+
+
+def entry_refusal(points: list[dict], side: str, level: float, minutes: int) -> str | None:
+    """None when the order's own side did at least `level` % of the executed volume, else the plain refusal."""
+    with_volume = [p for p in points if p["buy"] + p["sell"] > 0]
+    if len(with_volume) < max(1, minutes // 2):
+        return f"executed volume: too little volume to read in the last {minutes} min"
+    buy = sum(p["buy"] for p in with_volume)
+    sell = sum(p["sell"] for p in with_volume)
+    own = round(100.0 * (buy if side == "LONG" else sell) / (buy + sell), 1)
+    if own >= level:
+        return None
+    who = "buyers" if side == "LONG" else "sellers"
+    return f"executed volume: {who} did only {own:g}% of the shares traded in {minutes} min (need {level:g}%)"

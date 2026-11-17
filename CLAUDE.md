@@ -248,6 +248,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   stop cancelled first; a LIVE position restored without its stop id is left to that stop); the latest reading is
   `books[].flow_note`. Groupable in "How exits combine" (`exit_join` key `FLOW`). Counts as an exit for
   `strategyChecks.noExitOn`. The Strategy lab does not know it; the stock research baseline keeps it off.
+  **Entry check too** (`flow_entry`, off by default; `flow_entry_pct` 55, 50-95; `flow_entry_window` 3 = the last N closed
+  1-minute candles or 0 = one exit candle's length ending at the last closed minute; per bot and per stock, PAPER and LIVE,
+  replays too; any stock; Settings → 2. Checks before entering, under the fresh trend check, `StrategyConfigPanel.FlowEntry`,
+  anchor `#sma-flow-entry`): `apply_signal` (next to the smaller-candle and Most active entry checks) refuses an entry unless
+  the real order's side (after `flip_orders`) did at least that % of the shares traded over the window
+  (`flow_exit.entry_span` / `entry_refusal` on `trade_flow.minutes` of `_tapes`); too little volume refuses too. It joins
+  `entry_block`, so late entry can retry it. Direct orders (Force, news, hand-offs, fast mover) never read it.
 - `backend/trade_flow.py` – **executed buy / sell volume, estimated** (display and the flip check above; no order path;
   owner's SOLARINDS case: buyers held 79 % of the waiting orders while sellers kept hitting the bids). Groww's API has
   no trade-by-trade list and never says which side started a trade, so per 1-minute candle (`minutes`): its volume
