@@ -725,13 +725,13 @@ export function BacktestRuns() {
       ) : (
         <>
         <RunFilterBar filters={filters} onChange={setFilters} shown={shownRuns.length} total={runs.length} />
-        <div className="flex flex-wrap items-center gap-2 px-4 pt-2 text-xs">
+        {/* Pinned under the blotter bar, so runs far down the list can be ticked and compared without scrolling back. */}
+        <div
+          className="z-10 flex flex-wrap items-center gap-2 border-b border-white/10 bg-[#151921] px-4 py-2 text-xs md:sticky"
+          style={{ top: "var(--blotter-pin-top, 0px)" }}
+        >
           {picked.length ? (
             <>
-              <span className="text-slate-300">
-                {picked.length} run{picked.length === 1 ? "" : "s"} ticked: {picked.map((id) => `#${id}`).join(", ")}
-                {picked.length >= 2 ? ` (base #${picked[0]}, the first you ticked)` : ". Tick at least one more."}
-              </span>
               {picked.length >= 2 ? (
                 <a
                   href={`/terminal/compare/?runs=${picked.join(",")}`}
@@ -740,9 +740,27 @@ export function BacktestRuns() {
                   className="inline-flex min-h-9 items-center gap-1 rounded-md bg-accentSky px-3 font-semibold text-on-accent hover:opacity-90"
                   title="Opens a new page: which strategy did best, on which stocks and which days"
                 >
-                  Compare {picked.length} runs <NewTag id="term-compare" link={false} />
+                  Compare {picked.length} runs <NewTag id="term-compare-detail" link={false} />
                 </a>
-              ) : null}
+              ) : (
+                <span className="text-slate-300">Tick at least one more run.</span>
+              )}
+              <span className="flex flex-wrap items-center gap-1">
+                {picked.map((id, i) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => togglePick(id)}
+                    title={`Untick run #${id}`}
+                    className="inline-flex min-h-8 items-center gap-1 rounded-md border border-sky-400/40 bg-sky-500/10 px-2 font-semibold text-slate-100 hover:bg-sky-500/20"
+                  >
+                    #{id}
+                    {i === 0 && picked.length >= 2 ? <span className="font-normal text-slate-400">base</span> : null}
+                    <span aria-hidden className="text-slate-400">×</span>
+                    <span className="sr-only">untick</span>
+                  </button>
+                ))}
+              </span>
               <button
                 type="button"
                 onClick={() => setPicked([])}
@@ -753,8 +771,8 @@ export function BacktestRuns() {
             </>
           ) : (
             <span className="text-slate-400">
-              Tick 2 to {COMPARE_MAX} runs to compare them on one page: which strategy is best, on which stocks and which days.{" "}
-              <NewTag id="term-compare" />
+              Tick 2 to {COMPARE_MAX} runs to compare them on one page: which strategy is best, on which stocks and which days.
+              This bar stays in view while you scroll. <NewTag id="term-compare-detail" />
             </span>
           )}
         </div>

@@ -2450,6 +2450,121 @@ export type CompareVerdict = {
   bad_on_all?: string[];
 };
 
+/** One closed trade of a compared run (backend/backtest_detail.py). `pnl` follows the basis asked for. */
+export type CmpTrade = {
+  id: number;
+  run_id: number;
+  date: string;
+  symbol: string;
+  side: "LONG" | "SHORT";
+  qty: number;
+  entry_at: string;
+  exit_at: string;
+  entry_ts: number;
+  exit_ts: number;
+  entry_price: number | null;
+  exit_price: number | null;
+  gross: number;
+  net: number;
+  pnl: number;
+  entry_reason: string;
+  exit_reason: string;
+  hold_min: number;
+  best_pts: number | null;
+  worst_pts: number | null;
+  trend: string | null;
+  /** Buyers' share of the waiting orders in the latest saved Most active read before the entry (0-100). */
+  buy_pct: number | null;
+  rvol: number | null;
+  value_cr: number | null;
+  read_at?: string;
+};
+export type CmpReasonRow = { name: string; trades: number; wins: number; losses: number; pnl: number; avg_hold: number | null };
+export type CmpStats = {
+  trades: number;
+  wins: number;
+  losses: number;
+  flat: number;
+  win_rate: number | null;
+  pnl: number;
+  avg_win: number | null;
+  avg_loss: number | null;
+  stocks: number;
+  stocks_won: number;
+  stocks_lost: number;
+  avg_hold: number | null;
+  median_hold: number | null;
+  avg_hold_win: number | null;
+  avg_hold_loss: number | null;
+  longs: number;
+  long_wins: number;
+  long_pnl: number;
+  shorts: number;
+  short_wins: number;
+  short_pnl: number;
+  best_trade: { symbol: string; date: string; pnl: number } | null;
+  worst_trade: { symbol: string; date: string; pnl: number } | null;
+  by_entry: CmpReasonRow[];
+  by_exit: CmpReasonRow[];
+};
+export type CmpBrief = {
+  date: string;
+  symbol: string;
+  side: "LONG" | "SHORT";
+  entry_at: string;
+  exit_at: string;
+  entry_reason: string;
+  exit_reason: string;
+  hold_min: number;
+  pnl: number;
+};
+export type CmpPair = { a: CmpBrief; b: CmpBrief; diff: number };
+/** How far another run took the base run's trades (a = the base, b = the other run). */
+export type CmpOverlap = {
+  tol_min: number;
+  same: number;
+  opposite: number;
+  only_a: number;
+  only_b: number;
+  union: number;
+  rate: number | null;
+  same_exit: number;
+  diff_exit_reason: number;
+  diff_exit_time: number;
+  same_pnl_a: number;
+  same_pnl_b: number;
+  opposite_pnl_a: number;
+  opposite_pnl_b: number;
+  only_a_pnl: number;
+  only_b_pnl: number;
+  stocks_both: number;
+  stocks_only_a: string[];
+  stocks_only_b: string[];
+  apart: CmpPair[];
+  apart_total: number;
+  opposite_rows: CmpPair[];
+  only_a_rows: CmpBrief[];
+  only_b_rows: CmpBrief[];
+};
+export type CompareDetail = {
+  runs: number[];
+  base: number;
+  basis: "gross" | "net";
+  match_min: number;
+  stats: Record<string, CmpStats>;
+  overlap: Record<string, CmpOverlap>;
+  takeaways: { tone: "good" | "bad" | "info"; title: string; text: string }[];
+  trades: CmpTrade[];
+  trades_total: number;
+  reads: number;
+};
+export type CompareStockDay = {
+  symbol: string;
+  day: string;
+  runs: { run_id: number; trades: CmpTrade[]; curve: { t: string; pnl: number }[] }[];
+  pressure: { t: string; buy_pct: number }[];
+};
+
 export type BacktestCompare = {
   basis: "gross" | "net";
   base: number;
@@ -3385,6 +3500,22 @@ export const smaApi = {
       `/api/replay/compare?runs=${runIds.join(",")}${base ? `&base=${base}` : ""}&basis=${basis}`,
       undefined,
       60000,
+      false
+    ),
+  /** The same runs trade by trade: wins / losers, time in trade, overlap with the base, takeaways, every trade. */
+  replayCompareTrades: (runIds: number[], base?: number | null, basis: "gross" | "net" = "gross") =>
+    request<CompareDetail>(
+      `/api/replay/compare/trades?runs=${runIds.join(",")}${base ? `&base=${base}` : ""}&basis=${basis}`,
+      undefined,
+      60000,
+      false
+    ),
+  /** One stock on one replayed day in each run: P&L minute by minute, its trades, the day's buyers % reads. */
+  replayCompareStock: (runIds: number[], symbol: string, day: string) =>
+    request<CompareStockDay>(
+      `/api/replay/compare/stock?runs=${runIds.join(",")}&symbol=${encodeURIComponent(symbol)}&day=${day}`,
+      undefined,
+      30000,
       false
     ),
   /** `seek` moves the replayed day's clock to `at` (IST HH:MM): forward = fast-forward, back = the day replays to there. */

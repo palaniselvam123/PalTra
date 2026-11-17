@@ -9,7 +9,7 @@
  * its rank, so changing the base or the basis never repaints a run.
  */
 import clsx from "clsx";
-import { ArrowLeft, Download, Loader2 } from "lucide-react";
+import { ArrowLeft, Download, FileDown, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { C, money, short, ticks, Tip, useWidth } from "@/components/PnlDashboard/charts";
@@ -23,6 +23,7 @@ import {
 } from "@/lib/smaApi";
 import { useTitle } from "@/lib/useTitle";
 import { strategyLabel, type Settings } from "./BacktestRuns";
+import { CompareDetailRest, CompareDetailTop, useCompareDetail } from "./CompareDetail";
 import { ThemeToggle } from "./Header";
 import { SortTh, useSort } from "./sortable";
 import { REASON_SHORT } from "./TradeHistoryTable";
@@ -205,17 +206,38 @@ export function BacktestCompare() {
   }, [ids, base, basis]);
 
   const meta = useMemo(() => new Map((data?.runs ?? []).map((r, i) => [r.id, { run: r, i }])), [data]);
+  const loaded = useCompareDetail(data, basis);
+  // Save as PDF = the browser's own print dialog ("Save as PDF"), on the light theme so it reads on paper;
+  // every folded list is opened first so the PDF holds what the page holds.
+  const savePdf = () => {
+    const root = document.documentElement;
+    const theme = root.getAttribute("data-theme");
+    const folds = Array.from(document.querySelectorAll<HTMLDetailsElement>("details.cmp-fold:not([open])"));
+    const title = document.title;
+    const restore = () => {
+      if (theme) root.setAttribute("data-theme", theme);
+      else root.removeAttribute("data-theme");
+      folds.forEach((d) => (d.open = false));
+      document.title = title;
+      window.removeEventListener("afterprint", restore);
+    };
+    root.setAttribute("data-theme", "light");
+    folds.forEach((d) => (d.open = true));
+    document.title = `Compare backtests ${(ids ?? []).map((i) => `#${i}`).join(" ")}`;
+    window.addEventListener("afterprint", restore);
+    window.setTimeout(() => window.print(), 150);
+  };
   const tag = (id: number | null | undefined) => {
     const m = id == null ? undefined : meta.get(id);
     return m ? <RunTag run={m.run} i={m.i} base={data?.base === id} /> : <span>#{id}</span>;
   };
 
   return (
-    <main className="cmp-series mx-auto max-w-[1500px] space-y-4 px-3 py-4 sm:px-6">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+    <main className="cmp-series cmp-page mx-auto max-w-[1500px] space-y-4 px-3 py-4 sm:px-6">
+      <header className="cmp-hero flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-sky-500/30 p-3">
         <a
           href="/terminal/"
-          className="inline-flex min-h-9 items-center gap-1 rounded-md border border-white/10 px-2 text-sm text-slate-300 hover:bg-white/5"
+          className="cmp-noprint inline-flex min-h-9 items-center gap-1 rounded-md border border-white/10 px-2 text-sm text-slate-300 hover:bg-white/5"
         >
           <ArrowLeft size={14} aria-hidden /> Terminal
         </a>
@@ -226,7 +248,17 @@ export function BacktestCompare() {
             changes a setting or places an order.
           </p>
         </div>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="cmp-noprint ml-auto flex flex-wrap items-center gap-2">
+          {data ? (
+            <button
+              type="button"
+              onClick={savePdf}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-md bg-accentSky px-3 text-sm font-semibold text-on-accent hover:opacity-90"
+              title="Opens the print dialog with the whole page laid out for paper: choose “Save as PDF” as the printer"
+            >
+              <FileDown size={14} aria-hidden /> Save as PDF
+            </button>
+          ) : null}
           {loading ? <Loader2 size={16} aria-label="Loading" className="animate-spin text-slate-400" /> : null}
           {data ? (
             <label className="flex items-center gap-1.5 text-xs text-slate-400">
@@ -279,6 +311,7 @@ export function BacktestCompare() {
         <>
           <RunCards data={data} />
           <Answer data={data} tag={tag} />
+          <CompareDetailTop data={data} loaded={loaded} />
           <Ranking data={data} meta={meta} />
           <Section
             title="Running total, day by day"
@@ -295,6 +328,7 @@ export function BacktestCompare() {
             </div>
             <RunningTotals data={data} />
           </Section>
+          <CompareDetailRest data={data} loaded={loaded} />
           <Differences data={data} tag={tag} />
           <ByStock data={data} tag={tag} />
           <ByDay data={data} />

@@ -337,6 +337,8 @@ export const FEATURES: Feature[] = [
     purpose: "The chart's buyers / sellers reading says which Most active scan it came from (\"read 09:52\"), since a long candle can take its reading from any scan inside it." },
   { id: "ma-missed", area: "active", added: "2026-11-16", pr: 447, href: "/scalp/?view=history#active", where: "Scalp → Most active → under the filters", title: "Stocks a scan could not read",
     purpose: "Lists the stocks Groww did not answer in that Most active scan, and why, so a stock you search for and do not find is explained (\"KAYNES was not read in this scan\")." },
+  { id: "term-compare-detail", area: "terminal", added: "2026-11-17", pr: 457, href: TERM, where: "Terminal → Blotter → Backtests → tick 2-8 runs → Compare", title: "Compare backtests, trade by trade",
+    purpose: "The Compare page now gives key takeaways, each run's winners, losers and stocks, time in the trade, how many trades the runs share and where they parted, each stock's entries and exits with a P&L line through the day and the buyers / sellers %, scatter plots of every trade, and Save as PDF. The Compare bar stays pinned while you tick runs." },
   { id: "term-compare", area: "terminal", added: "2026-11-15", pr: 429, href: TERM, where: "Terminal → Blotter → Backtests → tick 2-8 runs → Compare", title: "Compare backtests",
     purpose: "Tick 2-8 backtest runs and compare them on one page, on the days and stocks they share: which strategy did best, on which stocks and on which days." },
   { id: "term-light", area: "terminal", added: "2026-11-14", pr: 422, href: TERM, where: "Every page (light theme)", title: "Readable light theme",

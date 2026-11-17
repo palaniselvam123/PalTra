@@ -375,6 +375,23 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   page: the answer in plain words, the ranking (common ground / everything), the running total chart (one colour per run
   by its place, `.cmp-series` in globals.css, end labels up to 4 runs), the differences, by stock (filters, search, CSV), by
   day (CSV), by exit reason; base picker and before / after charges. Nothing is changed or ordered.
+  **Trade by trade** (`backend/backtest_detail.py`, read-only; `GET /api/replay/compare/trades?runs=&base=&basis=` → `detail`,
+  `GET /api/replay/compare/stock?runs=&symbol=&day=` → `stock_day`; `components/Terminal/CompareDetail.tsx`,
+  `useCompareDetail` / `CompareDetailTop` / `CompareDetailRest`): every closed trade of each run (`load`; entry / exit time
+  and reason, minutes in the trade, the buyers % of the latest saved Most active read before its entry,
+  `pressure_exit.read_before`), per run `stats` (winners / losers, stocks up / down, average winner / loser, time in a
+  trade, buys vs sells, by entry / exit reason), `overlap` of each run with the base (`match`: the same stock, day and side
+  entered within `MATCH_MIN` 5 minutes = the same trade; overlap rate, same entry but a different exit, the same moment on
+  the other side, trades and stocks only one run took, P&L per bucket, the biggest differences listed) and plain-words
+  `takeaways`. The page: Key takeaways, Winners / losers / stocks cards, Each run's set-up (always shown: entry mode,
+  candle size, Heikin Ashi colours, the pick's candles, stop…, differing rows amber), Did the runs take the same trades?,
+  Stock by stock (stock and day picker, each run's trades side by side, an SVG line of each run's P&L on that stock through
+  the day from the replay P&L log, else steps at each exit, with ▲ / ▼ entries and ● exits and a buyers % / sellers %
+  strip), four scatter plots over every trade (time in the trade, entry time, own-side % at entry, best while open; each
+  vs the result), entry / exit reasons, All trades CSV. **Save as PDF** = the browser's print dialog on the light theme
+  with every folded list opened (`BacktestCompare.savePdf`, print rules under `.cmp-page` in globals.css, A3 landscape).
+  The Backtests tab's Compare bar (ticked runs as chips, Compare, Clear) is pinned under the blotter bar
+  (`--blotter-pin-top`, set by `TradeHistoryTable`).
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills
