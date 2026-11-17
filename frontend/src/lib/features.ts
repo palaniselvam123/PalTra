@@ -321,6 +321,16 @@ export const FEATURES: Feature[] = [
     purpose: "While the market is open, the auto-arm replay can play today up to the last minute that has closed (positions are squared off there), so you can test today's picks without waiting for 15:30." },
   { id: "chart-executed-flow", area: "terminal", added: "2026-11-17", pr: 454, href: TERM, where: "Terminal → chart → buyers / sellers strip (dashed line) and the reading line", title: "Executed buy / sell % on the chart (estimated)",
     purpose: "Next to the buyers % of the waiting orders, how many shares were actually bought vs sold at market in each candle, so you can see when sellers keep selling into a book full of buyers. Groww has no trade list, so it is estimated from the per-second prices the bots record, else from the candle's shape." },
+  { id: "flow-trigger", area: "settings", added: "2026-11-17", pr: 463, href: S("sma-flow-trigger"), where: "Settings → Strategy → 1. When to enter → Enter on executed volume", title: "Enter on executed volume, check the waiting orders",
+    purpose: "The other way round from the Most active entry: a flat stock is bought once buyers did your % of the shares traded in the last few minutes (sold once sellers did), and only while that side also holds your % of the waiting orders." },
+  { id: "flow-same-candle", area: "settings", added: "2026-11-17", pr: 463, href: S("sma-flow-entry"), where: "Settings → Strategy → executed volume check, entry and exit → Read the same candle as the chart", title: "Read the same candle as the chart",
+    purpose: "One tick makes the executed volume check, entry or exit read the last closed candle exactly as the chart draws it, so the buyers / sellers % you see on that candle is the number the bot used." },
+  { id: "chart-trade-reads", area: "terminal", added: "2026-11-17", pr: 463, href: TERM, where: "Terminal → chart → Indicators → Mark what the bot read at each entry and exit", title: "See what the bot read at each entry and exit",
+    purpose: "Dots on the buyers / sellers strip at every entry (in) and exit (out) with the executed buyers % and sellers % the bot read then and the minutes it read them over; the lines keep each candle's own numbers." },
+  { id: "chart-indicator-checks", area: "terminal", added: "2026-11-17", pr: 463, href: TERM, where: "Terminal → chart → Indicators", title: "Tick boxes for every chart line, check / uncheck all",
+    purpose: "Each line in Indicators has a tick box to show or hide it, and one box at the top checks or unchecks them all; All on Auto puts the default back." },
+  { id: "trade-entry-reads", area: "terminal", added: "2026-11-17", pr: 463, href: TERM, where: "Terminal → chart → hover a trade's B / S / X label", title: "What the bot read when the trade opened",
+    purpose: "The trade card shows the executed buyers / sellers % over the minutes before the order and the waiting orders' read the bot had then, so the numbers match what it decided on." },
   { id: "chart-four-lines", area: "terminal", added: "2026-11-17", pr: 462, href: TERM, where: "Terminal → chart → bottom strip (Indicators → Buyers / Sellers waiting %, Buyers / Sellers executed %)", title: "Buyers and sellers, waiting and executed: four lines on the chart",
     purpose: "The bottom strip draws four lines you can switch on or off one by one: buyers waiting, sellers waiting (the order book from the Most active scans) and buyers executed, sellers executed (what traded in each candle, estimated). The reading line shows all four for the candle under the mouse, and says why one is blank." },
   { id: "flow-window-custom", area: "settings", added: "2026-11-17", pr: 461, href: S("sma-flow-exit"), where: "Settings → Strategy → executed volume entry check and exit → % of the shares traded in → custom minutes…", title: "Any number of minutes for the executed volume window",
@@ -627,7 +637,7 @@ export function featureById(id: string): Feature | undefined {
 const ANCHOR_GROUP: Record<string, string> = {
   "sma-candle-interval": "enter", "sma-day-extreme": "enter", "sma-colour-exit": "enter", "sma-colour-force": "enter",
   "sma-fresh": "check", "sma-exit-candle": "exit", "sma-slope-candle": "exit", "sma-small-colour": "exit",
-  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced",
+  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced",
 };
 
 /** The strategy form's group (enter, check, exit, gap, stop, risk, advanced) a Settings link opens, or null. */

@@ -83,6 +83,18 @@ export function ChartIndicators({
   const [open, setOpen] = useState<LineKey | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const setLine = (key: LineKey, patch: Partial<LineLook>) => onChange({ ...style, [key]: { ...style[key], ...patch } });
+  const keys = Object.keys(LINE_NAMES) as LineKey[];
+  const shownCount = keys.filter((k) => style[k].show !== "off").length;
+  // Tick all = every line shown; untick all = every line hidden (SMA lines too); "All on Auto" brings back the default.
+  const setAll = (show: Show) => {
+    const next = { ...style };
+    for (const k of keys) next[k] = { ...style[k], show: show === "auto" && (k === "sma9" || k === "sma21") ? "on" : show };
+    onChange(next);
+  };
+  const allBox = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (allBox.current) allBox.current.indeterminate = shownCount > 0 && shownCount < keys.length;
+  }, [shownCount, keys.length]);
 
   // Escape closes the panel (before the chart's own Escape leaves full screen); a click outside it too.
   useEffect(() => {
@@ -139,6 +151,29 @@ export function ChartIndicators({
           </button>
         </span>
       </div>
+      <div className="flex flex-wrap items-center gap-3 border-b border-white/10 px-3 py-2 text-xs">
+        <label className="flex min-h-9 items-center gap-2 font-semibold text-slate-100">
+          <input
+            ref={allBox}
+            type="checkbox"
+            checked={shownCount === keys.length}
+            onChange={(e) => setAll(e.target.checked ? "on" : "off")}
+            aria-label="Show or hide every line"
+          />
+          {shownCount === keys.length ? "Uncheck all" : "Check all"}
+        </label>
+        <span className="text-slate-400">
+          {shownCount} of {keys.length} on
+        </span>
+        <button
+          type="button"
+          onClick={() => setAll("auto")}
+          className="ml-auto flex min-h-9 items-center rounded-md px-2 text-slate-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
+        >
+          All on Auto
+        </button>
+        <NewTag id="chart-indicator-checks" link={false} />
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-1">
         <ul className="divide-y divide-white/5">
           {(Object.keys(LINE_NAMES) as LineKey[]).map((key) => {
@@ -150,6 +185,13 @@ export function ChartIndicators({
             return (
               <li key={key} className="py-2 text-xs">
                 <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={!off}
+                    onChange={(e) => setLine(key, { show: e.target.checked ? "on" : "off" })}
+                    aria-label={`Show ${meta.name}`}
+                    className="shrink-0"
+                  />
                   <span className="flex w-6 shrink-0 items-center justify-center">
                     <Swatch look={look} color={look.color} />
                   </span>
@@ -272,6 +314,24 @@ export function ChartIndicators({
                 className="accent-[#10B981]"
               />
               Heikin Ashi
+            </label>
+          </li>
+          <li className="py-2 text-xs">
+            <label
+              className="flex items-start gap-2"
+              title="At each trade's entry and exit, a dot on the buyers / sellers strip with the executed buyers % and sellers % the bot read then, over the minutes it read them (the same numbers as the trade card). The strip's lines stay the candle's own numbers."
+            >
+              <input
+                type="checkbox"
+                checked={style.tradeReads}
+                onChange={(e) => onChange({ ...style, tradeReads: e.target.checked })}
+                className="mt-0.5 accent-[#10B981]"
+              />
+              <span>
+                <span className="font-semibold text-slate-100">Mark what the bot read at each entry and exit</span>{" "}
+                <NewTag id="chart-trade-reads" link={false} />
+                <span className="block text-slate-500">executed buyers / sellers % at that moment, on the strip</span>
+              </span>
             </label>
           </li>
         </ul>

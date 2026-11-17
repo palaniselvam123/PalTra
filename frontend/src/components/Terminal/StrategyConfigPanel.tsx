@@ -492,6 +492,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     flow_exit_loss: Boolean(form.flow_exit_loss),
     flow_exit_book: Boolean(form.flow_exit_book),
     flow_exit_mode: String(form.flow_exit_mode ?? "EXIT").toUpperCase() === "CONFIRM" ? "CONFIRM" : "EXIT",
+    flow_trigger: Boolean(form.flow_trigger),
+    flow_trigger_pct: Math.min(95, Math.max(50, Number(form.flow_trigger_pct ?? 60) || 60)),
+    flow_trigger_window: Math.min(60, Math.max(0, Math.round(Number(form.flow_trigger_window ?? 3)))) || 0,
+    flow_trigger_book: Math.min(95, Math.max(0, Number(form.flow_trigger_book ?? 55) || 0)),
     flow_entry: Boolean(form.flow_entry),
     flow_entry_pct: Math.min(95, Math.max(50, Number(form.flow_entry_pct ?? 55) || 55)),
     flow_entry_window: flowWindow(form.flow_entry_window),
@@ -1248,6 +1252,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         </div>
         <div className="min-w-0">
           <PressureEntry form={form} set={set} isOwn={isOwn} />
+          <FlowTrigger form={form} set={set} isOwn={isOwn} />
           <Only s="sma trend turn colour">
           <SectionTitle>Extra ways in (all off by default)</SectionTitle>
           </Only>
@@ -3751,6 +3756,8 @@ export function activeRules(f: SmaConfig): Rule[] {
     }[String(f.level_line ?? "BB_MIDDLE")] ?? "Price beyond the chosen level"
   );
   check("use_fresh", f.use_fresh, `Fresh trend only: a new cross, beyond VWAP, the gap widening${Number(f.fresh_rvol ?? 1.5) > 0 ? `, volume ${n(f.fresh_rvol, 1.5)}× usual` : ""}`);
+  if (f.flow_trigger)
+    add({ group: "enter", key: "flow_trigger", text: `Enter when buyers (buy) / sellers (sell) did ${f.flow_trigger_pct ?? 60}% of the shares traded ${Number(f.flow_trigger_window ?? 3) === 0 ? "in the last exit candle" : `in the last ${f.flow_trigger_window ?? 3} min`}${Number(f.flow_trigger_book ?? 55) > 0 ? `, and that side holds ${f.flow_trigger_book ?? 55}% of the waiting orders` : ""}`, off: { flow_trigger: false } });
   check("flow_entry", f.flow_entry, `Executed volume: the order's own side did ${f.flow_entry_pct ?? 55}% of the shares traded ${Number(f.flow_entry_window ?? 3) === 0 ? "in the last exit candle" : `in the last ${f.flow_entry_window ?? 3} min`} (estimated)`);
   check(
     "use_high52",
@@ -5110,6 +5117,62 @@ function PressureEntry({
   );
 }
 
+/** Executed volume starts the trade (flow_exit.trigger_*); the waiting orders are the check. */
+function FlowTrigger({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const on = Boolean(form.flow_trigger);
+  const pct = Number(form.flow_trigger_pct ?? 60);
+  const shown = Number.isFinite(pct) ? pct : 60;
+  const win = Number(form.flow_trigger_window ?? 3);
+  const book = Number(form.flow_trigger_book ?? 55);
+  const bookShown = Number.isFinite(book) ? book : 55;
+  const box = "min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9";
+  return (
+    <div id="sma-flow-trigger" className="mb-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-white/10">
+      <label className="flex items-start gap-2 text-sm text-slate-200">
+        <input type="checkbox" className="mt-1" checked={on} onChange={(e) => set("flow_trigger", e.target.checked)} />
+        <span>
+          {(isOwn("flow_trigger") || isOwn("flow_trigger_pct") || isOwn("flow_trigger_window") || isOwn("flow_trigger_book")) && <OwnTag />}
+          <b className="text-slate-100">Enter on executed volume</b> — the side doing the trading starts the trade, the waiting orders
+          check it <NewTag id="flow-trigger" />{" "}
+          <InfoTip label="About entering on executed volume">
+            The other way round from the Most active entry above (there the waiting orders start the trade). A flat armed stock is
+            bought once buyers did at least this % of the shares traded at market over the window that just closed, and sold once
+            sellers did. Then the waiting orders are checked: the order&apos;s side must hold at least the second % in a Most active
+            read of the last 20 minutes (0 = not checked; no fresh read = no order). Judged once per closed window. Every other
+            entry check, the stop, flip, cut-off, caps and one LIVE bot per stock still apply. The split is estimated from the
+            per-second prices the bots record (else the candle&apos;s shape). Any stock, PAPER and LIVE, backtests too. Entry reason
+            &quot;Executed volume&quot;.
+          </InfoTip>
+        </span>
+      </label>
+      <div className={clsx("mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
+        Buyers (buy) / sellers (sell) did at least
+        <input type="number" min={50} max={95} step={1} disabled={!on} value={shown} onChange={(e) => set("flow_trigger_pct", e.target.value)} aria-label="Executed share that starts a trade, %" className={box} />
+        % of the shares traded in
+        <FlowWindowPick disabled={!on} value={win} candleLabel="the last closed candle" onChange={(v) => set("flow_trigger_window", v)} />
+      </div>
+      <SameCandle disabled={!on} value={win} onChange={(v) => set("flow_trigger_window", v)} />
+      <div className={clsx("mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
+        and that side holds at least
+        <input type="number" min={0} max={95} step={1} disabled={!on} value={bookShown} onChange={(e) => set("flow_trigger_book", e.target.value)} aria-label="Waiting orders the order's side must hold, %" className={box} />
+        % of the waiting orders (0 = not checked)
+      </div>
+      <p className="mt-1 text-xs text-slate-400">
+        Example at {shown}% / {bookShown}%: sellers did {Math.min(95, shown + 8)}% of the shares traded {win === 0 ? "in the last candle" : `in the last ${win} minutes`}
+        {bookShown > 0 ? ` and sellers hold ${Math.min(95, bookShown + 10)}% of the waiting orders` : ""}: the bot sells.
+      </p>
+    </div>
+  );
+}
+
 /** Executed volume entry check (flow_exit.py): the order's own side must have done the set % of the shares traded. */
 function FlowEntry({
   form,
@@ -5157,6 +5220,7 @@ function FlowEntry({
         />
         % of the shares traded in
         <FlowWindowPick disabled={!on} value={win} candleLabel="the last exit candle" onChange={(v) => set("flow_entry_window", v)} />
+        <SameCandle disabled={!on} value={win} onChange={(v) => set("flow_entry_window", v)} />
       </div>
       <p className="mt-1 text-xs text-slate-400">
         Example at {shown}%, {win === 0 ? "the exit candle" : `${win} min`}: a buy signal while sellers did {Math.max(5, 100 - shown + 10)}% of the
@@ -5176,6 +5240,18 @@ function flowWindow(value: unknown): number {
 }
 
 /** The executed volume window: the ready-made minutes, the exit candle, or any number of minutes typed (1-60). */
+/** "Read the same candle as the chart": the window set to the last closed exit candle (0), the very candle the chart
+ * draws at the bot's candle size, so the hover % on the candle before an entry / exit is the number the bot read. */
+function SameCandle({ value, disabled, onChange }: { value: number; disabled: boolean; onChange: (value: string) => void }) {
+  return (
+    <label className={clsx("flex basis-full items-center gap-2 text-xs text-slate-300", disabled && "opacity-50")}>
+      <input type="checkbox" disabled={disabled} checked={value === 0} onChange={(e) => onChange(e.target.checked ? "0" : "3")} />
+      Read the same candle as the chart (the last closed candle, so the chart&apos;s % on it is what the bot read; set the
+      chart to the bot&apos;s candle size) <NewTag id="flow-same-candle" link={false} />
+    </label>
+  );
+}
+
 function FlowWindowPick({
   value,
   disabled,
@@ -5303,6 +5379,7 @@ function FlowExit({
         />
         % of the shares traded in
         <FlowWindowPick disabled={!on} value={win} candleLabel="the exit candle just closed" onChange={(v) => set("flow_exit_window", v)} />
+        <SameCandle disabled={!on} value={win} onChange={(v) => set("flow_exit_window", v)} />
       </div>
       {!confirm && (
       <>

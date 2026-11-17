@@ -251,6 +251,10 @@ def _ensure_bot_config_columns(engine) -> None:
             "flow_entry": "BOOLEAN DEFAULT 0",
             "flow_entry_pct": "FLOAT DEFAULT 55",
             "flow_entry_window": "INTEGER DEFAULT 3",
+            "flow_trigger": "BOOLEAN DEFAULT 0",
+            "flow_trigger_pct": "FLOAT DEFAULT 60",
+            "flow_trigger_window": "INTEGER DEFAULT 3",
+            "flow_trigger_book": "FLOAT DEFAULT 55",
             "stop_plan": "BOOLEAN DEFAULT 0",
             "plan_be_r": "FLOAT DEFAULT 1.5",
             "plan_trail_r": "FLOAT DEFAULT 2.0",
@@ -375,6 +379,10 @@ def _ensure_trade_log_columns(engine) -> None:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN stop_log VARCHAR")
         if "entry_regime" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN entry_regime VARCHAR")
+        if "entry_flow" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN entry_flow VARCHAR")
+        if "exit_flow" not in names:
+            conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN exit_flow VARCHAR")
         if "recovery_loss" not in names:
             conn.exec_driver_sql("ALTER TABLE trade_log ADD COLUMN recovery_loss FLOAT")
         if "recovery_bar" not in names:

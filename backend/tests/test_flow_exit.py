@@ -182,3 +182,50 @@ def test_custom_windows_are_accepted_by_the_settings_api():
     with pytest.raises(Exception):
         ConfigUpdate(flow_exit_window=61)
     assert flow_exit.confirm_span(_ts(10, 20, 5), _ts(10, 0, 5), 7, 15) == (int(_ts(10, 13)), int(_ts(10, 20)))
+
+
+
+
+# ---- executed volume starts the trade (flow_trigger) -------------------------------------------------------------------
+
+def test_trigger_side_and_book_check():
+    assert flow_exit.trigger_side(70, 60) == "LONG" and flow_exit.trigger_side(30, 60) == "SHORT"
+    assert flow_exit.trigger_side(55, 60) is None
+    assert flow_exit.split([], 3) is None
+    assert flow_exit.split([{"time": 0, "buy": 300, "sell": 100, "src": "T"}], 1) == (75.0, "ticks")
+    cfg = type("C", (), {"flow_trigger_book": 0})()
+    assert flow_exit.trigger_book(cfg) == 0.0
+    now = _ts(11, 0)
+    assert "no fresh Most active read" in flow_exit.book_refusal("ACME", "SHORT", now, 55)
+    pressure_exit.note_scan({"as_of": "", "rows": [{"symbol": "ACME", "buy_share": 0.3,
+                                                    "read_at": dt.datetime.fromtimestamp(now - 60, IST).isoformat()}]})
+    assert flow_exit.book_refusal("ACME", "SHORT", now, 55) is None                       # sellers hold 70%
+    assert "buyers hold only 30%" in flow_exit.book_refusal("ACME", "LONG", now, 55)
+    reads = flow_exit.entry_reads("ACME", None, now, 3)
+    assert reads == {"wait_buy": 30.0, "read_at": int(now - 60)}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("on", [False, True])
+async def test_sellers_doing_the_trading_start_a_short(db, on):  # noqa: F811
+    from sma_research.replayer import replay_symbol
+    from tests.test_candle_patterns import DAY, DAY0, _quiet, _rows
+    from tests.test_gap_mode import _settings
+
+    # Quiet candles all day; from 10:00 to 10:05 every recorded second ticks down: sellers do the trading.
+    start = int(dt.datetime.combine(DAY, dt.time(10, 0), tzinfo=IST).timestamp())
+    for minute in range(5):
+        for i, price in enumerate([996.0, 995.9, 995.8, 995.7, 995.6]):
+            tick_store.add("FLT", start + minute * 60 + i * 10, price - 0.05 * minute)
+    frame = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(375)))
+    trades = await replay_symbol(frame, "FLT", [DAY], _settings(
+        db, qty=1, use_stop=False, flow_trigger=on, flow_trigger_pct=60, flow_trigger_window=3, flow_trigger_book=0))
+    shorts = [t for t in trades if t["direction"] == "SHORT" and "10:0" <= t["entry_time"].strftime("%H:%M") <= "10:09"]
+    assert bool(shorts) is on
+
+
+def test_last_exit_candle_is_the_candle_the_chart_draws():
+    # An order at 09:36 on 15-minute candles reads the 09:15-09:30 candle (the one the chart shows), not 09:21-09:36.
+    assert flow_exit.entry_span(_ts(9, 36, 0), 0, 15) == (int(_ts(9, 15)), int(_ts(9, 30)))
+    assert flow_exit.entry_span(_ts(12, 30, 5), 0, 15) == (int(_ts(12, 15)), int(_ts(12, 30)))
+    assert flow_exit.entry_span(_ts(12, 30, 5), 10, 15) == (int(_ts(12, 20)), int(_ts(12, 30)))

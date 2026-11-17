@@ -255,6 +255,9 @@ type TradeTip = {
   /** SMA fast vs slow gap % on the entry / exit candle: (fast − slow) ÷ slow × 100. */
   gapEntry: number | null;
   gapExit: number | null;
+  /** What the bot read when the trade opened: executed buy % over the minutes before it, the latest waiting-orders read. */
+  entryFlow: { buy?: number; src?: string; from?: number; to?: number; wait_buy?: number; read_at?: number } | null;
+  exitFlow: { buy?: number; src?: string; from?: number; to?: number; wait_buy?: number; read_at?: number } | null;
 };
 
 /** Green for a trade that made money, red for a loss, grey while it is open or unknown. */
@@ -804,6 +807,8 @@ function tradeTip(
     charges: open ? null : row?.brokerage_and_taxes ?? null,
     net,
     gapEntry: gapAt(rows, entryTime, snap),
+    entryFlow: row?.entry_flow ?? null,
+    exitFlow: open ? null : row?.exit_flow ?? null,
     gapExit: open ? gapAt(rows, rows[rows.length - 1]?.time ?? null, snap) : gapAt(rows, exitTime, snap),
   };
 }
@@ -1880,6 +1885,50 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           );
         }
       }
+    }
+    // What the bot read at each entry and exit (its own window, saved on the trade), as dots on the strip: the lines keep
+    // each candle's own numbers, the dots say what the order was decided on.
+    for (const ref of [pressureRef.current, pressureSellRef.current, flowRef.current, flowSellRef.current]) ref?.setMarkers([]);
+    const host = (
+      [
+        [flowRef.current, showFlow],
+        [flowSellRef.current, showFlowSell],
+        [pressureRef.current, showBuyerLine],
+        [pressureSellRef.current, showSellerLine],
+      ] as const
+    ).find(([ref, on]) => ref && on)?.[0];
+    if (host && look.tradeReads && rows.length) {
+      const sym = (past?.symbol ?? symbol ?? "").toUpperCase();
+      const shown = host === flowRef.current ? flows.map((f) => f != null) : host === flowSellRef.current ? flows.map((f) => f != null) : buyers.map((v) => v != null);
+      const first = rows[0].time;
+      // The candle a moment falls in that has a point on the host line (else the nearest earlier one with a point).
+      const at = (sec: number) => {
+        let pick: number | null = null;
+        for (let i = 0; i < rows.length && rows[i].time <= sec; i += 1) if (shown[i]) pick = rows[i].time;
+        return pick;
+      };
+      const marks: { time: never; position: "aboveBar" | "belowBar"; color: string; shape: "circle"; text: string }[] = [];
+      const hhmm = (sec?: number) =>
+        sec == null ? "" : new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(sec * 1000));
+      const sec = (text?: string | null) => {
+        const when = text ? parseClock(text) : null;
+        return when ? Math.floor(when.getTime() / 1000) : null;
+      };
+      for (const t of allTrades ?? trades) {
+        if ((t.symbol ?? "").toUpperCase() !== sym) continue;
+        for (const [read, time, word, color, pos] of [
+          [t.entry_flow, sec(t.entry_time), "in", "#38BDF8", "belowBar"],
+          [t.exit_flow, sec(t.exit_time), "out", "#F59E0B", "aboveBar"],
+        ] as const) {
+          if (time == null || time < first || read?.buy == null) continue;
+          const c = at(time);
+          if (c == null) continue;
+          const span = read.from != null && read.to != null ? ` ${hhmm(read.from)}-${hhmm(read.to)}` : "";
+          marks.push({ time: c as never, position: pos, color, shape: "circle", text: `${word} B${read.buy.toFixed(0)} S${(100 - read.buy).toFixed(0)}${span}` });
+        }
+      }
+      marks.sort((a, b) => (a.time as number) - (b.time as number));
+      host.setMarkers(marks);
     }
     if (cvdRef.current) {
       cvdRef.current.applyOptions({ visible: showCvd });
@@ -3223,7 +3272,9 @@ function LegendItem({ swatch, children }: { swatch: ReactNode; children: ReactNo
 function TradeTipCard({ at, width, height }: { at: { box: TradeBox; x: number; y: number }; width: number; height: number }) {
   const t = at.box.tip;
   const cardW = 236;
-  const cardH = 240;
+  const cardH = 240 + (t.entryFlow ? 60 : 0) + (t.exitFlow ? 40 : 0);
+  const hhmm = (sec?: number) =>
+    sec == null ? "—" : new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(sec * 1000));
   // Beside the pointer, flipped to the other side near the right or bottom edge, and kept inside the chart.
   const left = at.x + 14 + cardW > width ? Math.max(4, at.x - 14 - cardW) : at.x + 14;
   const below = at.y + 14 + cardH <= height;
@@ -3246,7 +3297,7 @@ function TradeTipCard({ at, width, height }: { at: { box: TradeBox; x: number; y
   const side = t.direction === "SHORT" ? "Short" : "Buy";
   const reason = t.reason ? REASON_SHORT[t.reason] ?? t.reason.replace(/_/g, " ").toLowerCase() : null;
   const pctMove = t.points != null && t.entryPrice ? (t.points / t.entryPrice) * 100 : null;
-  const row = (label: string, value: ReactNode, cls = "text-slate-100") => (
+  const row = (label: ReactNode, value: ReactNode, cls = "text-slate-100") => (
     <div className="flex items-baseline justify-between gap-3">
       <span className="text-slate-400">{label}</span>
       <span className={clsx("text-right font-mono tabular-nums", cls)}>{value}</span>
@@ -3273,6 +3324,21 @@ function TradeTipCard({ at, width, height }: { at: { box: TradeBox; x: number; y
       {!t.open && t.exitTime != null ? row("", `${when(t.exitTime)}${reason ? ` · ${reason}` : ""}`, "text-slate-400") : null}
       {t.qty ? row("Qty", String(t.qty)) : null}
       {row("SMA gap at entry", pct(t.gapEntry), tone(t.gapEntry))}
+      {t.entryFlow?.buy != null ? (
+        <>
+          {row(<>Executed at entry <NewTag id="trade-entry-reads" link={false} /></>, `B ${t.entryFlow.buy.toFixed(0)}% · S ${(100 - t.entryFlow.buy).toFixed(0)}%`, "text-sky-200")}
+          {row("", `${hhmm(t.entryFlow.from)}–${hhmm(t.entryFlow.to)} before the order${t.entryFlow.src ? ` · ${t.entryFlow.src}` : ""}`, "text-slate-400")}
+        </>
+      ) : null}
+      {t.entryFlow?.wait_buy != null
+        ? row("Waiting at entry", `B ${t.entryFlow.wait_buy.toFixed(0)}% · S ${(100 - t.entryFlow.wait_buy).toFixed(0)}% (read ${hhmm(t.entryFlow.read_at)})`, "text-amber-200")
+        : null}
+      {t.exitFlow?.buy != null ? (
+        <>
+          {row("Executed at exit", `B ${t.exitFlow.buy.toFixed(0)}% · S ${(100 - t.exitFlow.buy).toFixed(0)}%`, "text-sky-200")}
+          {row("", `${hhmm(t.exitFlow.from)}–${hhmm(t.exitFlow.to)} before the exit${t.exitFlow.src ? ` · ${t.exitFlow.src}` : ""}`, "text-slate-400")}
+        </>
+      ) : null}
       {row(t.open ? "SMA gap now" : "SMA gap at exit", pct(t.gapExit), tone(t.gapExit))}
       {row(
         "Points",

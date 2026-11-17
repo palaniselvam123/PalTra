@@ -45,6 +45,10 @@ class TradeLog(Base):
     # Choppy or trending when the trade opened (stock_regime.py, JSON: phase, score, crosses, since,
     # move, candle minutes); display only, NULL on older rows.
     entry_regime: Mapped[str | None] = mapped_column(String, nullable=True)
+    # What the stock showed when the trade opened (display only, JSON): executed buy % over the window before it and the
+    # latest waiting-orders read (flow_exit.entry_reads).
+    entry_flow: Mapped[str | None] = mapped_column(String, nullable=True)
+    exit_flow: Mapped[str | None] = mapped_column(String, nullable=True)
     # Recovery hold (recovery.py): loss per share at the adverse cross and that candle's start.
     recovery_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
     recovery_bar: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -540,6 +544,12 @@ class BotConfig(Base):
     flow_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     flow_entry_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=55.0)
     flow_entry_window: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
+    # Executed volume starts the trade (flow_exit.trigger_*): buyers / sellers did flow_trigger_pct % of the shares traded
+    # over flow_trigger_window minutes, and the order's side holds flow_trigger_book % of the waiting orders (0 = no check).
+    flow_trigger: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    flow_trigger_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=60.0)
+    flow_trigger_window: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
+    flow_trigger_book: Mapped[float | None] = mapped_column(Float, nullable=True, default=55.0)
     # Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R.
     stop_plan: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     plan_be_r: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)

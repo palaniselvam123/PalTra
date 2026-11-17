@@ -217,9 +217,18 @@ def entry_window(cfg) -> int:
 
 
 def entry_span(now_ts: float, win: int, exit_minutes: int) -> tuple[int, int]:
-    """(start, end) of the closed minutes an entry reads: the last `win` minutes, or one exit candle's length."""
+    """(start, end) of the closed minutes an entry reads: the last `win` minutes, or with 0 the last closed exit candle
+    (candles of `exit_minutes` from 09:15 IST): the very candle the chart draws at that size, so its hover % is what the
+    bot read (owner's request)."""
     end = int(now_ts) - int(now_ts) % 60
-    size = (win if win > 0 else max(1, int(exit_minutes))) * 60
+    if win > 0:
+        return end - win * 60, end
+    size = max(1, int(exit_minutes)) * 60
+    day = dt.datetime.fromtimestamp(end - 1, IST)
+    open_ts = int(dt.datetime.combine(day.date(), dt.time(9, 15), tzinfo=IST).timestamp())
+    closed = open_ts + max(0, (end - open_ts) // size) * size
+    if closed > open_ts:
+        return closed - size, closed
     return end - size, end
 
 
@@ -235,3 +244,117 @@ def entry_refusal(points: list[dict], side: str, level: float, minutes: int) -> 
         return None
     who = "buyers" if side == "LONG" else "sellers"
     return f"executed volume: {who} did only {own:g}% of the shares traded in {minutes} min (need {level:g}%)"
+
+
+# ---- executed volume starts the trade (flow_trigger) ------------------------------------------------------------------
+# The other way round from the Most active entry (pressure_exit AT_ARM: the waiting orders start the trade): a flat armed
+# stock is entered once buyers did at least `flow_trigger_pct` % (60) of the shares traded at market over the window
+# (`flow_trigger_window`, 3 closed minutes; 0 = one exit candle's length) — a buy — or sellers did — a sell. The waiting
+# orders are then the check (`flow_trigger_book`, 55; 0 = not checked): the order's side must hold at least that % of the
+# waiting orders in a Most active read at most pressure_exit.MAX_AGE_SEC old; no fresh read = no order. Judged once per
+# closed window end; every entry check, the stop, flip, cut-off, caps and one LIVE bot per stock apply (apply_signal).
+
+TRIGGER_REASON = "EXECUTED_VOLUME"
+DEFAULT_TRIGGER_PCT = 60.0
+DEFAULT_TRIGGER_BOOK = 55.0
+
+
+def trigger_on(cfg) -> bool:
+    return bool(getattr(cfg, "flow_trigger", False))
+
+
+def trigger_pct(cfg) -> float:
+    value = getattr(cfg, "flow_trigger_pct", None)
+    try:
+        value = float(DEFAULT_TRIGGER_PCT if value is None else value)
+    except (TypeError, ValueError):
+        value = DEFAULT_TRIGGER_PCT
+    return min(MAX_PCT, max(MIN_PCT, value))
+
+
+def trigger_window(cfg) -> int:
+    value = getattr(cfg, "flow_trigger_window", None)
+    try:
+        value = int(DEFAULT_WINDOW if value is None else value)
+    except (TypeError, ValueError):
+        value = DEFAULT_WINDOW
+    return value if 0 <= value <= MAX_WINDOW else DEFAULT_WINDOW
+
+
+def trigger_book(cfg) -> float:
+    """The waiting-orders check in %, 0 = not checked."""
+    value = getattr(cfg, "flow_trigger_book", None)
+    try:
+        value = float(DEFAULT_TRIGGER_BOOK if value is None else value)
+    except (TypeError, ValueError):
+        value = DEFAULT_TRIGGER_BOOK
+    return 0.0 if value <= 0 else min(MAX_PCT, max(30.0, value))
+
+
+def split(points: list[dict], minutes: int) -> tuple[float, str] | None:
+    """(buyers' % of the executed volume, source word) over the points, or None with too little volume to read."""
+    with_volume = [p for p in points if p["buy"] + p["sell"] > 0]
+    if not with_volume or len(with_volume) < max(1, minutes // 2):
+        return None
+    buy = sum(p["buy"] for p in with_volume)
+    sell = sum(p["sell"] for p in with_volume)
+    kinds = {p.get("src") for p in with_volume}
+    src = "ticks" if kinds == {"T"} else "candles" if kinds == {"C"} else "ticks + candles"
+    return round(100.0 * buy / (buy + sell), 1), src
+
+
+def trigger_side(buy_pct: float, level: float) -> str | None:
+    """LONG when buyers did at least `level` %, SHORT when sellers did, else None."""
+    if buy_pct >= level:
+        return "LONG"
+    if 100.0 - buy_pct >= level:
+        return "SHORT"
+    return None
+
+
+def latest_wait(symbol: str, now_ts: float) -> tuple[float, float] | None:
+    """(buyers' % of the waiting orders, read time) of the latest Most active read at most MAX_AGE_SEC old, else None."""
+    import pressure_exit
+
+    rows = pressure_exit._rows(symbol, now_ts)
+    if not rows:
+        return None
+    at, share = rows[-1]
+    if now_ts - at > pressure_exit.MAX_AGE_SEC:
+        return None
+    return round(share * 100.0, 1), at
+
+
+def book_refusal(symbol: str, side: str, now_ts: float, level: float) -> str | None:
+    """None when the order's side holds at least `level` % of the waiting orders in a fresh read, else why not."""
+    if level <= 0:
+        return None
+    wait = latest_wait(symbol, now_ts)
+    who = "buyers" if side == "LONG" else "sellers"
+    if wait is None:
+        return f"no fresh Most active read of the waiting orders (needs {who} at {level:g}%)"
+    buy, at = wait
+    own = buy if side == "LONG" else round(100.0 - buy, 1)
+    if own >= level:
+        return None
+    clock = dt.datetime.fromtimestamp(at, IST).strftime("%H:%M")
+    return f"{who} hold only {own:g}% of the waiting orders (read {clock}, need {level:g}%)"
+
+
+def entry_reads(symbol: str, tape, now_ts: float, minutes: int, exit_minutes: int = 0) -> dict:
+    """What a trade saw at its entry (display only, saved on the trade): the executed split over the `minutes` closed
+    minutes before it and the latest fresh waiting-orders read."""
+    import trade_flow
+
+    out: dict = {}
+    start, end = entry_span(now_ts, minutes, exit_minutes or minutes)
+    try:
+        got = split(trade_flow.minutes(symbol, tape, start, end), (end - start) // 60)
+    except Exception:  # noqa: BLE001 - bookkeeping only
+        got = None
+    if got is not None:
+        out.update({"buy": got[0], "src": got[1], "from": start, "to": end})
+    wait = latest_wait(symbol, now_ts)
+    if wait is not None:
+        out.update({"wait_buy": wait[0], "read_at": int(wait[1])})
+    return out
