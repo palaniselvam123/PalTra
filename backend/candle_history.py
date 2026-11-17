@@ -284,7 +284,20 @@ def build_payload(
         "filters": chart_filters(cfg),
         # Buyers' share from that range's saved Most active scans (pressure_exit.series); display only.
         "pressure": _pressure(symbol, candles),
+        # Executed buy / sell volume per 1-minute candle, estimated (trade_flow.py); display only.
+        "flow": _flow(symbol, frame, candles, interval),
     }
+
+
+def _flow(symbol: str, frame: pd.DataFrame, candles: list[dict], interval: int) -> list[dict]:
+    if not candles or frame is None or frame.empty:
+        return []
+    try:
+        import trade_flow
+
+        return trade_flow.minutes(symbol, frame, float(candles[0]["time"]), float(candles[-1]["time"]) + interval * 60)
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def _pressure(symbol: str, candles: list[dict]) -> list[dict]:

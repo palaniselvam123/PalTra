@@ -482,6 +482,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     pressure_entry_pct: Math.min(95, Math.max(30, Number(form.pressure_entry_pct ?? 65) || 65)),
     pressure_flip: Boolean(form.pressure_flip),
     pressure_flip_pct: Math.min(95, Math.max(55, Number(form.pressure_flip_pct ?? 65) || 65)),
+    pressure_flip_flow: (() => {
+      const v = Number(form.pressure_flip_flow ?? 0) || 0;
+      return v <= 0 ? 0 : Math.min(95, Math.max(30, v));
+    })(),
     stop_plan: Boolean(form.stop_plan),
     decel_exit: Boolean(form.decel_exit),
     decel_lookback: Math.min(10, Math.max(1, Math.round(Number(form.decel_lookback ?? 2) || 2))),
@@ -3851,7 +3855,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM")
     add({ group: "enter", key: "pressure_entry", text: `Most active stocks: ${f.pressure_entry === "AT_ARM" ? "entered at once while" : "enter only while"} the buyers (a buy) / sellers (a sell) hold ${f.pressure_entry_pct ?? 65}% or more`, off: { pressure_entry: "OFF" } });
   if (f.pressure_flip)
-    add({ group: "enter", key: "pressure_flip", text: `Most active stocks, candle colour: sellers (against a buy) / buyers (against a sell) at ${f.pressure_flip_pct ?? 65}% or more, with the price on their side of the VWAP, turn the order their way`, off: { pressure_flip: false } });
+    add({ group: "enter", key: "pressure_flip", text: `Most active stocks, candle colour: sellers (against a buy) / buyers (against a sell) at ${f.pressure_flip_pct ?? 65}% or more, with the price on their side of the VWAP${Number(f.pressure_flip_flow) > 0 ? ` and ${f.pressure_flip_flow}% of the executed volume` : ""}, turn the order their way`, off: { pressure_flip: false } });
   if (f.pressure_exit && f.pressure_over_counter)
     add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
@@ -5141,6 +5145,28 @@ function PressureFlip({
         Example at {shown}%: a green candle on a stock whose sellers hold 71% (read 09:56) and whose price is under the
         VWAP sells instead of buying. Over the VWAP, the colour decides.
       </p>
+      <label className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300">
+        {isOwn("pressure_flip_flow") && <OwnTag />}
+        And their share of the colour candle&apos;s executed volume at least
+        <input
+          type="number"
+          min={0}
+          max={95}
+          step={1}
+          disabled={!on}
+          value={Number(form.pressure_flip_flow ?? 0) || 0}
+          onChange={(e) => set("pressure_flip_flow", e.target.value)}
+          className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        />
+        % <span className="text-xs text-slate-500">(0 = not checked)</span> <NewTag id="pressure-flip-flow" />{" "}
+        <InfoTip label="About the executed volume check">
+          Waiting orders can mislead: buyers can hold 79% of the book while sellers keep selling into it. With this set, the
+          flip also needs the other side to have done this % of the shares traded in the colour candle that just closed.
+          Groww gives no trade-by-trade list, so it is estimated: each minute&apos;s volume is split by how often the price
+          ticked up vs down in the seconds the bots record (kept 10 days), else by the candle&apos;s shape. No volume known
+          = no flip. The chart shows the same estimate as a dashed &quot;Executed buy %&quot; line on the buyers strip.
+        </InfoTip>
+      </label>
     </div>
   );
 }

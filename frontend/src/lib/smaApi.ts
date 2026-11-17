@@ -325,6 +325,8 @@ export type SmaConfig = {
   /** Candle-colour mode, Most active stocks: the other side at pressure_flip_pct % or more overrules the colour. */
   pressure_flip?: boolean;
   pressure_flip_pct?: number;
+  /** ... and the other side's % of the colour candle's executed volume (estimated); 0 = not checked. */
+  pressure_flip_flow?: number;
   /** Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R. */
   stop_plan?: boolean;
   /** SMA 9 deceleration guard (decel_guard.py): slope in ATR per candle. */
@@ -1998,6 +2000,8 @@ export type ChartPayload = {
   /** Buyers' share of the waiting orders from the Most active scans (live and saved), oldest first; display only. */
   /** Saved Most active reads: buyers %, and volume vs usual (×) / money traded (₹ cr) when that read had them. */
   pressure?: { time: number; buy_pct: number; rvol?: number; value_cr?: number }[];
+  /** Executed buy / sell shares per 1-minute candle, estimated (trade_flow.py); display only. */
+  flow?: { time: number; buy: number; sell: number; src: "T" | "C" }[];
 };
 
 export type TradeRow = {

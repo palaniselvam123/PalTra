@@ -241,6 +241,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "pressure_entry_pct": "FLOAT DEFAULT 65",
             "pressure_flip": "BOOLEAN DEFAULT 0",
             "pressure_flip_pct": "FLOAT DEFAULT 65",
+            "pressure_flip_flow": "FLOAT DEFAULT 0",
             "stop_plan": "BOOLEAN DEFAULT 0",
             "plan_be_r": "FLOAT DEFAULT 1.5",
             "plan_trail_r": "FLOAT DEFAULT 2.0",
