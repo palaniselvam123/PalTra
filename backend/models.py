@@ -533,6 +533,8 @@ class BotConfig(Base):
     flow_exit_window: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
     flow_exit_loss: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     flow_exit_book: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # EXIT = the executed volume closes the trade itself; CONFIRM = it only lets the other signal exits close (flow_exit.py).
+    flow_exit_mode: Mapped[str | None] = mapped_column(String(10), nullable=True, default="EXIT")
     # Executed volume entry check (flow_exit.py): the order's own side did flow_entry_pct % of the shares traded over the
     # last flow_entry_window minutes (0 = one exit candle's length). Per bot and per stock.
     flow_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

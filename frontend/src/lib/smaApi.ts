@@ -331,14 +331,17 @@ export type SmaConfig = {
   flow_exit?: boolean;
   flow_exit_pct?: number;
   /** Minutes (1, 2, 3, 5, 10, 15), or 0 = the exit candle just closed. */
-  flow_exit_window?: 0 | 1 | 2 | 3 | 5 | 10 | 15;
+  /** 0 = the exit candle; else the last N closed minutes (1-60). */
+  flow_exit_window?: number;
   flow_exit_loss?: boolean;
   flow_exit_book?: boolean;
+  /** EXIT = close the trade itself; CONFIRM = only let the other signal exits close when it agrees. */
+  flow_exit_mode?: "EXIT" | "CONFIRM";
   /** Executed volume entry check (flow_exit.py): the order's own side's % of the shares traded over the window. */
   flow_entry?: boolean;
   flow_entry_pct?: number;
   /** Minutes 1-15, or 0 = one exit candle's length. */
-  flow_entry_window?: 0 | 1 | 2 | 3 | 5 | 10 | 15;
+  flow_entry_window?: number;
   /** Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R. */
   stop_plan?: boolean;
   /** SMA 9 deceleration guard (decel_guard.py): slope in ATR per candle. */

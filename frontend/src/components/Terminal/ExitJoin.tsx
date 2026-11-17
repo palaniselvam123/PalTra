@@ -25,7 +25,7 @@ export const EXIT_KEYS: { key: string; label: string; on: (f: Record<string, unk
   { key: "MACD", label: "MACD", on: (f) => Boolean(f.macd_exit) },
   { key: "CVD", label: "Cumulative delta", on: (f) => Boolean(f.cvd_div_exit) },
   { key: "SLOW", label: "Slow SMA", on: (f) => Boolean(f.slow_sma_exit) },
-  { key: "FLOW", label: "Executed volume", on: (f) => Boolean(f.flow_exit) },
+  { key: "FLOW", label: "Executed volume", on: (f) => Boolean(f.flow_exit) && String(f.flow_exit_mode ?? "EXIT").toUpperCase() !== "CONFIRM" },
 ];
 
 export function exitGroup(value: unknown): string[] {

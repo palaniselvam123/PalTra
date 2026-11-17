@@ -236,6 +236,7 @@ FIELD_HELP = {
     "flow_exit_pct": "the other side's % of the executed volume that closes the trade (50-95, default 60)",
     "flow_exit_window": "the window in minutes: 1, 2, 3, 5, 10 or 15 closed 1-minute candles, or 0 = the candle the bot exits on",
     "flow_exit_loss": "with flow_exit, close only while the trade is losing",
+    "flow_exit_mode": "EXIT = the executed volume closes the trade itself; CONFIRM = it never closes on its own, but the signal exits (colour turn, counter candles, SMA cross, SMA 9 exits, Supertrend, Bollinger, EMA, MACD…) close only when the other side did flow_exit_pct % of the shares traded over the window; stops, targets and the square-off are never held",
     "flow_exit_book": "with flow_exit, also need the waiting orders (latest Most active read) to show the other side above half",
     "flow_entry": "entry check: enter only when the order's own side (buyers for a buy, sellers for a sell) did flow_entry_pct % of the shares traded at market over the window (estimated, trade_flow.py); too little volume refuses",
     "flow_entry_pct": "the order's own side's % of the executed volume an entry needs (50-95, default 55)",
