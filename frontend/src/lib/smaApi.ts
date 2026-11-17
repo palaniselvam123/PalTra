@@ -2537,6 +2537,11 @@ export type CmpOverlap = {
   opposite_pnl_b: number;
   only_a_pnl: number;
   only_b_pnl: number;
+  /** Run B's entry fill against run A's on the same trades, ₹ a share (+ = worse) and in total; minutes apart. */
+  entry_worse_rs?: number | null;
+  entry_worse_total?: number | null;
+  entry_later_min?: number | null;
+  exit_later_min?: number | null;
   stocks_both: number;
   stocks_only_a: string[];
   stocks_only_b: string[];
@@ -2548,6 +2553,9 @@ export type CmpOverlap = {
 };
 export type CompareDetail = {
   runs: number[];
+  /** With a live book in the comparison: the real days every run is read on (else empty). */
+  days?: string[];
+  labels?: Record<string, string>;
   base: number;
   basis: "gross" | "net";
   match_min: number;
@@ -2570,7 +2578,13 @@ export type BacktestCompare = {
   base: number;
   made_at?: string;
   runs: {
+    /** Negative = a bot's own book of real days (live_book.py), not a backtest run. */
     id: number;
+    kind?: "replay" | "live";
+    /** "#12", or the live book's name ("Bot 1 NSE live · 17 Nov"). */
+    label?: string;
+    /** Live books: how many different strategy snapshots its trades were opened with (settings changed, or per stock). */
+    settings_variants?: number | null;
     status: string;
     start_date: string;
     end_date: string;
@@ -3510,6 +3524,16 @@ export const smaApi = {
       60000,
       false
     ),
+  /** The recent days a bot's own book (NSE live, practice, research) traded, each with its Compare id (negative). */
+  replayCompareLiveDays: (bot: number, book: "LIVE" | "PAPER" | "RESEARCH") =>
+    request<{ day: string; id: number; trades: number; gross: number }[]>(
+      `/api/replay/compare/live-days?bot=${bot}&book=${book}`,
+      undefined,
+      20000,
+      false
+    ),
+  /** One bot's replay, whichever desk the page is on (the Compare page's "Backtest this live day"). */
+  replayInfoFor: (bot: number) => request<ReplayInfo>(`/api/replay?bot=${bot}`, undefined, 15000, false),
   /** One stock on one replayed day in each run: P&L minute by minute, its trades, the day's buyers % reads. */
   replayCompareStock: (runIds: number[], symbol: string, day: string) =>
     request<CompareStockDay>(

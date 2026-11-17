@@ -392,6 +392,22 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   with every folded list opened (`BacktestCompare.savePdf`, print rules under `.cmp-page` in globals.css, A3 landscape).
   The Backtests tab's Compare bar (ticked runs as chips, Compare, Clear) is pinned under the blotter bar
   (`--blotter-pin-top`, set by `TradeHistoryTable`).
+  **Live against a backtest** (`backend/live_book.py`, read-only; owner's request: compare the bot's real trades of a day
+  with a backtest of the same day and strategy): a bot's own book of real days is a **negative run id**
+  (`encode`: -(first day YYYYMMDD × 10 000 + span × 100 + bot × 10 + book), book 1 LIVE / 2 PAPER / 3 RESEARCH; `decode`,
+  `label` "Bot 1 NSE live · 17 Nov"; frontend `lib/liveBook.ts` the same arithmetic). `backtest_compare.load` and
+  `backtest_detail.load` read its trades straight from the trade book (`live_book.trades`: that mode, that bot (bot 1 also
+  NULL rows), those days, no `run_id`), `live_book.run` gives it a run's shape (settings = the most common strategy snapshot
+  saved on its trades at entry, `settings_variants` how many there were; stocks = the ones traded plus the arm log's), and
+  with a live book in the comparison `detail` reads every run on the live book's days only (`days`). `overlap` adds
+  `entry_worse_rs` / `entry_worse_total` / `entry_later_min` / `exit_later_min` (B's fill against A's on the same trades) and
+  `_live_takeaways` explains the gap ("Live against the backtest": trades both took, only live, only the backtest, fills
+  ₹ a share worse / better). `stock_day` draws a live book's line from the market-day open P&L log (`open_pnl_log.points`,
+  that mode). `GET /api/replay/compare/live-days?bot=&book=` lists the days a book traded with their ids; the blotter's
+  Compare bar has **+ Add a real day** (`BacktestRuns.LiveDayPicker`), and the Compare page's **Backtest the same days**
+  (`BacktestCompare.LiveBacktest`) starts that bot's replay of those days "As armed live" with hand-offs played at full
+  speed (`smaApi.replayStart`, `replayInfoFor` polled) and adds the finished run; a LIVE bot cannot replay (refused as
+  always), and the page says what to do. Nothing is ordered.
 - `backend/replay.py` – "Replay a past day": a separate `ReplayEngine`
   (subclass of `StrategyEngine`) plays a past session's Groww 1-minute
   candles on its own clock (`_now`), through `ReplayBroker`, which fills

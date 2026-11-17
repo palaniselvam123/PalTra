@@ -45,15 +45,21 @@ def load(run_ids: list[int], reads: bool = True) -> dict[int, list[dict]]:
     from database import session_factory
     from models import TradeLog
 
+    import live_book
+
+    replay_ids = [int(i) for i in run_ids if not live_book.is_live(i)]
     with session_factory()() as db:
-        rows = (
+        rows = [(t, int(t.run_id)) for t in (
             db.query(TradeLog)
-            .filter(TradeLog.run_id.in_(run_ids), TradeLog.exit_price.isnot(None))
+            .filter(TradeLog.run_id.in_(replay_ids), TradeLog.exit_price.isnot(None))
             .order_by(TradeLog.entry_time, TradeLog.id)
             .all()
-        )
+        )] if replay_ids else []
+        for i in run_ids:
+            if live_book.is_live(i):
+                rows.extend((t, int(i)) for t in live_book.trades(db, int(i)))
         out: dict[int, list[dict]] = {int(i): [] for i in run_ids}
-        for t in rows:
+        for t, rid in rows:
             if (t.exit_reason or "") == STOPPED_REASON or t.entry_time is None or t.exit_time is None:
                 continue
             entry_ts, exit_ts = _epoch(t.entry_time), _epoch(t.exit_time)
@@ -63,10 +69,10 @@ def load(run_ids: list[int], reads: bool = True) -> dict[int, list[dict]]:
             if t.max_high is not None and t.max_low is not None and t.entry_price:
                 up, down = float(t.max_high) - float(t.entry_price), float(t.max_low) - float(t.entry_price)
                 best, worst = (up, down) if sign > 0 else (-down, -up)
-            out[int(t.run_id)].append(
+            out[rid].append(
                 {
                     "id": int(t.id),
-                    "run_id": int(t.run_id),
+                    "run_id": rid,
                     "date": t.date,
                     "symbol": (t.symbol or "").upper(),
                     "side": (t.direction or "LONG").upper(),
@@ -265,6 +271,9 @@ def overlap(a: list[dict], b: list[dict], key: str = "gross", tol_min: float = M
         [(x, y) for x, y in same if (id(x), id(y)) not in kept], key=lambda p: -abs(p[1][key] - p[0][key])
     )
     stocks_a, stocks_b = {t["symbol"] for t in a}, {t["symbol"] for t in b}
+    priced = [(x, y) for x, y in same if x["entry_price"] and y["entry_price"]]
+    # How much worse (+) or better (-) run B's fill was than run A's on the same trade, ₹ a share and in total.
+    worse = [((y["entry_price"] - x["entry_price"]) * (1 if x["side"] == "LONG" else -1), y["qty"]) for x, y in priced]
     return {
         "tol_min": tol_min,
         "same": len(same),
@@ -282,6 +291,10 @@ def overlap(a: list[dict], b: list[dict], key: str = "gross", tol_min: float = M
         "opposite_pnl_b": _r(sum(y[key] for _, y in opposite)),
         "only_a_pnl": _r(sum(t[key] for t in m["only_a"])),
         "only_b_pnl": _r(sum(t[key] for t in m["only_b"])),
+        "entry_worse_rs": _r(sum(w for w, _ in worse) / len(worse)) if worse else None,
+        "entry_worse_total": _r(sum(w * q for w, q in worse)) if worse else None,
+        "entry_later_min": _avg([(y["entry_ts"] - x["entry_ts"]) / 60.0 for x, y in same]),
+        "exit_later_min": _avg([(y["exit_ts"] - x["exit_ts"]) / 60.0 for x, y in same]),
         "stocks_both": len(stocks_a & stocks_b),
         "stocks_only_a": sorted(stocks_a - stocks_b),
         "stocks_only_b": sorted(stocks_b - stocks_a),
@@ -297,6 +310,18 @@ def overlap(a: list[dict], b: list[dict], key: str = "gross", tol_min: float = M
 
 
 # ---- what to take away ----------------------------------------------------------------------------------------------
+
+
+def _name(run_id: int) -> str:
+    """"run #12", or the live book's name ("Bot 1 NSE live · 17 Nov")."""
+    import live_book
+
+    return live_book.label(run_id) if live_book.is_live(run_id) else f"run #{run_id}"
+
+
+def _Name(run_id: int) -> str:
+    text = _name(run_id)
+    return text[:1].upper() + text[1:]
 
 
 def _money(value: float | None) -> str:
@@ -320,7 +345,7 @@ def takeaways(ids: list[int], base: int, per_run: dict[int, dict], overlaps: dic
     s = per_run[top]
     if s["trades"]:
         out.append({"tone": "good" if (s["pnl"] or 0) > 0 else "bad", "title": "Most money",
-                    "text": f"Run #{top} made {_money(s['pnl'])} from {s['trades']} trades: {s['wins']} winners, "
+                    "text": f"{_Name(top)} made {_money(s['pnl'])} from {s['trades']} trades: {s['wins']} winners, "
                             f"{s['losses']} losers ({s['win_rate']:g}% won) on {s['stocks']} stocks."})
     rates = [(i, per_run[i]["win_rate"]) for i in ids if per_run[i]["win_rate"] is not None]
     if len(rates) > 1:
@@ -328,63 +353,64 @@ def takeaways(ids: list[int], base: int, per_run: dict[int, dict], overlaps: dic
         lo = min(rates, key=lambda r: r[1])
         if hi[0] != top and hi[1] - lo[1] >= 3:
             out.append({"tone": "info", "title": "Most winners",
-                        "text": f"Run #{hi[0]} won most often ({hi[1]:g}% of its trades) but did not make the most "
-                                f"money: its winners are smaller or its losers bigger than run #{top}'s."})
+                        "text": f"{_Name(hi[0])} won most often ({hi[1]:g}% of its trades) but did not make the most "
+                                f"money: its winners are smaller or its losers bigger than {_name(top)}'s."})
     for i in ids:
         s = per_run[i]
         if s["avg_win"] is not None and s["avg_loss"] is not None and s["avg_loss"] < 0:
             ratio = s["avg_win"] / -s["avg_loss"]
             if ratio < 1 and (s["win_rate"] or 0) < 60:
-                out.append({"tone": "bad", "title": f"Run #{i}: losers bigger than winners",
+                out.append({"tone": "bad", "title": f"{_Name(i)}: losers bigger than winners",
                             "text": f"An average winner makes {_money(s['avg_win'])} and an average loser costs "
                                     f"{_money(s['avg_loss'])}, while only {s['win_rate']:g}% of trades win."})
     for other, o in overlaps.items():
         if not o["union"]:
             continue
         tone = "info"
-        out.append({"tone": tone, "title": f"Runs #{base} and #{other}: {o['rate']:g}% the same trades",
+        out.append({"tone": tone, "title": f"{_Name(base)} and {_name(other)}: {o['rate']:g}% the same trades",
                     "text": f"{o['same']} of {o['union']} trades were the same in both (same stock, side and entry "
-                            f"within {o['tol_min']:g} min); run #{base} took {o['only_a']} that #{other} did not, "
-                            f"#{other} took {o['only_b']} that #{base} did not"
+                            f"within {o['tol_min']:g} min); {_name(base)} took {o['only_a']} that {_name(other)} did not, "
+                            f"{_name(other)} took {o['only_b']} that {_name(base)} did not"
                             + (f", and {o['opposite']} times they went opposite ways" if o["opposite"] else "") + "."})
         gap_same = (o["same_pnl_b"] or 0) - (o["same_pnl_a"] or 0)
         gap_only = (o["only_b_pnl"] or 0) - (o["only_a_pnl"] or 0)
         if abs(gap_same) + abs(gap_only) > 0:
             if abs(gap_only) >= abs(gap_same):
                 out.append({"tone": "good" if gap_only > 0 else "bad", "title": "The gap is in which trades were taken",
-                            "text": f"Trades only run #{other} took made {_money(o['only_b_pnl'])}; trades only run "
-                                    f"#{base} took made {_money(o['only_a_pnl'])}. That explains more of the "
+                            "text": f"Trades only {_name(other)} took made {_money(o['only_b_pnl'])}; trades only "
+                                    f"{_name(base)} took made {_money(o['only_a_pnl'])}. That explains more of the "
                                     f"difference than the exits do: look at the entry rules and checks."})
             else:
                 out.append({"tone": "good" if gap_same > 0 else "bad", "title": "The gap is in the exits",
-                            "text": f"On the {o['same']} trades both took, run #{other} made {_money(o['same_pnl_b'])} "
-                                    f"and run #{base} {_money(o['same_pnl_a'])}; {o['diff_exit_reason']} of them closed "
+                            "text": f"On the {o['same']} trades both took, {_name(other)} made {_money(o['same_pnl_b'])} "
+                                    f"and {_name(base)} {_money(o['same_pnl_a'])}; {o['diff_exit_reason']} of them closed "
                                     f"for a different reason. Look at the exit rules and stops."})
         if o["stocks_only_a"] or o["stocks_only_b"]:
             out.append({"tone": "info", "title": "Stocks only one run traded",
-                        "text": f"Run #{base} only: {', '.join(o['stocks_only_a'][:8]) or 'none'}"
-                                f"{' …' if len(o['stocks_only_a']) > 8 else ''}. Run #{other} only: "
+                        "text": f"{_Name(base)} only: {', '.join(o['stocks_only_a'][:8]) or 'none'}"
+                                f"{' …' if len(o['stocks_only_a']) > 8 else ''}. {_Name(other)} only: "
                                 f"{', '.join(o['stocks_only_b'][:8]) or 'none'}{' …' if len(o['stocks_only_b']) > 8 else ''}."})
     holds = [(i, per_run[i]["avg_hold"]) for i in ids if per_run[i]["avg_hold"] is not None]
     if len(holds) > 1:
         long_, short_ = max(holds, key=lambda h: h[1]), min(holds, key=lambda h: h[1])
         if long_[1] >= 1.3 * max(short_[1], 0.1):
             out.append({"tone": "info", "title": "Time in a trade",
-                        "text": f"Run #{long_[0]} stays in a trade {_mins(long_[1])} on average, run #{short_[0]} "
+                        "text": f"{_Name(long_[0])} stays in a trade {_mins(long_[1])} on average, {_name(short_[0])} "
                                 f"{_mins(short_[1])}."})
     for i in ids:
         s = per_run[i]
         if s["avg_hold_win"] and s["avg_hold_loss"] and s["avg_hold_loss"] >= 1.5 * s["avg_hold_win"] and s["losses"] >= 5:
-            out.append({"tone": "bad", "title": f"Run #{i}: losers are held longer than winners",
+            out.append({"tone": "bad", "title": f"{_Name(i)}: losers are held longer than winners",
                         "text": f"Losers stay open {_mins(s['avg_hold_loss'])} on average, winners "
                                 f"{_mins(s['avg_hold_win'])}: the exit is slow to cut a losing trade."})
+    out = _live_takeaways(ids, base, per_run, overlaps) + out
     for i in ids:
         with_read = [(side_pct(t), t[key]) for t in trades[i] if side_pct(t) is not None]
         strong = [p for share, p in with_read if share >= 60]
         weak = [p for share, p in with_read if share <= 40]
         if len(strong) >= MIN_READS and len(weak) >= MIN_READS:
             a, b = sum(strong) / len(strong), sum(weak) / len(weak)
-            out.append({"tone": "good" if a > b else "bad", "title": f"Run #{i}: buyers / sellers at the entry",
+            out.append({"tone": "good" if a > b else "bad", "title": f"{_Name(i)}: buyers / sellers at the entry",
                         "text": f"Trades entered with their own side holding 60% or more of the waiting orders made "
                                 f"{_money(a)} each on average ({len(strong)} trades); with 40% or less, {_money(b)} "
                                 f"({len(weak)} trades)."})
@@ -392,6 +418,42 @@ def takeaways(ids: list[int], base: int, per_run: dict[int, dict], overlaps: dic
 
 
 # ---- the page's payload ---------------------------------------------------------------------------------------------
+
+
+def _live_takeaways(ids: list[int], base: int, per_run: dict[int, dict], overlaps: dict[int, dict]) -> list[dict]:
+    """Live book against a backtest of the same days: where the gap between what really happened and the backtest
+    comes from (the same trades filled or closed differently, or trades only one of them took)."""
+    import live_book
+
+    out: list[dict] = []
+    for other, o in overlaps.items():
+        if live_book.is_live(base) == live_book.is_live(other):
+            continue
+        live, test = (base, other) if live_book.is_live(base) else (other, base)
+        # overlap() is base (a) vs other (b): turn it round when the base is the backtest.
+        flip = live != base
+        same_live, same_test = (o["same_pnl_b"], o["same_pnl_a"]) if flip else (o["same_pnl_a"], o["same_pnl_b"])
+        only_live, only_test = (o["only_b_pnl"], o["only_a_pnl"]) if flip else (o["only_a_pnl"], o["only_b_pnl"])
+        n_live, n_test = (o["only_b"], o["only_a"]) if flip else (o["only_a"], o["only_b"])
+        gap = per_run[live]["pnl"] - per_run[test]["pnl"]
+        parts = [
+            f"{_Name(live)} made {_money(per_run[live]['pnl'])}, the backtest ({_name(test)}) "
+            f"{_money(per_run[test]['pnl'])}: {_money(abs(gap))} {'more' if gap >= 0 else 'less'} live.",
+            f"On the {o['same']} trades both took: live {_money(same_live)}, backtest {_money(same_test)}.",
+            f"{n_live} trades only live took made {_money(only_live)} (news, Force / manual orders, settings changed "
+            f"during the day, or a signal the candles show differently); {n_test} only the backtest took made "
+            f"{_money(only_test)}.",
+        ]
+        worse = o.get("entry_worse_rs")
+        if worse is not None:
+            # entry_worse_rs is run B's fill against run A's: turned round to live against the backtest.
+            live_worse = worse if flip else -worse
+            apart = o.get("entry_later_min")
+            when = f", entries {abs(apart):.1f} min apart" if apart is not None else ""
+            parts.append(f"On those trades live fills were ₹{abs(live_worse):,.2f} a share "
+                         f"{'worse' if live_worse > 0 else 'better'} than the backtest's on average{when}.")
+        out.append({"tone": "good" if gap >= 0 else "bad", "title": "Live against the backtest", "text": " ".join(parts)})
+    return out
 
 
 def detail(run_ids: list[int], base: int | None = None, basis: str = "gross") -> dict:
@@ -405,6 +467,13 @@ def detail(run_ids: list[int], base: int | None = None, basis: str = "gross") ->
     key = "net" if basis == "net" else "gross"
     base_id = int(base) if base is not None and int(base) in ids else ids[0]
     trades = load(ids)
+    import live_book
+
+    live_days = {d for i in ids if live_book.is_live(i) for d in live_book.decode(i)["days"]}
+    if live_days:
+        # A real day against a backtest: every run is read on the live book's days only, so a longer backtest is
+        # not set against one real day.
+        trades = {i: [t for t in rows if t["date"] in live_days] for i, rows in trades.items()}
     per_run = {i: stats(trades[i], key) for i in ids}
     overlaps = {i: overlap(trades[base_id], trades[i], key) for i in ids if i != base_id}
     rows = sorted((t for i in ids for t in trades[i]), key=lambda t: (t["entry_ts"], t["run_id"]))
@@ -413,6 +482,8 @@ def detail(run_ids: list[int], base: int | None = None, basis: str = "gross") ->
         rows = rows[-MAX_TRADES:]
     return {
         "runs": ids,
+        "days": sorted(live_days),
+        "labels": {i: _name(i) for i in ids},
         "base": base_id,
         "basis": key,
         "match_min": MATCH_MIN,
@@ -428,6 +499,7 @@ def detail(run_ids: list[int], base: int | None = None, basis: str = "gross") ->
 def stock_day(run_ids: list[int], symbol: str, day: str) -> dict:
     """One stock on one replayed day in each run: its P&L minute by minute (closed trades + the open one, before
     charges, from the replay P&L log), its trades, and the day's buyers % reads for the strip under the chart."""
+    import live_book
     import open_pnl_log
 
     name = (symbol or "").upper()
@@ -438,7 +510,11 @@ def stock_day(run_ids: list[int], symbol: str, day: str) -> dict:
         mine = [t for t in trades[i] if t["symbol"] == name and t["date"] == day]
         closed = [(name, t["exit_at"][:5], float(t["gross"] or 0.0)) for t in mine]
         try:
-            series = open_pnl_log.replay_points(i, day)
+            if live_book.is_live(i):
+                book = live_book.decode(i)["book"]
+                series = [p for p in open_pnl_log.points(day, live_book.desk(i)) if p.get("mode") == book]
+            else:
+                series = open_pnl_log.replay_points(i, day)
             curve = open_pnl_log.by_stock(series, closed).get(name, [])
         except Exception:  # noqa: BLE001
             curve = []
