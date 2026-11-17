@@ -230,6 +230,22 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   source (`replay.pick_sources`: a Most active pick backtest's stocks and an auto-arm replay's Most active arms), merged over
   the bot's `trade_sources` in `ReplayEngine.load_config`, so every Most active rule (entry check, fade exit, flip) applies in
   those backtests.
+  **Executed volume too** (`pressure_flip_flow`, 0 = not checked, 30-95; per bot and per stock; the box under the flip,
+  `StrategyConfigPanel.PressureFlip`): the flip also needs the other side's share of the colour candle's executed volume
+  (`trade_flow.share` of the minutes in the colour candle just closed, `pressure_exit.flip_side(..., flow, flow_level)`);
+  unknown never flips.
+- `backend/trade_flow.py` – **executed buy / sell volume, estimated** (display and the flip check above; no order path;
+  owner's SOLARINDS case: buyers held 79 % of the waiting orders while sellers kept hitting the bids). Groww's API has
+  no trade-by-trade list and never says which side started a trade, so per 1-minute candle (`minutes`): its volume
+  (`minute_volume`, else Groww's running total differenced) split by the tick rule over the per-second prices the bots
+  record (`tick_store.between`, kept `TICK_KEEP_DAYS` 10; up = buy, down = sell, unchanged keeps the last side; `src`
+  "T"), else by the candle's shape like the cumulative delta (`candle_share`: ½ + ½ × (close − open) ÷ (high − low);
+  `src` "C"). Finished minutes are cached (`_CACHE`, `FINAL_AFTER_SEC` 70). The chart payloads (`/api/chart` and the
+  research / replay forms via `StrategyEngine._flow_points` on `_tapes`, `/api/history` via `candle_history._flow`) carry
+  `flow` [{time, buy, sell, src}]; the chart draws each candle's executed buy % as a dashed line on the buyers / sellers
+  strip (`chartStyle.flowReads`, Indicators → "Executed buy % (strip, estimated)", key `flow`, Auto = with the buyers
+  strip) and "Executed buy …% sell …% (ticks / candles)" on the reading line. Stocks no bot watched and days older than the
+  tick store read the candle shape only.
 - Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
   PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle
   after the entry by `StrategyEngine._watch_bollinger` on `bb_period` /

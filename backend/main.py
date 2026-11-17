@@ -829,6 +829,8 @@ class ConfigUpdate(BaseModel):
     # Candle-colour mode, Most active stocks: buyers / sellers at this % overrule the colour (pressure_exit.py).
     pressure_flip: bool | None = None
     pressure_flip_pct: float | None = Field(default=None, ge=55, le=95)
+    # ... and the other side's % of the colour candle's executed volume, estimated (trade_flow.py); 0 = off.
+    pressure_flip_flow: float | None = Field(default=None, ge=0, le=95)
     stop_plan: bool | None = None
     plan_be_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
     plan_trail_r: float | None = Field(default=None, gt=0, le=stop_plan_mod.MAX_R)
@@ -1894,6 +1896,7 @@ def _gap_dict(row) -> dict:
         "pressure_entry_pct": pressure_exit_mod.entry_pct(row),
         "pressure_flip": pressure_exit_mod.flip_on(row),
         "pressure_flip_pct": pressure_exit_mod.flip_pct(row),
+        "pressure_flip_flow": pressure_exit_mod.flip_flow_pct(row),
         "stop_plan": stop_plan_mod.on(row),
         "plan_be_r": stop_plan_mod.be_r(row),
         "plan_trail_r": stop_plan_mod.trail_r(row),

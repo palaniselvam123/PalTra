@@ -106,6 +106,7 @@ import recovery
 import fade_unarm
 import pivots
 import pressure_exit
+import trade_flow
 import breakout
 import review
 import paper_wallet
@@ -416,7 +417,7 @@ SNAPSHOT_FIELDS = (
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
     "pressure_exit", "pressure_exit_pct", "pressure_over_counter", "pressure_entry", "pressure_entry_pct",
-    "pressure_flip", "pressure_flip_pct",
+    "pressure_flip", "pressure_flip_pct", "pressure_flip_flow",
     "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
@@ -2622,9 +2623,17 @@ class StrategyEngine:
             closed = frame.iloc[:-1] if frame is not None and len(frame) > 1 else None
             last_close = float(closed["close"].iloc[-1]) if closed is not None and len(closed) else None
             vwap = _session_vwap(closed) if closed is not None else None
+            flow_level, flow = pressure_exit.flip_flow_pct(cfg), None
+            if flow_level > 0 and closed is not None and len(closed):
+                # Executed volume of the colour candle just closed (trade_flow.py): buyers' share of it.
+                end = int(closed["ts"].iloc[-1]) + 60
+                tf = max(1, int(pattern_setting(cfg, "pattern_tf") or 1))
+                points = trade_flow.minutes(symbol, closed, end - tf * 60, end)
+                if points:
+                    flow = (trade_flow.share(points, "LONG"), trade_flow.source_word(points))
 
             def overruled(c):
-                found = (pressure_exit.flip_side(symbol, c.side, now_ts, level, last_close, vwap)
+                found = (pressure_exit.flip_side(symbol, c.side, now_ts, level, last_close, vwap, flow, flow_level)
                          if c.side is not None else None)
                 return (replace(c, side=found[0], note=f"{c.note}; {found[1]}"), True) if found else (c, False)
 
@@ -7345,7 +7354,18 @@ class StrategyEngine:
             "pivot_target": pivots.target_mode(cfg) if cfg is not None else "OFF",
             # Buyers' share of the waiting orders from the Most active scans (pressure_exit.series); display only.
             "pressure": self._pressure_points(view, candles),
+            # Executed buy / sell volume per 1-minute candle, estimated (trade_flow.py); display only.
+            "flow": self._flow_points(view, candles),
         }
+
+    def _flow_points(self, symbol: str, candles: list[dict]) -> list[dict]:
+        """Estimated shares bought / sold at market per minute over the candles on screen, up to the engine's clock."""
+        if not symbol or not candles:
+            return []
+        try:
+            return trade_flow.minutes(symbol, self._tapes.get(symbol), float(candles[0]["time"]), self._now().timestamp())
+        except Exception:  # noqa: BLE001
+            return []
 
     def _pressure_points(self, symbol: str, candles: list[dict]) -> list[dict]:
         """The stock's buyers % over the candles on screen, up to the engine's clock (a replay sees no later read)."""

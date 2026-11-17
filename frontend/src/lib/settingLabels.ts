@@ -192,6 +192,7 @@ export const SETTING_LABELS: Record<string, string> = {
   pressure_entry_pct: "Most active entry buyers / sellers %",
   pressure_flip: "Candle colour: buyers / sellers overrule it",
   pressure_flip_pct: "Buyers / sellers % that overrules the colour",
+  pressure_flip_flow: "Executed volume % the overrule needs too",
   stop_plan: "staged stop plan",
   decel_exit: "SMA 9 deceleration guard",
   decel_lookback: "deceleration slope over (candles)",

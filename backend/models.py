@@ -523,6 +523,8 @@ class BotConfig(Base):
     # Candle-colour mode, Most active stocks: buyers / sellers at pressure_flip_pct % or more overrule the colour.
     pressure_flip: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     pressure_flip_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=65.0)
+    # ... and the other side's share of the colour candle's executed volume (trade_flow.py), 0 = not checked.
+    pressure_flip_flow: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     # Staged stop plan (stop_plan.py): breakeven at +plan_be_r R, Supertrend trail from +plan_trail_r R.
     stop_plan: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     plan_be_r: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)

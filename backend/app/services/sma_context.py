@@ -231,6 +231,7 @@ FIELD_HELP = {
     "pressure_entry_pct": "buyers / sellers % a Most active stock's entry needs (30-95)",
     "pressure_flip": "candle-colour mode, Most active stocks: when the colour points one way but the other side (sellers against a buy, buyers against a sell) holds at least pressure_flip_pct % in a fresh Most active read and the last close is on their side of today's VWAP, the trade goes their way instead (entry reason PRESSURE_FLIP)",
     "pressure_flip_pct": "buyers / sellers % that overrules the candle colour (55-95)",
+    "pressure_flip_flow": "with pressure_flip, the other side must also hold this % of the colour candle's executed volume (estimated from the per-second prices, else the candle's shape); 0 = not checked",
     "pressure_over_counter": "Most active stocks with the fade exit on: hold the counter-candle exit while a fresh Most active read still shows the trade's side above pressure_exit_pct (no fresh read = the counter-candle exit works as usual)",
     "cross_exit": "an opposite SMA cross closes the trade and reverses (off = held through a cross)",
     "bb_exit": "Bollinger exit: OFF | BAND | MIDDLE | BOTH", "bb_period": "Bollinger period", "bb_std": "Bollinger std dev",

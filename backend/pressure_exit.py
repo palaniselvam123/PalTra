@@ -315,8 +315,19 @@ def flip_pct(cfg) -> float:
     return min(MAX_PCT, max(MIN_FLIP_PCT, value))
 
 
+def flip_flow_pct(cfg) -> float:
+    """The executed-volume share the other side needs too (trade_flow.py), 0 = not checked."""
+    value = getattr(cfg, "pressure_flip_flow", None)
+    try:
+        value = float(value or 0.0)
+    except (TypeError, ValueError):
+        value = 0.0
+    return 0.0 if value <= 0 else min(MAX_PCT, max(MIN_PCT, value))
+
+
 def flip_side(symbol: str, side: str, now_ts: float, level: float,
-              close: float | None = None, vwap: float | None = None) -> tuple[str, str] | None:
+              close: float | None = None, vwap: float | None = None,
+              flow: tuple[float | None, str] | None = None, flow_level: float = 0.0) -> tuple[str, str] | None:
     """(the other side, plain note) when the other side holds at least `level` % in a fresh read AND the price
     agrees: the last closed candle's close under today's VWAP to sell, over it to buy (owner's case: buyers read
     79 % while sellers were hitting the bids under the VWAP; the waiting orders alone are not proof). An unknown
@@ -330,10 +341,20 @@ def flip_side(symbol: str, side: str, now_ts: float, level: float,
         return None
     if close is None or vwap is None or not (close < vwap if other == "SHORT" else close > vwap):
         return None
+    done = ""
+    if flow_level > 0:
+        # Executed volume too (trade_flow.py): the other side's share of the colour candle's estimated volume.
+        # `flow` = (the LONG side's % of it, how it was read); unknown never flips.
+        if flow is None or flow[0] is None:
+            return None
+        executed = flow[0] if other == "LONG" else round(100.0 - flow[0], 1)
+        if executed < flow_level:
+            return None
+        done = f", {executed:g}% of the executed volume ({flow[1]})"
     at = dt.datetime.fromtimestamp(read[0], IST).strftime("%H:%M")
     who = "sellers" if other == "SHORT" else "buyers"
     where = "under" if other == "SHORT" else "over"
-    return other, f"{who} {share:g}% (read {at}) and the price {where} VWAP {vwap:.2f} overrule the candle colour"
+    return other, f"{who} {share:g}% (read {at}){done} and the price {where} VWAP {vwap:.2f} overrule the candle colour"
 
 
 def reset() -> None:
