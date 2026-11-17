@@ -235,7 +235,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`trade_flow.share` of the minutes in the colour candle just closed, `pressure_exit.flip_side(..., flow, flow_level)`);
   unknown never flips.
 - `backend/flow_exit.py` – **executed volume exit** (`flow_exit`, off by default; `flow_exit_pct` 60, 50-95;
-  `flow_exit_window` 3 = the last N closed 1-minute candles (1/2/3/5/10/15) or 0 = the exit candle just closed
+  `flow_exit_window` 3 = the last N closed 1-minute candles (1/2/3/5/10/15, or any custom 1-`MAX_WINDOW` 60 typed under "custom minutes…", `StrategyConfigPanel.FlowWindowPick`; the entry check's `flow_entry_window` too) or 0 = the exit candle just closed
   (`_exit_minutes`, from 09:15); `flow_exit_loss` only while losing; `flow_exit_book` the waiting orders must agree (the
   other side above 50 % in a Most active read at most `pressure_exit.MAX_AGE_SEC` old, `book_note`); per bot and per
   stock, PAPER and LIVE, replays too; any stock, not only Most active; Settings → 3. When to exit, under the buyers /
@@ -255,6 +255,18 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the real order's side (after `flip_orders`) did at least that % of the shares traded over the window
   (`flow_exit.entry_span` / `entry_refusal` on `trade_flow.minutes` of `_tapes`); too little volume refuses too. It joins
   `entry_block`, so late entry can retry it. Direct orders (Force, news, hand-offs, fast mover) never read it.
+  **Confirm the other exits instead** (`flow_exit_mode` `EXIT` default | `CONFIRM`, per bot and per stock, PAPER and LIVE,
+  replays too; owner's request: the executed volume as a check like the entry checks, not an exit of its own; the card's
+  "Close the trade by itself" / "Use it to confirm the other exits" switch): with `CONFIRM` `_watch_flow_exit` never
+  closes (`flow_exit.closes`), and `StrategyEngine._flow_hold` holds every signal exit in `flow_exit.CONFIRM_REASONS`
+  (colour turn, counter candles, SMA cross / recovery profit exit, SMA 9 turn / bend / V-turn / deceleration / turn
+  against, smaller candles, exit candle cross, Supertrend, Bollinger, EMA, MACD, CVD, slow SMA) unless the other side did
+  at least `flow_exit_pct` % of the shares traded over `confirm_span` (the last `flow_exit_window` minutes, or 0 = the
+  last closed exit candle; cut at the entry's first minute). Checked in `_exit_now` (after the AND vote), in
+  `_colour_minute` before the colour turn (a held turn neither closes nor reverses) and in `_apply_locked` for the cross /
+  SMA 9 turn. Too little volume to read lets the exit go; "only while losing" and "waiting orders agree" are not read;
+  stops, targets, the square-off, recovery, gap fade and kill switch are never held. The held exit is judged again the
+  next time it fires; `books[].flow_note` says confirmed / held.
 - `backend/trade_flow.py` – **executed buy / sell volume, estimated** (display and the flip check above; no order path;
   owner's SOLARINDS case: buyers held 79 % of the waiting orders while sellers kept hitting the bids). Groww's API has
   no trade-by-trade list and never says which side started a trade, so per 1-minute candle (`minutes`): its volume

@@ -419,7 +419,7 @@ SNAPSHOT_FIELDS = (
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
     "pressure_exit", "pressure_exit_pct", "pressure_over_counter", "pressure_entry", "pressure_entry_pct",
     "pressure_flip", "pressure_flip_pct", "pressure_flip_flow",
-    "flow_exit", "flow_exit_pct", "flow_exit_window", "flow_exit_loss", "flow_exit_book",
+    "flow_exit", "flow_exit_pct", "flow_exit_window", "flow_exit_loss", "flow_exit_book", "flow_exit_mode",
     "flow_entry", "flow_entry_pct", "flow_entry_window",
     "stop_handoff", "stop_handoff_loss",
     "stop_plan", "plan_be_r", "plan_trail_r",
@@ -2676,6 +2676,13 @@ class StrategyEngine:
                 self.last_signal = text
                 return text
         if pos is not None:
+            held = self._flow_hold(cfg, symbol, pos, "COLOUR_TURN")
+            if held:
+                # Executed volume set to confirm the exits (flow_exit.py): no close and no reverse on this candle.
+                text = f"{symbol} holding {pos.direction} — {call.note}, but executed volume does not confirm it: {held}"
+                self._signals[symbol] = text
+                self.last_signal = text
+                return text
             self._focus = symbol
             await self._exit_now(cfg, self._exit_price(symbol, pos), "COLOUR_TURN", gate=False)
             if symbol in self.positions:
@@ -3263,6 +3270,14 @@ class StrategyEngine:
             done, text = exit_join.vote(pos.exit_votes, cfg, "MA_CROSS", now.timestamp(), candle_minutes(cfg))
             if not done:
                 return f"holding {pos.direction} — SMA cross noted; {text}"
+        if pos is not None and pos.signal_direction != want:
+            held = self._flow_hold(
+                cfg, (cfg.symbol or self._focus or "").upper(), pos,
+                turn_entry.EXIT_REASON if why == turn_entry.ENTRY_REASON else "MA_CROSS",
+            )
+            if held:
+                # Executed volume set to confirm the exits (flow_exit.py): the cross neither closes nor reverses.
+                return f"holding {pos.direction} — executed volume does not confirm the exit: {held}"
 
         exit_reason = turn_entry.EXIT_REASON if why == turn_entry.ENTRY_REASON else "MA_CROSS"
         if pos is not None and pos.signal_direction != want and recovery.on(cfg):
@@ -5862,10 +5877,34 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} buyers / sellers exit — {note}"
         await self._exit_now(cfg, self.ltp, pressure_exit.EXIT_REASON)
 
+    def _flow_hold(self, cfg: BotConfig, symbol: str, pos: OpenPosition | None, reason: str) -> str | None:
+        """Executed volume set to confirm the other exits (flow_exit.py, `flow_exit_mode` CONFIRM): why this exit is
+        held (the other side did too little of the shares traded), or None to let it close the trade."""
+        if pos is None or reason not in flow_exit.CONFIRM_REASONS or not flow_exit.confirms(cfg):
+            return None
+        tape = self._tapes.get(symbol)
+        if tape is None or len(tape) == 0 or "ts" not in tape.columns:
+            return None
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        found = flow_exit.confirm_span(
+            self._now().timestamp(), opened.timestamp(), flow_exit.window(cfg), self._exit_minutes(symbol, cfg)
+        )
+        if found is None:
+            return None
+        start, end = found
+        minutes = (end - start) // 60
+        hit, note = flow_exit.judge(trade_flow.minutes(symbol, tape, start, end), pos.direction, flow_exit.pct(cfg), minutes)
+        note = note.replace("; exit at ", "; need ")
+        if hit is None:
+            self._flow_note[symbol] = f"{note}; {reason} exit not held"
+            return None
+        self._flow_note[symbol] = f"{note}; {reason} exit {'confirmed' if hit else 'held'}"
+        return None if hit else note
+
     async def _watch_flow_exit(self, cfg: BotConfig) -> None:
         """Close once the other side did the set % of the shares traded at market over the window (flow_exit.py)."""
         pos = self.position
-        if pos is None or not flow_exit.on(cfg) or self.status != "RUNNING" or self.ltp <= 0:
+        if pos is None or not flow_exit.closes(cfg) or self.status != "RUNNING" or self.ltp <= 0:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
         if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
@@ -5940,6 +5979,15 @@ class StrategyEngine:
                 self._signals[symbol] = f"{symbol} {reason} exit noted, holding {self.position.direction} — {text}"
                 return
             self._signals[symbol] = f"{symbol} {text}: closed on {reason}"
+        if gate and self.position is not None:
+            symbol = (cfg.symbol or self._focus or "").upper()
+            held = self._flow_hold(cfg, symbol, self.position, reason)
+            if held:
+                self._signals[symbol] = (
+                    f"{symbol} {reason} exit held, holding {self.position.direction} — executed volume does not "
+                    f"confirm it: {held}"
+                )
+                return
         async with self.lock:
             if self.position is None or self.inflight:
                 return

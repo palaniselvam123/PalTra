@@ -247,6 +247,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "flow_exit_window": "INTEGER DEFAULT 3",
             "flow_exit_loss": "BOOLEAN DEFAULT 0",
             "flow_exit_book": "BOOLEAN DEFAULT 0",
+            "flow_exit_mode": "VARCHAR(10) DEFAULT 'EXIT'",
             "flow_entry": "BOOLEAN DEFAULT 0",
             "flow_entry_pct": "FLOAT DEFAULT 55",
             "flow_entry_window": "INTEGER DEFAULT 3",

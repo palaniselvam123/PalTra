@@ -15,6 +15,16 @@ trades, unlike the buyers / sellers fade exit (pressure_exit.py), which reads th
   pressure_exit.MAX_AGE_SEC old) to show the other side holding more than half of the waiting orders; no fresh read
   = no close, so one burst of selling against a strong order book does not close a trade.
 
+**Use it to confirm the other exits** (`flow_exit_mode` `EXIT` default | `CONFIRM`; owner's request: the executed volume
+as a check, like the entry checks, instead of an exit of its own): with `CONFIRM` the rule never closes a trade itself.
+Instead every signal exit in `CONFIRM_REASONS` (candle colour turn, counter candles, SMA cross, the SMA 9 exits,
+smaller candles, exit candle cross, Supertrend, Bollinger, EMA, MACD, cumulative delta, slow SMA) closes only when the
+other side also did at least `flow_exit_pct` % of the shares traded over the window (`confirm_span`: the last N minutes,
+or 0 = the last exit candle that closed, cut at the entry); otherwise the trade is held and that exit is judged again the
+next time it fires (`StrategyEngine._flow_hold`). Too little volume to read lets the exit go. Stops, targets, the
+square-off, recovery, the gap fade and the kill switch are never held. "Only while losing" and "waiting orders agree"
+belong to the exit mode and are not read here.
+
 Too little volume to read (fewer than half the window's minutes with volume) closes nothing. Exits go through
 `StrategyEngine._exit_now` as `FLOW_EXIT` (a LIVE stop is cancelled first; a LIVE position restored without its stop
 id is left to that stop). The stops, targets and every other exit stay; whichever comes first closes the trade. No
@@ -32,7 +42,15 @@ DEFAULT_PCT = 60.0
 MIN_PCT = 50.0
 MAX_PCT = 95.0
 DEFAULT_WINDOW = 3
-WINDOWS = (0, 1, 2, 3, 5, 10, 15)
+MODES = ("EXIT", "CONFIRM")
+# The signal exits a CONFIRM-mode executed volume check must agree with (never stops, targets or the square-off).
+CONFIRM_REASONS = frozenset({
+    "MA_CROSS", "PROFITABLE_TREND_EXHAUSTION", "COLOUR_TURN", "SMA9_VTURN", "SMA9_TURN", "SMA9_TURN_AGAINST",
+    "SMA9_BEND", "SMA9_DECEL", "COUNTER_CANDLES", "SMALL_CANDLE_EXIT", "EXIT_CANDLE_CROSS", "SUPERTREND",
+    "BB_MIDDLE", "BB_TARGET", "EMA_CROSS", "MACD_CROSS", "CVD_DIVERGENCE", "SLOW_SMA_BREACH",
+})
+WINDOWS = (0, 1, 2, 3, 5, 10, 15)  # the ready-made choices on the Settings card
+MAX_WINDOW = 60  # a custom window: any whole number of minutes from 1 to this (0 = the exit candle)
 ENTRY_GRACE_SEC = 15       # an entry this close to its minute's open counts that minute as the trade's own
 
 
@@ -55,7 +73,47 @@ def window(cfg) -> int:
         value = int(DEFAULT_WINDOW if value is None else value)
     except (TypeError, ValueError):
         value = DEFAULT_WINDOW
-    return value if value in WINDOWS else DEFAULT_WINDOW
+    return value if 0 <= value <= MAX_WINDOW else DEFAULT_WINDOW
+
+
+def mode(cfg) -> str:
+    """EXIT (closes the trade itself, the default) or CONFIRM (only lets the other exits close)."""
+    value = str(getattr(cfg, "flow_exit_mode", None) or "EXIT").strip().upper()
+    return value if value in MODES else "EXIT"
+
+
+def confirms(cfg) -> bool:
+    return on(cfg) and mode(cfg) == "CONFIRM"
+
+
+def closes(cfg) -> bool:
+    return on(cfg) and mode(cfg) == "EXIT"
+
+
+def confirm_span(now_ts: float, entry_ts: float, win: int, exit_minutes: int) -> tuple[int, int] | None:
+    """(start, end) of the closed minutes a CONFIRM check reads now, or None when there is nothing yet.
+
+    The last `win` minutes, or with 0 the last exit candle (of `exit_minutes` from 09:15 IST) that has closed; never
+    minutes before the entry. When that candle closed before the entry's first minute, the minutes since the entry."""
+    end = int(now_ts) - int(now_ts) % 60
+    first = first_minute(entry_ts)
+    if win > 0:
+        start = end - win * 60
+    else:
+        size = max(1, int(exit_minutes)) * 60
+        day = dt.datetime.fromtimestamp(end - 1, IST)
+        open_ts = int(dt.datetime.combine(day.date(), dt.time(9, 15), tzinfo=IST).timestamp())
+        closed = open_ts + max(0, (end - open_ts) // size) * size
+        if closed > open_ts:
+            start, end = closed - size, closed
+        else:
+            start = end - size
+    start = max(start, first)
+    if start >= end:
+        start, end = first, int(now_ts) - int(now_ts) % 60
+    if start >= end:
+        return None
+    return start, end
 
 
 def loss_only(cfg) -> bool:
@@ -155,7 +213,7 @@ def entry_window(cfg) -> int:
         value = int(DEFAULT_WINDOW if value is None else value)
     except (TypeError, ValueError):
         value = DEFAULT_WINDOW
-    return value if value in WINDOWS else DEFAULT_WINDOW
+    return value if 0 <= value <= MAX_WINDOW else DEFAULT_WINDOW
 
 
 def entry_span(now_ts: float, win: int, exit_minutes: int) -> tuple[int, int]:
