@@ -789,6 +789,11 @@ def bot5_view(eng: "ReplayEngine", snap: dict) -> dict:
     return out
 
 
+# Runs this process found playing when it booted (a deploy, a crash, an idle stop) and marked INTERRUPTED: the
+# backtest server resumes them by itself (main._auto_resume_replays).
+cut_short_at_boot: list[int] = []
+
+
 def close_orphan_replay_rows(run_id: int | None = None, interrupted: bool = False) -> int:
     """A restart mid-replay leaves REPLAY rows open. Close them flat.
 
@@ -816,6 +821,8 @@ def close_orphan_replay_rows(run_id: int | None = None, interrupted: bool = Fals
             runs = runs.filter(ReplayRun.id == run_id)
         for run in runs.all():
             run.status = "INTERRUPTED" if interrupted else "STOPPED"
+            if interrupted:
+                cut_short_at_boot.append(int(run.id))
         db.commit()
         return len(rows)
 

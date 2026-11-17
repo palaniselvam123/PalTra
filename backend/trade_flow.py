@@ -66,57 +66,58 @@ def minutes(symbol: str, tape: pd.DataFrame | None, start: float, end: float) ->
     if tape is None or len(tape) == 0 or "ts" not in tape.columns:
         return []
     name = (symbol or "").upper()
-    work = tape
-    if "minute_volume" in work.columns:
-        vols = pd.to_numeric(work["minute_volume"], errors="coerce")
-    else:
-        vols = derive_minute_volume(work)
-    ts = pd.to_numeric(work["ts"], errors="coerce")
-    keep = (ts >= start) & (ts < end)
+    ts_all = pd.to_numeric(tape["ts"], errors="coerce").to_numpy()
+    keep = (ts_all >= start) & (ts_all < end)
     if not keep.any():
         return []
-    rows = work[keep]
-    vols = vols[keep]
-    now = time.time()
-    todo: list[int] = []
+    times = ts_all[keep].astype("int64").tolist()
+    # Finished minutes come from the cache: a chart refresh (once a second in a replay) only works on new ones.
+    todo = [t for t in times if (name, t) not in _CACHE]
     out: dict[int, dict | None] = {}
-    for t in rows["ts"].astype(int):
-        hit = _CACHE.get((name, t), False)
-        if hit is False:
-            todo.append(t)
-        else:
-            out[t] = hit
-    seconds: list[list[float]] = []
     if todo:
+        if "minute_volume" in tape.columns:
+            vols = pd.to_numeric(tape["minute_volume"], errors="coerce")
+        else:
+            vols = derive_minute_volume(tape)
+        want = set(todo)
+        pick = keep & pd.Series(ts_all).isin(want).to_numpy()
+        rows = tape[pick]
+        vol_of = dict(zip(ts_all[pick].astype("int64").tolist(), vols.to_numpy()[pick].tolist()))
+        closes = dict(zip(ts_all.astype("int64").tolist(), pd.to_numeric(tape["close"], errors="coerce").tolist()))
         try:
             seconds = tick_store.between(name, min(todo) - 60, max(todo) + 60)
         except Exception:  # noqa: BLE001
             seconds = []
-    closes = dict(zip(ts.astype("Int64"), pd.to_numeric(work["close"], errors="coerce")))
-    by_minute: dict[int, list[list[float]]] = {}
-    for sec, price in seconds:
-        by_minute.setdefault(int(sec) - int(sec) % 60, []).append([sec, price])
-    todo_set = set(todo)
-    for (_, row), vol in zip(rows.iterrows(), vols):
-        t = int(row["ts"])
-        if t not in todo_set:
-            continue
-        point = None
-        if pd.notna(vol) and float(vol) > 0:
-            before = closes.get(t - 60)
-            before = float(before) if before is not None and pd.notna(before) else None
-            share = _tick_share(by_minute.get(t - t % 60, []), before) if seconds else None
-            src = "T"
-            if share is None:
-                share, src = candle_share(row["open"], row["high"], row["low"], row["close"]), "C"
-            buy = round(float(vol) * share)
-            point = {"time": t, "buy": int(buy), "sell": int(round(float(vol)) - buy), "src": src}
-        out[t] = point
-        if t + FINAL_AFTER_SEC < now:
-            if len(_CACHE) > _CACHE_MAX:
-                _CACHE.clear()
-            _CACHE[(name, t)] = point
-    return [out[t] for t in sorted(out) if out[t] is not None]
+        by_minute: dict[int, list[list[float]]] = {}
+        for sec, price in seconds:
+            by_minute.setdefault(int(sec) - int(sec) % 60, []).append([sec, price])
+        now = time.time()
+        for t, o, h, low, c in zip(
+            rows["ts"].astype("int64").tolist(), rows["open"].tolist(), rows["high"].tolist(),
+            rows["low"].tolist(), rows["close"].tolist(),
+        ):
+            vol = vol_of.get(t)
+            point = None
+            if vol is not None and pd.notna(vol) and float(vol) > 0:
+                before = closes.get(t - 60)
+                before = float(before) if before is not None and pd.notna(before) else None
+                got = _tick_share(by_minute.get(t - t % 60, []), before) if seconds else None
+                src = "T"
+                if got is None:
+                    got, src = candle_share(o, h, low, c), "C"
+                buy = round(float(vol) * got)
+                point = {"time": t, "buy": int(buy), "sell": int(round(float(vol)) - buy), "src": src}
+            out[t] = point
+            if t + FINAL_AFTER_SEC < now:
+                if len(_CACHE) > _CACHE_MAX:
+                    _CACHE.clear()
+                _CACHE[(name, t)] = point
+    result = []
+    for t in times:
+        point = out[t] if t in out else _CACHE.get((name, t))
+        if point is not None:
+            result.append(point)
+    return result
 
 
 def share(points: list[dict], side: str) -> float | None:
