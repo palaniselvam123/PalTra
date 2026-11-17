@@ -2,7 +2,7 @@
 
 import { usePinned } from "@/lib/usePinned";
 import { PinToggle } from "@/components/ui/PinToggle";
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, FileDown, LineChart, Loader2, Sigma } from "lucide-react";
 import clsx from "clsx";
 import { istStamp, parseClock } from "@/lib/format";
@@ -366,6 +366,15 @@ export function TradeHistoryTable({
     }
     if (inBox !== boxed) setBoxed(inBox);
   });
+  // The bar's height, so the Backtests tab can pin its Compare bar right under it (BacktestRuns).
+  const [barH, setBarH] = useState(0);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setBarH(Math.round(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // The Backtests tab shows replay runs instead of a trade book.
   const [backtests, setBacktests] = useState(false);
   const [picked, setPicked] = useState(false);
@@ -652,6 +661,11 @@ export function TradeHistoryTable({
         "min-w-0 max-w-full rounded-xl border bg-[#151921]",
         simulation ? "border-[#F59E0B]/40" : book === "REPLAY" ? "border-violet-400/40" : "border-[#F43F5E]/40"
       )}
+      style={
+        {
+          "--blotter-pin-top": `calc(${boxed ? "0px" : "var(--sma-header-bottom, 0px)"} + ${barPinned ? barH : 0}px)`,
+        } as CSSProperties
+      }
     >
       {/* Pinned under the terminal's sticky header while the blotter scrolls by. */}
       <div

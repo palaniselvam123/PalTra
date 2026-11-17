@@ -757,6 +757,21 @@ textarea:focus-visible,
    in the comparison (never by its rank). The reference categorical palette, checked with the dataviz validator on these
    surfaces (dark #131833, light #ffffff): CVD and normal-vision separation pass; three light steps sit under 3:1, so
    the chart has a legend and the same numbers in the tables. Swatches and lines only: text stays in text colours. */
+/* Compare page: a tinted header, and "Save as PDF" (the browser's print dialog) laid out for paper. */
+.cmp-hero {
+  background: linear-gradient(100deg, rgb(var(--c-sky) / 0.16), rgb(var(--c-profit) / 0.08) 55%, rgb(var(--c-amber) / 0.1));
+}
+@media print {
+  @page { size: A3 landscape; margin: 10mm; }
+  .cmp-page { max-width: none; padding: 0; }
+  .cmp-page, .cmp-page * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .cmp-page .cmp-noprint { display: none !important; }
+  .cmp-page tr, .cmp-page li, .cmp-page svg, .cmp-page h2, .cmp-page h3 { break-inside: avoid; }
+  .cmp-page h2, .cmp-page h3 { break-after: avoid; }
+  .cmp-page svg { max-width: 100%; height: auto; }
+  .cmp-page .overflow-x-auto, .cmp-page .overflow-y-auto { overflow: visible !important; max-height: none !important; }
+  body:has(.cmp-page) .fixed { display: none !important; }
+}
 .cmp-series {
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
   --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --s8: #e66767;

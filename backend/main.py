@@ -43,6 +43,7 @@ import scan_arm
 import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
 import backtest_compare
+import backtest_detail
 import fast_bot
 import tsl_calc as tsl_calc_mod
 import regime_study
@@ -3368,6 +3369,30 @@ async def replay_compare(runs: str, base: int | None = None, basis: Literal["gro
         return await asyncio.to_thread(backtest_compare.compare, ids, base, basis)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+def _run_ids(runs: str) -> list[int]:
+    try:
+        return [int(x) for x in runs.replace(" ", "").split(",") if x]
+    except ValueError as exc:
+        raise HTTPException(400, "runs must be run numbers separated by commas, e.g. 12,15,18") from exc
+
+
+@app.get("/api/replay/compare/trades")
+async def replay_compare_trades(runs: str, base: int | None = None, basis: Literal["gross", "net"] = "gross"):
+    """The comparison trade by trade (backtest_detail.py): each run's wins and losers, time in the trade, every
+    trade with its entry / exit reason and the buyers % at its entry, how far the runs took the same trades, and
+    plain-words takeaways. Read-only."""
+    try:
+        return await asyncio.to_thread(backtest_detail.detail, _run_ids(runs), base, basis)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/replay/compare/stock")
+async def replay_compare_stock(runs: str, symbol: str, day: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$")):
+    """One stock on one replayed day in each run: P&L minute by minute, its trades, and the buyers % reads. Read-only."""
+    return await asyncio.to_thread(backtest_detail.stock_day, _run_ids(runs), symbol, day)
 
 
 @app.get("/api/replay/runs")
