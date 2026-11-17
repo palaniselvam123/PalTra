@@ -278,7 +278,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `flow` [{time, buy, sell, src}]; the chart draws each candle's executed buy % as a dashed line on the buyers / sellers
   strip (`chartStyle.flowReads`, Indicators → "Executed buy % (strip, estimated)", key `flow`, Auto = with the buyers
   strip) and "Executed buy …% sell …% (ticks / candles)" on the reading line. Stocks no bot watched and days older than the
-  tick store read the candle shape only.
+  tick store read the candle shape only. **Four lines** (owner's request; display only): the strip draws buyers waiting
+  (`chartStyle` key `pressure`), sellers waiting (`pressureSell`, 100 − it), buyers executed (`flow`) and sellers executed
+  (`flowSell`, 100 − it), each on / off / auto in Indicators (`StrategyChart` `pressureSellRef` / `flowSellRef`; the 50 line
+  and fade-exit levels sit on the first line that is on); the reading line shows the four for the candle under the mouse and
+  says why one is blank (no Most active read before the candle closed / no volume known). A minute is cached (`_CACHE`) only
+  once a later minute is on the tape as well as `FINAL_AFTER_SEC` by the clock: a replay's tape ends in the forming minute
+  (part of its volume), which the wall clock used to call finished, so replays kept partial numbers (blanks, wrong splits)
+  that the chart, the entry check and the exit then read.
 - Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
   PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle
   after the entry by `StrategyEngine._watch_bollinger` on `bb_period` /
