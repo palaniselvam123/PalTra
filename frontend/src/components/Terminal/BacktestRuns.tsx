@@ -13,6 +13,7 @@ import { REASON_SHORT } from "./TradeHistoryTable";
 import { chartHref } from "./StockTabs";
 import { runName } from "@/lib/liveBook";
 import { NewTag } from "@/components/ui/NewTag";
+import { ApplyRunStrategy } from "./ApplyRunStrategy";
 
 /** Opens one stock's chart for one day of a finished (or playing) run, in a new tab. */
 function RunChartLink({ run, symbol, date }: { run: ReplayRun; symbol: string; date: string }) {
@@ -1436,6 +1437,8 @@ cumulative: <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t
             <dd className="text-right text-slate-200">{run.symbols.join(", ")}</dd>
           </div>
         </dl>
+        {/* A real backtest run (a live book has a negative id and no saved strategy of its own). */}
+        {run.id > 0 && !settingsRows ? <ApplyRunStrategy runId={run.id} runBot={Number(run.settings.bot ?? 1) || 1} /> : null}
       </div>
     </section>
   );

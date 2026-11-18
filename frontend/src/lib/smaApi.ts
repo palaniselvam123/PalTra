@@ -3536,6 +3536,17 @@ export const smaApi = {
     request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
   /** Each trade's latest saved Most active read before its entry (by trade id); trades without one are left out. */
   replayRunMarketReads: (id: number) => request<Record<string, MarketRead>>(`/api/replay/runs/${id}/market-reads`),
+  /** Put the strategy a backtest run played with onto a bot (Trade list, mode and name stay). No order is placed. */
+  applyRunStrategy: (id: number, toDesk: "1" | "2" | "3" | "4" | "5" | "research", reset: boolean, withStocks: boolean, confirmLive = false) =>
+    request<{ desk: string; changed: string[]; notes: string[]; run_id: number }>(
+      `/api/replay/runs/${id}/apply`,
+      {
+        method: "POST",
+        body: JSON.stringify({ to_desk: toDesk, reset, stock_settings: withStocks, confirm_live: confirmLive }),
+      },
+      15000,
+      false
+    ),
   deleteReplayRun: (id: number) => request<{ deleted: number }>(`/api/replay/runs/${id}`, { method: "DELETE" }),
   /** Compare 2-8 runs on the days and stocks they all played: ranking, verdict, by stock / day / exit reason, settings. */
   replayCompare: (runIds: number[], base?: number | null, basis: "gross" | "net" = "gross") =>

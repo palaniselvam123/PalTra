@@ -60,6 +60,8 @@ type Props = {
 export const BAR_MINUTES = [1, 3, 5, 15, 30, 60, 240] as const;
 export type BarMinutes = (typeof BAR_MINUTES)[number];
 const BAR_KEY = "sma.chart.interval";
+/** Where the candles sit in the pane (the strips share the band under them). */
+const CANDLE_MARGINS = { top: 0.06, bottom: 0.28 };
 const DRILL_KEY = "sma.chart.drill";
 
 /** 1-minute bars the live chart needs so SMA 21 is formed on the bigger candles.
@@ -1538,7 +1540,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       wickUpColor: "#10B981",
       wickDownColor: "#F43F5E",
     });
-    candles.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.28 } });
+    candles.priceScale().applyOptions({ scaleMargins: CANDLE_MARGINS });
     const profileBars = new VolumeProfileBars();
     candles.attachPrimitive(profileBars);
     profileBarsRef.current = profileBars;
@@ -1876,7 +1878,10 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     fill(pressureSellRef.current, showSellerLine, buyers.map((v) => (v == null ? null : 100 - v)));
     fill(flowRef.current, showFlow, flows.map((f) => (f == null ? null : f.buyPct)));
     fill(flowSellRef.current, showFlowSell, flows.map((f) => (f == null ? null : 100 - f.buyPct)));
-    const strips = ([["atr", showAtr], ["rsi", showRsi], ["cvd", showCvd], ["pressure", showPressure]] as const)
+    // Over the candles (Indicators → "Draw the buyers / sellers lines over the candles"): the 0-100 scale spans the
+    // candle area like the SMA lines, and the strips below no longer make room for it.
+    const pressureOver = look.pressureOnCandles;
+    const strips = ([["atr", showAtr], ["rsi", showRsi], ["cvd", showCvd], ["pressure", showPressure && !pressureOver]] as const)
       .filter(([, on]) => on)
       .map(([id]) => id);
     const sliceOf = (id: string) => {
@@ -1889,7 +1894,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     apiRef.current?.priceScale("atr").applyOptions({ scaleMargins: sliceOf("atr") });
     apiRef.current?.priceScale("rsi").applyOptions({ scaleMargins: sliceOf("rsi") });
     apiRef.current?.priceScale("cvd").applyOptions({ scaleMargins: sliceOf("cvd") });
-    apiRef.current?.priceScale("pressure").applyOptions({ scaleMargins: sliceOf("pressure") });
+    apiRef.current?.priceScale("pressure").applyOptions({
+      scaleMargins: pressureOver ? { top: CANDLE_MARGINS.top, bottom: CANDLE_MARGINS.bottom } : sliceOf("pressure"),
+    });
     if (pressureRef.current) {
       fill(pressureRef.current, showBuyerLine, buyers);
       // The 50 line and the fade exit's levels go on a line that is on (a hidden series hides its levels too).
