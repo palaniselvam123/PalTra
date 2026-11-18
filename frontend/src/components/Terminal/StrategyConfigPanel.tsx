@@ -5958,6 +5958,12 @@ function BuyersSellersMap({
         order book, read by the Most active scan (intentions; only for stocks armed from Most active).{" "}
         <b className="text-slate-200">Executed</b>: the shares that really traded, split into bought and sold (any stock).
       </p>
+      <p className="mt-1 text-xs">
+        <a href="/learn/?lesson=buyers-sellers-strategies" className="text-sky-300 underline hover:text-sky-200">
+          Guide (PDF): every buyers &amp; sellers entry and exit, with examples
+        </a>{" "}
+        <NewTag id="bs-strategies-guide" />
+      </p>
       <div className="mt-2 overflow-x-auto">
         <table className="w-full min-w-[520px] text-left text-xs">
           <thead className="text-slate-400">

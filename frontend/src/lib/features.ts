@@ -617,6 +617,8 @@ export const FEATURES: Feature[] = [
     purpose: "The room is measured on the bot's own candles (15-minute colour candles read as 15-minute), never less than one candle's normal swing." },
   { id: "set-smart-live", area: "settings", added: "2026-11-14", pr: 421, href: S("sma-smart-stop"), where: "Settings → 5. Stop-loss and target → Smart stop → work it out again after every candle", title: "Smart stop: re-sized after every candle",
     purpose: "While a trade is open, each stock's room is worked out again after every candle from its latest swings; the stop still never moves back." },
+  { id: "bs-strategies-guide", area: "settings", added: "2026-11-18", pr: 474, href: "/learn/?lesson=buyers-sellers-strategies", where: "Learn → Buyers & sellers: entry and exit strategies", title: "Guide: buyers & sellers entry and exit strategies",
+    purpose: "A PDF guide to every waiting-orders and executed-volume entry and exit, how they combine (OR / AND), recipes, and the BSE short worked through." },
   { id: "set-smart-guide", area: "settings", added: "2026-11-14", pr: 423, href: "/learn/?lesson=smart-stop", where: "Learn → Smart stop", title: "Smart stop guide",
     purpose: "A guide to the smart stop with its Advanced settings." },
   { id: "set-reentry-wait", area: "settings", added: "2026-11-14", pr: 425, href: S("sma-risk"), where: "Settings → 6. Size, daily limits and times → After an exit, wait N candles", title: "Wait N candles after an exit",

@@ -21,6 +21,25 @@ export type Lesson = {
 
 export const LESSONS: Lesson[] = [
   {
+    id: "buyers-sellers-strategies",
+    title: "Buyers & sellers: every entry and exit strategy, with examples",
+    summary:
+      "Every setting that reads the waiting orders (buyers % / sellers %) or the executed volume (who actually traded), told apart and worked through with examples: the five ways in (Most active entry, enter on executed volume, Executed volume only, the executed volume check, overruling the candle colour), the exits (the fade exit and its executed volume check, overruling counter candles, the executed volume exit by itself or confirming the other exits), how they combine with OR and AND, recipes, and the BSE short of 6 Nov step by step: why it was not closed at 10:00 and what would have closed it.",
+    topic: "SMA strategy",
+    file: "/guides/buyers-sellers-strategies-guide.pdf",
+    pages: 8,
+    minutes: 15,
+    added: "2026-11-18",
+    open: { href: "/settings/#sma-buyers-sellers", label: "Open the Buyers & sellers overview" },
+    points: [
+      "Waiting orders are intentions (Most active stocks only, as often as that scan runs); executed volume is what was traded (any stock, every minute).",
+      "A check only says yes or no to a signal; \"Enter at once\", \"Enter on executed volume\" and \"Executed volume only\" start trades themselves.",
+      "Separate exits are OR: the first to fire closes. A box inside an exit (\"Executed volume must agree\", \"The waiting orders must agree too\") makes it an AND.",
+      "To close a trade when the trading turns while the waiting orders still favour it, use the executed volume exit by itself with \"waiting orders must agree\" off.",
+      "A 15-minute candle's executed % is complete only when it closes: the 10:00 candle is read at 10:15.",
+    ],
+  },
+  {
     id: "smart-stop",
     title: "Smart stop: how it works, why it closed in profit, and the Advanced settings",
     summary:
