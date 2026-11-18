@@ -534,6 +534,8 @@ function flowSpan(end: number, win: number, botBar: number): [number, number] {
 
 /** "Enter on: Executed volume only" (flow_exit.only_mode): the bot never trades a cross; at each candle close it reads
  * the executed buy / sell split and buys / sells when one side did the set %. Says what it read on this candle. */
+type FlowDecision = NonNullable<ChartPayload["flow_decisions"]>[number];
+
 function flowWhy(
   c: Candle,
   next: Candle | undefined,
@@ -542,8 +544,16 @@ function flowWhy(
   bar: number,
   botBar: number,
   points: FlowPoint[] | null,
+  decisions: FlowDecision[] | null,
 ): string {
   const end = c.time + bar * 60;
+  // What the bot itself noted for the windows ending inside this candle (flow_decisions), the latest one first.
+  const noted = (decisions ?? []).filter((d) => d.end > c.time && d.end <= end).sort((a, b) => b.end - a.end);
+  const botNote = noted.length
+    ? `The bot's note at ${istClock(noted[0].end)}: ${noted[0].text}${
+        noted[0].buy != null ? ` (it read buyers ${Math.round(noted[0].buy)}% · sellers ${Math.round(100 - noted[0].buy)}%${noted[0].src ? `, ${noted[0].src}` : ""})` : ""
+      }.`
+    : null;
   const level = filters.flow_trigger_pct ?? 60;
   const win = filters.flow_trigger_window ?? 0;
   const closeMins = istMinutes(end);
@@ -568,6 +578,7 @@ function flowWhy(
       const filledNext = next && markers.some((m) => m.kind === "ENTRY" && m.time >= next.time && m.time < next.time + bar * 60);
       const entered = filledNext || markers.some((m) => m.kind === "ENTRY" && m.time >= end && m.time < end + 90);
       if (entered) parts.push("The entry at the start of the next candle came from it.");
+      else if (botNote) parts.push(botNote);
       else if (closeMins < 9 * 60 + 20) parts.push("No order: before 09:20 the bot takes no entries.");
       else if (closeMins >= cutoff) parts.push(`No order: it closed after the entry cut-off (${cutoffText}).`);
       else {
@@ -591,10 +602,11 @@ function flowWhy(
         if ((filters.reentry_wait_candles ?? 0) > 0) reasons.push(`it may still be waiting ${filters.reentry_wait_candles} candle(s) after its last exit`);
         if ((filters.max_trades_per_stock ?? 0) > 0) reasons.push(`it may have had its ${filters.max_trades_per_stock} trades today`);
         reasons.push("the stock was not armed then, or the bot was not running");
-        parts.push(`No order followed: ${reasons.join("; ")}.`);
+        parts.push(`No order followed (the bot recorded no decision for this candle): ${reasons.join("; ")}.`);
       }
-    }
+    } else if (botNote) parts.push(botNote);
   }
+  if (buy == null && botNote) parts.push(botNote);
   return parts.join(" ");
 }
 
@@ -610,6 +622,8 @@ function whyNoTrade(p: {
   botBar: number;
   /** Executed buy / sell per 1-minute candle (the "Executed volume only" entry reads it). */
   flow?: FlowPoint[] | null;
+  /** What the bot's executed volume entry decided at each window end (flow_decisions). */
+  flowDecisions?: FlowDecision[] | null;
 }): string {
   const { rows, i, blocked, markers, filters, bar, botBar } = p;
   const c = rows[i];
@@ -643,7 +657,7 @@ function whyNoTrade(p: {
   if (refused) return `${refused.direction === "LONG" ? "Buy" : "Sell"} cross here, refused: ${refused.reason}.`;
   if (p.forming) return "This candle is still forming: the bot judges it only when it closes.";
   if (filters?.entry_mode === "COLOUR") return colourWhy(c, rows[i + 1], markers, filters, bar);
-  if (filters?.entry_mode === "FLOW") return flowWhy(c, rows[i + 1], markers, filters, bar, botBar, p.flow ?? null);
+  if (filters?.entry_mode === "FLOW") return flowWhy(c, rows[i + 1], markers, filters, bar, botBar, p.flow ?? null, p.flowDecisions ?? null);
   const sideOf = (r?: Candle) => (r && r.sma9 != null && r.sma21 != null ? Math.sign(r.sma9 - r.sma21) : 0);
   const side = sideOf(c);
   const prevSide = sideOf(rows[i - 1]);
@@ -2380,6 +2394,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           bar,
           botBar: botCandle,
           flow: view?.flow ?? null,
+          flowDecisions: view?.flow_decisions ?? null,
         })
       : "";
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
@@ -2717,6 +2732,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       {whyLine && ohlc ? (
         <p className="px-3 pb-1.5 text-xs text-slate-300 sm:px-4" aria-live="off" title="Why the bot took no trade on this candle. Move the mouse over any candle to read it there.">
           <span className="font-semibold text-slate-200">{hoverOhlc ? `At ${istClock(ohlc.time)}` : "Now"}:</span> {whyLine}
+          {filters?.entry_mode === "FLOW" ? <> <NewTag id="chart-flow-decisions" link={false} /></> : null}
         </p>
       ) : null}
       {lastBlocked ? (

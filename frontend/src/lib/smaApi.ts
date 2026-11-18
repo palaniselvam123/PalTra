@@ -2039,6 +2039,8 @@ export type ChartPayload = {
   pressure?: { time: number; buy_pct: number; rvol?: number; value_cr?: number }[];
   /** Executed buy / sell shares per 1-minute candle, estimated (trade_flow.py); display only. */
   flow?: { time: number; buy: number; sell: number; src: "T" | "C" }[];
+  /** "Executed volume only": what the bot decided at each window end it judged (entered / not taken and why); display only. */
+  flow_decisions?: { end: number; text: string; buy?: number; level?: number; src?: string; side?: string }[];
 };
 
 export type TradeRow = {

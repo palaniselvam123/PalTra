@@ -1399,6 +1399,8 @@ class StrategyEngine:
         # Executed volume exit (flow_exit.py): the last window judged per stock (entry time, window end) and its reading.
         self._flow_seen: dict[str, tuple] = {}
         self._ft_seen: dict[str, int] = {}  # executed volume entry: the last window end judged per stock
+        # Executed volume entry: what the bot decided at each window end, per stock (display only; the chart's why line).
+        self._ft_log: dict[str, list[dict]] = {}
         self._flow_note: dict[str, str] = {}
         # Most active entry at once (pressure_exit.entry_mode AT_ARM): symbol -> the IST day it was entered / refused.
         self._pe_done: dict[str, dt.date] = {}
@@ -2285,16 +2287,18 @@ class StrategyEngine:
         symbol_cfg = _cfg_for(cfg, symbol)
         if not flow_exit.trigger_on(symbol_cfg) or self.status != "RUNNING":
             return
+        start, end = flow_exit.entry_span(
+            now.timestamp(), flow_exit.trigger_window(symbol_cfg), self._exit_minutes(symbol, symbol_cfg)
+        )
         if symbol in self.positions or symbol in self._pullback:
+            self._ft_note(symbol, end, "holding a trade (or a waiting entry) on this stock — no new entry")
             return
         if not market_is_open(now) or now.time() < OPENING_BUFFER_END or now.time() >= _entry_cutoff(symbol_cfg):
+            self._ft_note(symbol, end, f"outside entry hours (09:20 to the cut-off {_entry_cutoff(symbol_cfg):%H:%M})")
             return
         if not self._still_armed(symbol):
             return
         tape = self._tapes.get(symbol)
-        start, end = flow_exit.entry_span(
-            now.timestamp(), flow_exit.trigger_window(symbol_cfg), self._exit_minutes(symbol, symbol_cfg)
-        )
         if self._ft_seen.get(symbol) == end:
             return
         if tape is None or len(tape) == 0 or int(pd.to_numeric(tape["ts"], errors="coerce").max()) < end - 60:
@@ -2306,16 +2310,19 @@ class StrategyEngine:
         span_text = f"{dt.datetime.fromtimestamp(start, IST):%H:%M}–{dt.datetime.fromtimestamp(end, IST):%H:%M}"
         if got is None:
             self._signals[symbol] = f"{symbol} executed volume entry: too little volume to read {span_text}"
+            self._ft_note(symbol, end, f"too little volume to read {span_text}")
             return
         buy, src = got
         side = flow_exit.trigger_side(buy, level)
         read = f"buyers {buy:g}% · sellers {round(100 - buy, 1):g}% executed {span_text} ({src})"
         if side is None:
             self._signals[symbol] = f"{symbol} executed volume entry waits for {level:g}% one way — {read}"
+            self._ft_note(symbol, end, f"no order: needs {level:g}% one way", buy=buy, level=level, src=src)
             return
         refusal = flow_exit.book_refusal(symbol, side, now.timestamp(), flow_exit.trigger_book(symbol_cfg))
         if refusal:
             self._signals[symbol] = f"{symbol} executed volume {side} not taken — {refusal} ({read})"
+            self._ft_note(symbol, end, f"{side} not taken — {refusal}", buy=buy, level=level, src=src, side=side)
             return
         enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
         self._focus = symbol
@@ -2329,6 +2336,20 @@ class StrategyEngine:
         text = f"{result} — executed volume entry ({read})"
         self._signals[symbol] = text
         self.last_signal = text
+        self._ft_note(symbol, end, result, buy=buy, level=level, src=src, side=side)
+
+    FT_LOG_KEEP = 400  # decisions kept per stock (a day of 1-minute windows)
+
+    def _ft_note(self, symbol: str, end: int, text: str, **read) -> None:
+        """Keep what the executed volume entry decided for the window ending at `end` (display only): the chart quotes it."""
+        log = self._ft_log.setdefault(symbol, [])
+        if log and log[-1].get("end") == end and log[-1].get("text") == text:
+            return
+        entry = {"end": int(end), "text": text}
+        entry.update({k: v for k, v in read.items() if v is not None})
+        log.append(entry)
+        if len(log) > self.FT_LOG_KEEP:
+            del log[: len(log) - self.FT_LOG_KEEP]
 
     async def _always_in_pass(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> None:
         """Always in a trade (always_in.py): a flat armed stock is entered on the side the SMAs point to now.
@@ -7595,7 +7616,15 @@ class StrategyEngine:
             "pressure": self._pressure_points(view, candles),
             # Executed buy / sell volume per 1-minute candle, estimated (trade_flow.py); display only.
             "flow": self._flow_points(view, candles),
+            # What the executed volume entry decided at each window end (display only; the chart's why line).
+            "flow_decisions": self._flow_decisions(view, candles),
         }
+
+    def _flow_decisions(self, symbol: str, candles: list[dict]) -> list[dict]:
+        if not symbol or not candles:
+            return []
+        start = float(candles[0]["time"])
+        return [d for d in self._ft_log.get(symbol, []) if d.get("end", 0) > start]
 
     def _flow_points(self, symbol: str, candles: list[dict]) -> list[dict]:
         """Estimated shares bought / sold at market per minute over the candles on screen, up to the engine's clock."""

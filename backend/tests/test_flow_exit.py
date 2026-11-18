@@ -276,3 +276,21 @@ def test_chart_filters_carry_the_executed_volume_entry_for_the_why_line():
     assert (got["flow_trigger_pct"], got["flow_trigger_window"], got["flow_trigger_book"]) == (70, 0, 0.0)
     assert (got["flow_entry"], got["flow_entry_pct"], got["flow_entry_window"]) == (True, 56, 5)
     assert (got["candle_minutes"], got["reentry_wait_candles"], got["max_trades_per_stock"]) == (15, 2, 8)
+
+
+def test_executed_volume_entry_keeps_its_decisions_for_the_chart():
+    from strategy_engine import StrategyEngine
+
+    eng = StrategyEngine.__new__(StrategyEngine)
+    eng._ft_log = {}
+    eng._ft_note("FLO", 1_000_020, "no order: needs 60% one way", buy=55.0, level=60, src="T")
+    eng._ft_note("FLO", 1_000_020, "no order: needs 60% one way", buy=55.0, level=60, src="T")   # same window: once
+    eng._ft_note("FLO", 1_000_080, "SHORT ignored — vwap: price above VWAP", buy=31.0, level=60, src="T", side="SHORT")
+    log = eng._ft_log["FLO"]
+    assert len(log) == 2 and log[1]["side"] == "SHORT" and "vwap" in log[1]["text"]
+    # The chart payload keeps only the decisions of the candles it draws.
+    assert [d["end"] for d in eng._flow_decisions("FLO", [{"time": 1_000_030}])] == [1_000_080]
+    assert eng._flow_decisions("XYZ", [{"time": 0}]) == []
+    for i in range(StrategyEngine.FT_LOG_KEEP + 5):
+        eng._ft_note("FLO", 2_000_000 + i * 60, "x")
+    assert len(eng._ft_log["FLO"]) == StrategyEngine.FT_LOG_KEEP
