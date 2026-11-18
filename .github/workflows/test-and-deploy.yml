@@ -40,9 +40,54 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  backend-tests:
-    name: Backend tests
+  # A main-desk / backtest deploy by hand (workflow_dispatch) ships a commit that was already pushed to main, and that
+  # push already ran the backend tests on that very commit. When it passed, they are not run a second time (about
+  # 25-30 minutes saved); when it did not pass, or was never tested, they run here as usual.
+  tested-before:
+    name: Already tested on main?
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      passed: ${{ steps.look.outputs.passed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+      - id: look
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          passed=false
+          runs=$(gh api "repos/$REPO/actions/workflows/test-and-deploy.yml/runs?head_sha=$sha&event=push&per_page=20" --jq '.workflow_runs[].id' || true)
+          for run in $runs; do
+            ok=$(gh api "repos/$REPO/actions/runs/$run/jobs?per_page=100" \
+              --jq '[.jobs[] | select(.name == "Backend tests" and .conclusion == "success")] | length' || echo 0)
+            if [ "${ok:-0}" -gt 0 ]; then passed=true; echo "Backend tests passed on ${sha:0:7} in run $run."; break; fi
+          done
+          if [ "$passed" = true ]; then
+            echo "::notice title=Tests not run again::${sha:0:7} already passed the backend tests when it was pushed to main."
+          else
+            echo "::notice title=Running the tests::No passing backend test run found for ${sha:0:7} on main, so they run now."
+          fi
+          echo "passed=$passed" >> "$GITHUB_OUTPUT"
+
+  # The backend tests in 4 parts on 4 runners at once, each part on every CPU of its runner (pytest-xdist; a test
+  # file stays on one worker, --dist loadfile). Test files are shared out by size, the biggest first, so the parts take
+  # about the same time.
+  backend-part:
+    name: Backend tests (part ${{ matrix.part }} of 4)
+    needs: [tested-before]
+    if: ${{ !cancelled() && needs.tested-before.outputs.passed != 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: backend
@@ -61,7 +106,30 @@ jobs:
             backend/requirements.txt
             backend/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
-      - run: python -m pytest -q
+      - name: pytest (this part)
+        env:
+          PART: ${{ matrix.part }}
+        run: |
+          files=$(python ../scripts/test_parts.py 4 "$PART")
+          echo "$(echo "$files" | wc -w) test files in part $PART"
+          python -m pytest -q -n auto --dist loadfile $files
+
+  # The one check named "Backend tests" (what the release gate and the deploy jobs wait on): every part passed, or the
+  # commit already passed them on main.
+  backend-tests:
+    name: Backend tests
+    needs: [tested-before, backend-part]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          BEFORE: ${{ needs.tested-before.outputs.passed }}
+          PARTS: ${{ needs.backend-part.result }}
+        run: |
+          if [ "$BEFORE" = "true" ]; then echo "Already passed on main."; exit 0; fi
+          if [ "$PARTS" = "success" ]; then echo "All parts passed."; exit 0; fi
+          echo "::error title=Backend tests failed::Backend test parts: $PARTS"
+          exit 1
 
   frontend-build:
     name: Frontend typecheck and export
