@@ -334,6 +334,24 @@ export function ChartIndicators({
               </span>
             </label>
           </li>
+          <li className="py-2 text-xs">
+            <label
+              className="flex items-start gap-2"
+              title="The four buyers / sellers lines (waiting and executed) drawn over the candles like the SMA lines, on their own 0-100 % scale across the candle area, instead of on the strip under the candles."
+            >
+              <input
+                type="checkbox"
+                checked={style.pressureOnCandles}
+                onChange={(e) => onChange({ ...style, pressureOnCandles: e.target.checked })}
+                className="mt-0.5 accent-[#10B981]"
+              />
+              <span>
+                <span className="font-semibold text-slate-100">Draw the buyers / sellers lines over the candles</span>{" "}
+                <NewTag id="chart-pressure-on-candles" link={false} />
+                <span className="block text-slate-500">like the SMA lines (0 % at the bottom of the candles, 100 % at the top); off = their own strip</span>
+              </span>
+            </label>
+          </li>
         </ul>
       </div>
       <p className="border-t border-white/10 px-3 py-2 text-xs text-slate-500">

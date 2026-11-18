@@ -3480,6 +3480,89 @@ async def replay_run_delete(run_id: int):
     return {"deleted": run_id}
 
 
+class RunApply(BaseModel):
+    """Put the strategy a backtest run played with onto a bot (the run detail's "Use this strategy on")."""
+
+    to_desk: Literal["1", "2", "3", "4", "5", "research"]
+    # Settings the run did not save go back to their defaults first (else the bot keeps its own value).
+    reset: bool = False
+    # Use the run's per-stock settings too (replacing the bot's). With `reset` and this off, the bot's own
+    # per-stock settings are cleared, so every stock follows the run's strategy.
+    stock_settings: bool = True
+    # The bot trades real money: the page asked first.
+    confirm_live: bool = False
+
+
+def run_apply_data(saved: dict, reset: bool, with_stocks: bool) -> tuple[dict, list[str]]:
+    """The settings-file shape `_import_desk` takes, built from a run's saved settings.
+
+    Only strategy fields (ConfigUpdate minus COPY_SKIP); a stock's own settings keep only STOCK_FIELDS (a field an
+    older run saved that no longer exists is dropped and named in the notes).
+    """
+    allowed = set(ConfigUpdate.model_fields) - COPY_SKIP
+    fields = {k: v for k, v in saved.items() if k in allowed}
+    if reset:
+        defaults = {k: v for k, v in strategy_defaults().items() if v is not None}
+        fields = {**defaults, **fields}
+    if isinstance(fields.get("review_check_minutes"), str):
+        # Saved as CSV on the row; the update model takes a list.
+        fields["review_check_minutes"] = [int(x) for x in fields["review_check_minutes"].split(",") if x.strip().isdigit()] or None
+        if fields["review_check_minutes"] is None:
+            fields.pop("review_check_minutes")
+    notes: list[str] = []
+    own: dict = {}
+    if with_stocks:
+        raw = saved.get("stock_settings")
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw or "{}")
+            except (TypeError, ValueError):
+                raw = {}
+        dropped: set[str] = set()
+        for symbol, values in (raw or {}).items() if isinstance(raw, dict) else []:
+            if not isinstance(values, dict):
+                continue
+            keep = {k: v for k, v in values.items() if k in STOCK_FIELDS}
+            dropped.update(k for k in values if k not in STOCK_FIELDS)
+            if keep:
+                own[str(symbol).upper()] = keep
+        if dropped:
+            notes.append(f"Per-stock settings this version no longer has were left out: {', '.join(sorted(dropped)[:6])}")
+    return {"settings": fields, "stock_settings": own}, notes
+
+
+@app.post("/api/replay/runs/{run_id}/apply")
+async def replay_run_apply(run_id: int, body: RunApply):
+    """Write the strategy a backtest run played with onto a bot: the same fields, checked like Save. The Trade list,
+    PAPER/LIVE switch and name stay. No order is placed."""
+    from models import ReplayRun
+
+    def _saved() -> dict | None:
+        with session_factory()() as db:
+            run = db.get(ReplayRun, int(run_id))
+            return None if run is None else replay_mod._run_settings(run)
+
+    saved = await asyncio.to_thread(_saved)
+    if saved is None:
+        raise HTTPException(404, "No such replay run")
+    if not any(k in saved for k in ConfigUpdate.model_fields):
+        raise HTTPException(400, f"Run #{run_id} did not save its strategy settings")
+    if body.to_desk != "research":
+        session = replays.get(int(body.to_desk))
+        if session is not None and session.status in ("LOADING", "PLAYING", "PAUSED"):
+            # A fresh multi-day run reads the bot's settings row each day: changing it now would change that run.
+            raise HTTPException(409, f"Bot {body.to_desk}'s backtest is playing: stop it or let it finish first")
+    eng = _desk_engine(body.to_desk)
+    if (eng.load_config().trading_mode or "PAPER").upper() == "LIVE" and not body.confirm_live:
+        raise HTTPException(409, f"{_desk_label(body.to_desk)} is LIVE: confirm before changing its settings")
+    data, notes = run_apply_data(saved, body.reset, body.stock_settings)
+    # Per-stock settings are written whenever they come from the run, or cleared by a reset.
+    write = SettingsImport(file={}, stock_settings=body.stock_settings or body.reset, confirm_live=body.confirm_live)
+    await asyncio.to_thread(_import_desk, body.to_desk, data, write, True)
+    result = await asyncio.to_thread(_import_desk, body.to_desk, data, write)
+    return {**result, "notes": notes + result.get("notes", []), "run_id": run_id}
+
+
 @app.post("/api/replay/control")
 async def replay_control(body: ReplayControl, bot: int = 1):
     session, _following = _replay_view(bot)

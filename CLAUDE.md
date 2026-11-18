@@ -309,6 +309,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   once a later minute is on the tape as well as `FINAL_AFTER_SEC` by the clock: a replay's tape ends in the forming minute
   (part of its volume), which the wall clock used to call finished, so replays kept partial numbers (blanks, wrong splits)
   that the chart, the entry check and the exit then read.
+  **Over the candles** (Indicators → "Draw the buyers / sellers lines over the candles", `chartStyle.pressureOnCandles`, off by
+  default; display only): the four lines' 0-100 scale spans the candle area (`StrategyChart` `CANDLE_MARGINS`) like the SMA
+  lines, and the strips below no longer make room for them.
 - Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
   PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle
   after the entry by `StrategyEngine._watch_bollinger` on `bb_period` /
@@ -510,6 +513,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   keeping the finished days, so the run ends as if it never stopped. The replay
   bar asks to resume (`/api/replay/resumable`, `POST /api/replay/resume`), and
   the Backtests tab has a Resume button.
+  **Use this strategy on a bot** (`POST /api/replay/runs/{id}/apply`, `RunApply`: `to_desk` 1-5 / research, `reset`,
+  `stock_settings`, `confirm_live`; the run detail's `components/Terminal/ApplyRunStrategy.tsx`): the run's saved strategy
+  fields (ConfigUpdate minus `COPY_SKIP`, `run_apply_data`) written through `_import_desk` (dry run first, Save's checks);
+  `reset` puts every field the run did not save back to its default first; per-stock settings come from the run (only
+  `STOCK_FIELDS`; dropped ones named in `notes`), or with `reset` and them off are cleared. Trade list, mode and name stay;
+  a LIVE bot needs `confirm_live` (409 without); refused while that bot's replay is loading / playing / paused (a fresh
+  run reads the bot's row each day). No order is placed.
   **Rewind / fast-forward** (`ReplaySession.seek`, `POST /api/replay/control {action: "seek", at: "HH:MM"}`; only
   while PLAYING or PAUSED, the pause state kept; `info().seeking` while it moves): forward sets `_seek` and
   `_fast_forward` ticks the same 10-second grid as fast as its CPU share allows up to the target (same trades, only
