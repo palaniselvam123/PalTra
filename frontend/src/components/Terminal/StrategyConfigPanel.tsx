@@ -478,6 +478,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     pressure_exit: Boolean(form.pressure_exit),
     pressure_exit_pct: Math.min(95, Math.max(30, Number(form.pressure_exit_pct ?? 55) || 55)),
     pressure_over_counter: Boolean(form.pressure_over_counter),
+    pressure_exit_flow: (() => {
+      const v = Number(form.pressure_exit_flow ?? 0) || 0;
+      return v <= 0 ? 0 : Math.min(95, Math.max(50, v));
+    })(),
+    pressure_exit_flow_window: flowWindow(form.pressure_exit_flow_window),
     pressure_entry: (["OFF", "CHECK", "AT_ARM"].includes(String(form.pressure_entry)) ? form.pressure_entry : "OFF") as SmaConfig["pressure_entry"],
     pressure_entry_pct: Math.min(95, Math.max(30, Number(form.pressure_entry_pct ?? 65) || 65)),
     pressure_flip: Boolean(form.pressure_flip),
@@ -3892,7 +3897,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.stop_plan && (f.stop_type ?? "ATR") === "ATR")
     add({ group: "stop", key: "stop_plan", text: `Stop plan: breakeven at +${f.plan_be_r ?? 1.5}R, Supertrend trail from +${f.plan_trail_r ?? 2}R`, off: { stop_plan: false } });
   if (f.pressure_exit)
-    add({ group: "exit", key: "pressure_exit", text: `Most active stocks close when the buyers (a buy) / sellers (a sell) fade to ${f.pressure_exit_pct ?? 55}% or below`, off: { pressure_exit: false } });
+    add({ group: "exit", key: "pressure_exit", text: `Most active stocks close when the buyers (a buy) / sellers (a sell) fade to ${f.pressure_exit_pct ?? 55}% or below${Number(f.pressure_exit_flow ?? 0) > 0 ? ` and the other side did ${f.pressure_exit_flow}% of the shares traded ${Number(f.pressure_exit_flow_window ?? 3) === 0 ? "in the exit candle" : `in the last ${f.pressure_exit_flow_window ?? 3} min`}` : ""}`, off: { pressure_exit: false } });
   if ((f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM") && flowOnly)
     add({ group: "enter", key: "pressure_entry", text: "Most active waiting orders entry — not used: Executed volume only never reads the waiting orders (turn it off)", off: { pressure_entry: "OFF" }, warn: true });
   else if (f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM")
@@ -5078,6 +5083,70 @@ function PressureExit({
           </InfoTip>
         </span>
       </label>
+      <FadeFlowCheck form={form} set={set} isOwn={isOwn} on={on} />
+    </div>
+  );
+}
+
+/** The fade exit's executed volume check (pressure_exit_flow): the waiting orders turning is not enough on its own. */
+function FadeFlowCheck({
+  form,
+  set,
+  isOwn,
+  on,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+  on: boolean;
+}) {
+  const level = Number(form.pressure_exit_flow ?? 0) || 0;
+  const checked = level > 0;
+  const win = Number(form.pressure_exit_flow_window ?? 3);
+  return (
+    <div className="mt-3 rounded-md border border-white/10 bg-black/20 p-2">
+      <label className="flex items-start gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={!on}
+          onChange={(e) => set("pressure_exit_flow", e.target.checked ? "60" : "0")}
+          className="mt-1 accent-[#10B981]"
+        />
+        <span>
+          {(isOwn("pressure_exit_flow") || isOwn("pressure_exit_flow_window")) && <OwnTag />}
+          <b className="text-slate-100">Executed volume must agree</b> <NewTag id="pressure-exit-flow" />{" "}
+          <InfoTip label="About the executed volume check on the fade exit">
+            The waiting orders are only intentions. With this ticked, the fade exit closes a buy only when sellers also did at
+            least this % of the shares actually traded over the window (a sell: buyers), estimated from the per-second prices,
+            else each candle&apos;s shape. When the waiting orders turn but the trading does not, the trade is held and judged
+            again at the next read. Too little volume to read lets the exit go. The executed volume exit, stops, targets and
+            every other exit are unchanged.
+          </InfoTip>
+        </span>
+      </label>
+      <div className={clsx("mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300", (!on || !checked) && "opacity-50")}>
+        The other side did at least
+        <input
+          type="number"
+          min={50}
+          max={95}
+          step={1}
+          disabled={!on || !checked}
+          value={checked ? level : 60}
+          onChange={(e) => set("pressure_exit_flow", e.target.value)}
+          className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        />
+        % of the shares traded in
+        <FlowWindowPick disabled={!on || !checked} value={win} candleLabel="the exit candle just closed" onChange={(v) => set("pressure_exit_flow_window", v)} />
+        <SameCandle disabled={!on || !checked} value={win} onChange={(v) => set("pressure_exit_flow_window", v)} />
+      </div>
+      {checked && (
+        <p className="mt-1 text-xs text-slate-400">
+          Example: a sell held while sellers are still the waiting side closes once sellers fall to {Number(form.pressure_exit_pct ?? 55)}% of the
+          waiting orders <i>and</i> buyers did at least {level}% of the shares traded {win === 0 ? "in the exit candle just closed" : `in the last ${win} min`}.
+        </p>
+      )}
     </div>
   );
 }
@@ -5822,7 +5891,10 @@ function BuyersSellersMap({
         { label: "Overrule the counter-candle exit", anchor: "sma-pressure-exit", on: Boolean(form.pressure_exit) && Boolean(form.pressure_over_counter) },
         { label: "Waiting orders must agree (executed exit)", anchor: "sma-flow-exit", on: Boolean(form.flow_exit) && Boolean(form.flow_exit_book) && !confirm },
       ],
-      executed: [{ label: confirm ? "Executed volume confirms the other exits" : "Executed volume exit", anchor: "sma-flow-exit", on: Boolean(form.flow_exit), value: `${form.flow_exit_pct ?? 60}% · ${win(form.flow_exit_window)}` }],
+      executed: [
+        { label: confirm ? "Executed volume confirms the other exits" : "Executed volume exit", anchor: "sma-flow-exit", on: Boolean(form.flow_exit), value: `${form.flow_exit_pct ?? 60}% · ${win(form.flow_exit_window)}` },
+        { label: "…the fade exit needs executed volume too", anchor: "sma-pressure-exit", on: Boolean(form.pressure_exit) && Number(form.pressure_exit_flow ?? 0) > 0, value: `${form.pressure_exit_flow ?? 0}% · ${win(form.pressure_exit_flow_window)}` },
+      ],
     },
   ];
 

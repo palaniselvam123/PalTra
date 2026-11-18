@@ -379,3 +379,67 @@ async def test_entry_at_arm_waits_for_the_executed_volume_check(monkeypatch, tmp
     await eng._pressure_entry_pass("ACME", cfg, now)
     assert sent == ["BEARISH"]
     database.reset_engine()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sell_share, level, closes", [
+    (0.7, 60, True),    # sellers did 70% of the shares traded: the executed volume agrees, the long closes
+    (0.4, 60, False),   # sellers did only 40%: held
+    (0.4, 0, True),     # check off: the waiting orders alone close it, as before
+    (None, 60, True),   # too little volume to read: the exit goes
+])
+async def test_fade_exit_waits_for_the_executed_volume(monkeypatch, tmp_path, sell_share, level, closes):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/p.db")
+    import database
+    import pandas as pd
+
+    import trade_flow
+    from strategy_engine import OpenPosition, StrategyEngine
+    from tests.test_sma_atr_terminal import _FakeBroker
+
+    database.reset_engine()
+    database.init_db()
+    eng = StrategyEngine(broker=_FakeBroker())
+    now = dt.datetime(2026, 11, 16, 11, 0, 30, tzinfo=IST)
+    monkeypatch.setattr(eng, "_now", lambda: now)
+    entry = now - dt.timedelta(minutes=10)
+    pressure_exit.note_scan(_scan(entry - dt.timedelta(minutes=2), ACME=0.80))
+    pressure_exit.note_scan(_scan(now - dt.timedelta(minutes=1), ACME=0.50))
+    eng._focus = "ACME"
+    eng._tapes["ACME"] = pd.DataFrame({"ts": [int(now.timestamp()) - 60]})
+
+    def fake_minutes(symbol, tape, start, end):
+        if sell_share is None:
+            return []
+        return [{"time": t, "buy": 100 * (1 - sell_share), "sell": 100 * sell_share, "src": "T"} for t in range(start, end, 60)]
+
+    monkeypatch.setattr(trade_flow, "minutes", fake_minutes)
+    eng.position = OpenPosition(
+        direction="LONG", qty=10, entry_price=100.0, ma_cross_price=100.0, atr_at_entry=1.0, sl_trigger=0.0,
+        sl_order_id="", entry_order_id="E", entry_time=entry, trade_id=0, mode="PAPER", stop_active=False,
+    )
+    eng.status, eng.ltp = "RUNNING", 101.0
+    exits = []
+
+    async def fake_exit(cfg, price, reason):
+        exits.append(reason)
+
+    monkeypatch.setattr(eng, "_exit_now", fake_exit)
+    cfg = type("C", (), {"symbol": "ACME", "pressure_exit": True, "pressure_exit_pct": 55, "candle_minutes": 15,
+                         "pressure_exit_flow": level, "pressure_exit_flow_window": 5,
+                         "trade_sources": json.dumps({"ACME": "Most active"})})()
+    await eng._watch_pressure_fade(cfg)
+    assert exits == (["PRESSURE_FADE"] if closes else [])
+    if not closes:
+        assert "held" in eng._signals["ACME"]
+    database.reset_engine()
+
+
+def test_fade_exit_flow_settings():
+    from main import ConfigUpdate
+
+    assert pressure_exit.exit_flow_pct(type("C", (), {})()) == 0.0
+    assert pressure_exit.exit_flow_pct(type("C", (), {"pressure_exit_flow": 30})()) == 50.0
+    assert pressure_exit.exit_flow_window(type("C", (), {"pressure_exit_flow_window": 0})()) == 0
+    assert pressure_exit.exit_flow_window(type("C", (), {})()) == 3
+    assert ConfigUpdate(pressure_exit_flow=60, pressure_exit_flow_window=15).pressure_exit_flow_window == 15

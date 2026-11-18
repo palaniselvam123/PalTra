@@ -419,7 +419,8 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max", "handoff_candle",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
-    "pressure_exit", "pressure_exit_pct", "pressure_over_counter", "pressure_entry", "pressure_entry_pct",
+    "pressure_exit", "pressure_exit_pct", "pressure_over_counter", "pressure_exit_flow", "pressure_exit_flow_window",
+    "pressure_entry", "pressure_entry_pct",
     "pressure_flip", "pressure_flip_pct", "pressure_flip_flow",
     "flow_exit", "flow_exit_pct", "flow_exit_window", "flow_exit_loss", "flow_exit_book", "flow_exit_mode",
     "flow_entry", "flow_entry_pct", "flow_entry_window",
@@ -6001,9 +6002,37 @@ class StrategyEngine:
             if self._pressure_note.get(symbol) != note:
                 self._pressure_note[symbol] = note
             return
+        held = self._fade_flow_hold(cfg, symbol, pos)
+        if held:
+            note = f"{note}; held — {held}"
+            self._pressure_note[symbol] = note
+            self._signals[symbol] = f"{symbol} buyers / sellers exit held — executed volume does not agree ({held})"
+            return
         self._pressure_note.pop(symbol, None)
         self._signals[symbol] = f"{symbol} buyers / sellers exit — {note}"
         await self._exit_now(cfg, self.ltp, pressure_exit.EXIT_REASON)
+
+    def _fade_flow_hold(self, cfg: BotConfig, symbol: str, pos: OpenPosition) -> str | None:
+        """The fade exit's executed volume check (`pressure_exit_flow`): why the exit is held (the other side did too
+        little of the shares traded over the window), or None to let it close. Too little volume to read lets it close."""
+        level = pressure_exit.exit_flow_pct(cfg)
+        if level <= 0:
+            return None
+        tape = self._tapes.get(symbol)
+        if tape is None or len(tape) == 0 or "ts" not in tape.columns:
+            return None
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        found = flow_exit.confirm_span(
+            self._now().timestamp(), opened.timestamp(), pressure_exit.exit_flow_window(cfg), self._exit_minutes(symbol, cfg)
+        )
+        if found is None:
+            return None
+        start, end = found
+        minutes = (end - start) // 60
+        hit, note = flow_exit.judge(trade_flow.minutes(symbol, tape, start, end), pos.direction, level, minutes)
+        if hit is None or hit:
+            return None
+        return note.replace("; exit at ", "; needs ")
 
     def _flow_hold(self, cfg: BotConfig, symbol: str, pos: OpenPosition | None, reason: str) -> str | None:
         """Executed volume set to confirm the other exits (flow_exit.py, `flow_exit_mode` CONFIRM): why this exit is

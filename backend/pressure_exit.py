@@ -315,6 +315,25 @@ def flip_pct(cfg) -> float:
     return min(MAX_PCT, max(MIN_FLIP_PCT, value))
 
 
+def exit_flow_pct(cfg) -> float:
+    """The executed-volume share the other side needs before the fade exit closes (trade_flow.py), 0 = not checked."""
+    value = getattr(cfg, "pressure_exit_flow", None)
+    try:
+        value = float(value or 0.0)
+    except (TypeError, ValueError):
+        value = 0.0
+    return 0.0 if value <= 0 else min(MAX_PCT, max(50.0, value))
+
+
+def exit_flow_window(cfg) -> int:
+    """Minutes of executed volume the fade exit's check reads (1-60), 0 = the exit candle just closed."""
+    try:
+        value = int(getattr(cfg, "pressure_exit_flow_window", 3) if getattr(cfg, "pressure_exit_flow_window", None) is not None else 3)
+    except (TypeError, ValueError):
+        value = 3
+    return value if 0 <= value <= 60 else 3
+
+
 def flip_flow_pct(cfg) -> float:
     """The executed-volume share the other side needs too (trade_flow.py), 0 = not checked."""
     value = getattr(cfg, "pressure_flip_flow", None)
