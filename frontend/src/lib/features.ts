@@ -341,6 +341,8 @@ export const FEATURES: Feature[] = [
     purpose: "The trade card shows the executed buyers / sellers % over the minutes before the order and the waiting orders' read the bot had then, so the numbers match what it decided on." },
   { id: "chart-four-lines", area: "terminal", added: "2026-11-17", pr: 462, href: TERM, where: "Terminal → chart → bottom strip (Indicators → Buyers / Sellers waiting %, Buyers / Sellers executed %)", title: "Buyers and sellers, waiting and executed: four lines on the chart",
     purpose: "The bottom strip draws four lines you can switch on or off one by one: buyers waiting, sellers waiting (the order book from the Most active scans) and buyers executed, sellers executed (what traded in each candle, estimated). The reading line shows all four for the candle under the mouse, and says why one is blank." },
+  { id: "buyers-sellers-map", area: "settings", added: "2026-11-18", pr: 469, href: S("sma-buyers-sellers"), where: "Settings → Strategy → 1. When to enter → Buyers & sellers: which setting does what", title: "Buyers & sellers settings side by side, duplicates named",
+    purpose: "One box lists every setting that reads buyers / sellers: waiting orders (Most active) against executed volume, by job (start a trade, check an entry, overrule the colour, close a trade), says which ones duplicate each other with a button to turn the extra one off, and which to use. In Executed volume only mode the bot no longer reads the executed volume entry check or the Most active waiting-orders entry." },
   { id: "flow-only", area: "settings", added: "2026-11-18", pr: 467, href: S("sma-flow-trigger"), where: "Settings → Strategy → 1. When to enter → Enter on → Executed volume only", title: "Trade on executed volume only",
     purpose: "A new entry mode in which only the executed volume opens a trade: buy once buyers did your % of the shares traded over the window, sell once sellers did. No SMA cross, candle colour, pattern or waiting orders open a trade, and the waiting orders are not checked; the stop, target, ticked exits and square-off close it." },
   { id: "flow-window-custom", area: "settings", added: "2026-11-17", pr: 461, href: S("sma-flow-exit"), where: "Settings → Strategy → executed volume entry check and exit → % of the shares traded in → custom minutes…", title: "Any number of minutes for the executed volume window",
@@ -647,7 +649,7 @@ export function featureById(id: string): Feature | undefined {
 const ANCHOR_GROUP: Record<string, string> = {
   "sma-candle-interval": "enter", "sma-day-extreme": "enter", "sma-colour-exit": "enter", "sma-colour-force": "enter",
   "sma-fresh": "check", "sma-exit-candle": "exit", "sma-slope-candle": "exit", "sma-small-colour": "exit",
-  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced",
+  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced",
 };
 
 /** The strategy form's group (enter, check, exit, gap, stop, risk, advanced) a Settings link opens, or null. */

@@ -1266,6 +1266,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
         </div>
         <div className="min-w-0">
+          <BuyersSellersMap form={form} set={set} />
           <PressureEntry form={form} set={set} isOwn={isOwn} />
           <FlowTrigger form={form} set={set} isOwn={isOwn} />
           <Only s="sma trend turn colour">
@@ -3702,13 +3703,17 @@ export function activeRules(f: SmaConfig): Rule[] {
   const pattern = f.entry_mode === "PATTERN";
   const colour = f.entry_mode === "COLOUR";
   const nth = f.entry_mode === "NTH_CANDLE";
+  const flowOnly = f.entry_mode === "FLOW";
+  const flowWin = (w: unknown) => (Number(w ?? 3) === 0 ? "in the last closed candle" : `in the last ${w ?? 3} min`);
   const nthNo = Math.min(6, Math.max(1, n(f.nth_candle_no, 2)));
   const nthWord = nthNo === 1 ? "1st" : nthNo === 2 ? "2nd" : nthNo === 3 ? "3rd" : `${nthNo}th`;
   const medium = f.sma_medium != null && String(f.sma_medium).trim() !== "";
 
   // 1. When to enter
   add(
-    pattern
+    flowOnly
+      ? { group: "enter", key: "entry_mode", text: `Executed volume only: buys when buyers did ${f.flow_trigger_pct ?? 60}% of the shares traded ${flowWin(f.flow_trigger_window)}, sells when sellers did; no SMA cross, candle colour or waiting orders`, off: { entry_mode: "SMA" }, warn: true }
+      : pattern
       ? { group: "enter", key: "entry_mode", text: `Enters on ${f.pattern_set === "ALL" ? "all" : "strong"} candle patterns (${f.pattern_tf ?? 1}-min), not the SMA cross; each trade closes at the end of its candle`, off: { entry_mode: "SMA" }, warn: true }
       : nth
         ? { group: "enter", key: "entry_mode", text: `Second candle: once a day, the ${nthWord} ${n(f.nth_candle_minutes, 5)}-min candle's colour buys (green) or sells (red) at its close, not the SMA cross${n(f.nth_min_body_pct, 0) > 0 ? ` (body ≥ ${f.nth_min_body_pct}%)` : ""}${n(f.nth_min_rvol, 0) > 0 ? ` (volume ≥ ${f.nth_min_rvol}× usual)` : ""}${f.nth_dir_rule === "CLOSES" ? " (up / down = a higher / lower close than the candle before)" : f.nth_dir_rule === "BOTH" ? " (up = green and a higher close, down = red and a lower close)" : ""}${f.nth_side_rule === "MAJORITY" ? `, the way most of the first ${n(f.nth_candle_no, 2)} candles went` : f.nth_side_rule === "AGREE" ? ", only when most of the first candles agree" : ""}${f.nth_skip_checks ? ", entering at once without the entry checks" : ""}; the stop, target, exits and square-off close it`, off: { entry_mode: "SMA" }, warn: true }
@@ -3771,9 +3776,11 @@ export function activeRules(f: SmaConfig): Rule[] {
     }[String(f.level_line ?? "BB_MIDDLE")] ?? "Price beyond the chosen level"
   );
   check("use_fresh", f.use_fresh, `Fresh trend only: a new cross, beyond VWAP, the gap widening${Number(f.fresh_rvol ?? 1.5) > 0 ? `, volume ${n(f.fresh_rvol, 1.5)}× usual` : ""}`);
-  if (f.flow_trigger)
+  if (f.flow_trigger && !flowOnly)
     add({ group: "enter", key: "flow_trigger", text: `Enter when buyers (buy) / sellers (sell) did ${f.flow_trigger_pct ?? 60}% of the shares traded ${Number(f.flow_trigger_window ?? 3) === 0 ? "in the last exit candle" : `in the last ${f.flow_trigger_window ?? 3} min`}${Number(f.flow_trigger_book ?? 55) > 0 ? `, and that side holds ${f.flow_trigger_book ?? 55}% of the waiting orders` : ""}`, off: { flow_trigger: false } });
-  check("flow_entry", f.flow_entry, `Executed volume: the order's own side did ${f.flow_entry_pct ?? 55}% of the shares traded ${Number(f.flow_entry_window ?? 3) === 0 ? "in the last exit candle" : `in the last ${f.flow_entry_window ?? 3} min`} (estimated)`);
+  if (f.flow_entry && flowOnly)
+    add({ group: "check", key: "flow_entry", text: "Executed volume entry check — not used: in Executed volume only mode the entry's own % and window decide (a duplicate, turn it off)", off: { flow_entry: false }, warn: true });
+  else check("flow_entry", f.flow_entry, `Executed volume: the order's own side did ${f.flow_entry_pct ?? 55}% of the shares traded ${Number(f.flow_entry_window ?? 3) === 0 ? "in the last exit candle" : `in the last ${f.flow_entry_window ?? 3} min`} (estimated)`);
   check(
     "use_high52",
     f.use_high52,
@@ -3886,7 +3893,9 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "stop", key: "stop_plan", text: `Stop plan: breakeven at +${f.plan_be_r ?? 1.5}R, Supertrend trail from +${f.plan_trail_r ?? 2}R`, off: { stop_plan: false } });
   if (f.pressure_exit)
     add({ group: "exit", key: "pressure_exit", text: `Most active stocks close when the buyers (a buy) / sellers (a sell) fade to ${f.pressure_exit_pct ?? 55}% or below`, off: { pressure_exit: false } });
-  if (f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM")
+  if ((f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM") && flowOnly)
+    add({ group: "enter", key: "pressure_entry", text: "Most active waiting orders entry — not used: Executed volume only never reads the waiting orders (turn it off)", off: { pressure_entry: "OFF" }, warn: true });
+  else if (f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM")
     add({ group: "enter", key: "pressure_entry", text: `Most active stocks: ${f.pressure_entry === "AT_ARM" ? "entered at once while" : "enter only while"} the buyers (a buy) / sellers (a sell) hold ${f.pressure_entry_pct ?? 65}% or more`, off: { pressure_entry: "OFF" } });
   if (f.pressure_flip)
     add({ group: "enter", key: "pressure_flip", text: `Most active stocks, candle colour: sellers (against a buy) / buyers (against a sell) at ${f.pressure_flip_pct ?? 65}% or more, with the price on their side of the VWAP${Number(f.pressure_flip_flow) > 0 ? ` and ${f.pressure_flip_flow}% of the executed volume` : ""}, turn the order their way`, off: { pressure_flip: false } });
@@ -5127,6 +5136,11 @@ function PressureEntry({
         Example at {shown}%: a stock armed when buyers were 78% is bought only while buyers are still {shown}% or more; once they
         drop under it, no new buy goes in.
       </p>
+      {String(form.entry_mode ?? "").toUpperCase() === "FLOW" && mode !== "OFF" ? (
+        <p className="mt-1 text-xs text-amber-300">
+          Not used now: &quot;Enter on&quot; is Executed volume only, which never reads the waiting orders. Set this to Off.
+        </p>
+      ) : null}
       <PressureFlip form={form} set={set} isOwn={isOwn} />
     </div>
   );
@@ -5248,6 +5262,12 @@ function FlowEntry({
         Example at {shown}%, {win === 0 ? "the exit candle" : `${win} min`}: a buy signal while sellers did {Math.max(5, 100 - shown + 10)}% of the
         shares traded {win === 0 ? "in the last candle" : `in the last ${win} minutes`} is refused, even on a green cross.
       </p>
+      {String(form.entry_mode ?? "").toUpperCase() === "FLOW" && on ? (
+        <p className="mt-1 text-xs text-amber-300">
+          Not used now: &quot;Enter on&quot; is Executed volume only, whose own % and window already decide the entry. Untick this
+          (a duplicate).
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -5743,5 +5763,174 @@ function SmartStopSwitch({
         </details>
       ) : null}
     </div>
+  );
+}
+
+/** One cell of the buyers / sellers overview: the setting's name, a link to it, and On (what) / Off / Not used. */
+type BsCell = { label: string; anchor: string; on: boolean; value?: string; unused?: string };
+
+/**
+ * Buyers & sellers overview (display only, plus "Turn off" buttons that only change the form): every setting that reads
+ * the buyers / sellers split side by side, waiting orders (the Most active scan) against executed volume (trades that
+ * happened), by what it does (start a trade, check an entry, overrule the colour, close a trade), with the duplicates
+ * named and a recommendation. Owner's request: the two kinds looked alike and were mixed up.
+ */
+function BuyersSellersMap({
+  form,
+  set,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+}) {
+  const flowOnly = String(form.entry_mode ?? "SMA").toUpperCase() === "FLOW";
+  const colour = String(form.entry_mode ?? "SMA").toUpperCase() === "COLOUR";
+  const pe = String(form.pressure_entry ?? "OFF");
+  const trig = Boolean(form.flow_trigger) || flowOnly;
+  const book = Number(form.flow_trigger_book ?? 55);
+  const win = (w: unknown) => (Number(w ?? 3) === 0 ? "last candle" : `${w ?? 3} min`);
+  const flipFlow = Number(form.pressure_flip_flow ?? 0);
+  const confirm = String(form.flow_exit_mode ?? "EXIT") === "CONFIRM";
+  const notHere = "not used in Executed volume only mode";
+
+  const rows: { what: string; waiting: BsCell[]; executed: BsCell[] }[] = [
+    {
+      what: "Start a trade",
+      waiting: [{ label: "Most active: Enter at once", anchor: "sma-pressure-entry", on: pe === "AT_ARM", value: `${form.pressure_entry_pct ?? 65}%`, unused: flowOnly && pe === "AT_ARM" ? notHere : undefined }],
+      executed: [
+        flowOnly
+          ? { label: "Enter on: Executed volume only", anchor: "sma-flow-trigger", on: true, value: `${form.flow_trigger_pct ?? 60}% · ${win(form.flow_trigger_window)}` }
+          : { label: "Enter on executed volume", anchor: "sma-flow-trigger", on: trig, value: `${form.flow_trigger_pct ?? 60}% · ${win(form.flow_trigger_window)}` },
+      ],
+    },
+    {
+      what: "Check before entering",
+      waiting: [
+        { label: "Most active: Only while they hold", anchor: "sma-pressure-entry", on: pe !== "OFF", value: `${form.pressure_entry_pct ?? 65}%`, unused: flowOnly && pe !== "OFF" ? notHere : undefined },
+        { label: "Waiting orders inside Enter on executed volume", anchor: "sma-flow-trigger", on: trig && !flowOnly && book > 0, value: `${book}%` },
+      ],
+      executed: [{ label: "Enter only when the order's side is doing the trading", anchor: "sma-flow-entry", on: Boolean(form.flow_entry), value: `${form.flow_entry_pct ?? 55}% · ${win(form.flow_entry_window)}`, unused: flowOnly && form.flow_entry ? notHere : undefined }],
+    },
+    {
+      what: "Overrule the candle colour",
+      waiting: [{ label: "Overrule the candle colour", anchor: "sma-pressure-flip", on: Boolean(form.pressure_flip), value: `${form.pressure_flip_pct ?? 65}%`, unused: form.pressure_flip && !colour ? "only in candle colour mode" : undefined }],
+      executed: [{ label: "…and executed volume agrees", anchor: "sma-pressure-flip", on: Boolean(form.pressure_flip) && flipFlow > 0, value: `${flipFlow}%`, unused: form.pressure_flip && flipFlow > 0 && !colour ? "only in candle colour mode" : undefined }],
+    },
+    {
+      what: "Close a trade",
+      waiting: [
+        { label: "Exit when buyers / sellers fade", anchor: "sma-pressure-exit", on: Boolean(form.pressure_exit), value: `${form.pressure_exit_pct ?? 55}%` },
+        { label: "Overrule the counter-candle exit", anchor: "sma-pressure-exit", on: Boolean(form.pressure_exit) && Boolean(form.pressure_over_counter) },
+        { label: "Waiting orders must agree (executed exit)", anchor: "sma-flow-exit", on: Boolean(form.flow_exit) && Boolean(form.flow_exit_book) && !confirm },
+      ],
+      executed: [{ label: confirm ? "Executed volume confirms the other exits" : "Executed volume exit", anchor: "sma-flow-exit", on: Boolean(form.flow_exit), value: `${form.flow_exit_pct ?? 60}% · ${win(form.flow_exit_window)}` }],
+    },
+  ];
+
+  // Duplicates: two settings doing the same job, with what to turn off.
+  const dups: { text: string; fix?: { label: string; run: () => void } }[] = [];
+  if (flowOnly && form.flow_entry)
+    dups.push({
+      text: "The executed volume entry check reads the same numbers as Executed volume only, over another window. The bot no longer reads it in this mode, so it only confuses the chart.",
+      fix: { label: "Turn the check off", run: () => set("flow_entry", false) },
+    });
+  if (flowOnly && pe !== "OFF")
+    dups.push({
+      text: "Most active entry reads the waiting orders, which Executed volume only never reads. The bot ignores it in this mode.",
+      fix: { label: "Set it to Off", run: () => set("pressure_entry", "OFF") },
+    });
+  if (!flowOnly && trig && form.flow_entry)
+    dups.push({
+      text: "Executed volume is read twice at the entry: Enter on executed volume and the executed volume entry check, each over its own window, so a trade can pass one and fail the other.",
+      fix: { label: "Turn the check off", run: () => set("flow_entry", false) },
+    });
+  if (!flowOnly && trig && book > 0 && pe !== "OFF")
+    dups.push({
+      text: "The waiting orders are checked twice at the entry: inside Enter on executed volume and by the Most active entry, with different %.",
+      fix: { label: "Drop the one inside Enter on executed volume", run: () => set("flow_trigger_book", "0") },
+    });
+  if (!flowOnly && trig && pe === "AT_ARM")
+    dups.push({ text: "Two settings start trades by themselves: Most active Enter at once (waiting orders) and Enter on executed volume. Whichever reads first opens the trade. Keep one." });
+  if (form.pressure_exit && form.flow_exit && form.flow_exit_book && !confirm)
+    dups.push({
+      text: "The waiting orders are used in two exits: the fade exit and \"waiting orders must agree\" inside the executed volume exit.",
+      fix: { label: "Untick \"waiting orders must agree\"", run: () => set("flow_exit_book", false) },
+    });
+
+  const Cell = ({ c }: { c: BsCell }) => (
+    <li className="flex flex-wrap items-baseline gap-x-2">
+      <a href={`#${c.anchor}`} className={clsx("underline-offset-2 hover:underline", c.on ? "text-slate-100" : "text-slate-400")}>
+        {c.label}
+      </a>
+      {c.unused ? (
+        <span className="rounded bg-amber-500/15 px-1.5 text-[11px] text-amber-300">On, {c.unused}</span>
+      ) : c.on ? (
+        <span className="rounded bg-emerald-500/15 px-1.5 text-[11px] text-emerald-300">On{c.value ? ` · ${c.value}` : ""}</span>
+      ) : (
+        <span className="rounded bg-white/5 px-1.5 text-[11px] text-slate-500">Off</span>
+      )}
+    </li>
+  );
+
+  return (
+    <details id="sma-buyers-sellers" className="mb-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-sky-400/30" open={dups.length > 0}>
+      <summary className="cursor-pointer text-sm text-slate-200">
+        <b className="text-slate-100">Buyers &amp; sellers: which setting does what</b> <NewTag id="buyers-sellers-map" link={false} />{" "}
+        {dups.length ? (
+          <span className="ml-1 rounded bg-amber-500/15 px-1.5 text-xs text-amber-300">{dups.length} duplicate{dups.length > 1 ? "s" : ""}</span>
+        ) : (
+          <span className="ml-1 text-xs text-slate-400">no duplicates</span>
+        )}
+      </summary>
+      <p className="mt-2 text-xs text-slate-400">
+        Two different numbers. <b className="text-slate-200">Waiting orders</b>: the buy and sell orders still sitting in the
+        order book, read by the Most active scan (intentions; only for stocks armed from Most active).{" "}
+        <b className="text-slate-200">Executed</b>: the shares that really traded, split into bought and sold (any stock).
+      </p>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[520px] text-left text-xs">
+          <thead className="text-slate-400">
+            <tr>
+              <th className="py-1 pr-2 font-normal">Job</th>
+              <th className="py-1 pr-2 font-normal">Waiting orders (Most active)</th>
+              <th className="py-1 font-normal">Executed (trades that happened)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.what} className="border-t border-white/10 align-top">
+                <td className="py-1.5 pr-2 text-slate-300">{r.what}</td>
+                <td className="py-1.5 pr-2">
+                  <ul className="space-y-1">{r.waiting.map((c) => <Cell key={c.label} c={c} />)}</ul>
+                </td>
+                <td className="py-1.5">
+                  <ul className="space-y-1">{r.executed.map((c) => <Cell key={c.label} c={c} />)}</ul>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {dups.length ? (
+        <ul className="mt-2 space-y-1.5">
+          {dups.map((d) => (
+            <li key={d.text} className="rounded-md bg-amber-500/10 p-2 text-xs text-amber-200 ring-1 ring-inset ring-amber-400/30">
+              {d.text}{" "}
+              {d.fix ? (
+                <button type="button" onClick={d.fix.run} className="ml-1 rounded border border-amber-400/40 px-1.5 py-0.5 text-amber-100 hover:bg-amber-500/20">
+                  {d.fix.label}
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="mt-2 rounded-md bg-white/5 p-2 text-xs text-slate-300">
+        <b className="text-slate-100">Which one to use.</b> Use one kind for one job. To trade on what really traded: Enter on →
+        Executed volume only (its % and window, ticked &quot;Read the same candle as the chart&quot;), close with the Executed
+        volume exit or the stop, and leave every waiting-orders setting Off. To trade the Most active waiting orders: Most
+        active Enter at once (or Only while they hold) and the fade exit, with the executed settings Off. The buttons above
+        only change the form; Save applies them.
+      </div>
+    </details>
   );
 }
