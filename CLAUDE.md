@@ -2541,7 +2541,8 @@ spinning top), body and range) / Matched / Call columns
   linked from the Settings slope editor), `day-high-low` (the day high/low guard, linked from that setting,
   anchor `#sma-day-extreme`), `smart-stop` (the smart stop and its Advanced settings, worked on an AMBER short; why it
   closes in profit and why candle colour mode still exits on the other colour; linked from the smart stop switch, anchor
-  `#sma-smart-stop`; module `19-smart-stop.js`), `sideways-test` (the Scalp page's Sideways test, linked from its card) and
+  `#sma-smart-stop`; module `19-smart-stop.js`), `buyers-sellers-strategies` (every waiting-orders / executed-volume entry and exit told apart, OR vs AND, recipes, the
+  BSE short of 6 Nov worked through; linked from the Buyers & sellers overview card; module `20-buyers-sellers-strategies.js`), `sideways-test` (the Scalp page's Sideways test, linked from its card) and
   `most-active-columns` (every column of the Most active card's "Which column finds the trend?" test, linked from it),
   `buyers-sellers` (the buyers / sellers % column, its day list, test and alert, linked from the day list),
   `settings-entries` and `settings-exits` (the strategy settings' look-alike names told apart, with pictures: part 1 the
