@@ -34,8 +34,7 @@ export const crossExitOn = (cfg: Partial<SmaConfig>): boolean => cfg.cross_exit 
 export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
   if (!cfg) return false;
   return (
-    (cfg.entry_mode ?? "SMA") === "SMA" &&
-    !crossExitOn(cfg) &&
+    ((cfg.entry_mode ?? "SMA") === "FLOW" || ((cfg.entry_mode ?? "SMA") === "SMA" && !crossExitOn(cfg))) &&
     cfg.use_stop === false &&
     !cfg.use_gap_mode &&
     String(cfg.bb_exit ?? "OFF").toUpperCase() === "OFF" &&
@@ -250,6 +249,7 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
       when: candle,
       code: "COLOUR_TURN",
     });
+  if (mode === "FLOW") out.push({ name: "Executed volume only: no exit of its own (the stop, target, ticked exits and square-off close it)", when: "—", code: "" });
   if (mode === "NTH_CANDLE") out.push({ name: "Second candle: no exit of its own (the stop, target, ticked exits and square-off close it)", when: "—", code: "" });
   if (cfg.breakout_handoff && cfg.breakout_cut && String(cfg.breakout_when ?? "ANY").toUpperCase() !== "IN_PROFIT") out.push({ name: "Breakout: cut and move the stock on", when: candle, code: "BREAKOUT_STOP" });
   if (mode === "SMA" && crossExitOn(cfg) && !mixed)

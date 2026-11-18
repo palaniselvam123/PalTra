@@ -1904,7 +1904,7 @@ export type WalletEntry = {
 };
 
 /** Where a stock can be armed: an SMA bot (1 = main desk, 2-4) or the research desk. */
-export type EntryMode = "SMA" | "PATTERN" | "COLOUR" | "NTH_CANDLE";
+export type EntryMode = "SMA" | "PATTERN" | "COLOUR" | "NTH_CANDLE" | "FLOW";
 export type NthCandleMinutes = 1 | 3 | 5 | 10 | 15;
 export const NTH_CANDLE_MINUTES: NthCandleMinutes[] = [1, 3, 5, 10, 15];
 export type CandleMinutes = 1 | 2 | 3 | 5 | 10 | 15;

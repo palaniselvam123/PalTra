@@ -347,11 +347,11 @@ export function StrategySummary({
           "Entry",
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              {segmented<"SMA" | "PATTERN" | "COLOUR" | "NTH_CANDLE">(
+              {segmented<"SMA" | "PATTERN" | "COLOUR" | "NTH_CANDLE" | "FLOW">(
                 "Enter on",
-                (c.entry_mode ?? "SMA") as "SMA" | "PATTERN" | "COLOUR" | "NTH_CANDLE",
-                ["SMA", "PATTERN", "COLOUR", "NTH_CANDLE"],
-                { SMA: `SMA ${c.sma_fast}/${c.sma_slow} cross`, PATTERN: "Candle patterns", COLOUR: "Candle colour", NTH_CANDLE: "Second candle" },
+                (c.entry_mode ?? "SMA") as "SMA" | "PATTERN" | "COLOUR" | "NTH_CANDLE" | "FLOW",
+                ["SMA", "PATTERN", "COLOUR", "NTH_CANDLE", "FLOW"],
+                { SMA: `SMA ${c.sma_fast}/${c.sma_slow} cross`, PATTERN: "Candle patterns", COLOUR: "Candle colour", NTH_CANDLE: "Second candle", FLOW: "Executed volume" },
                 (v) =>
                   save(
                     { entry_mode: v },
@@ -361,7 +361,9 @@ export function StrategySummary({
                         ? "Ride the candle colour"
                         : v === "NTH_CANDLE"
                           ? "Second candle: the day's Nth candle colour, once a day"
-                          : "Entry on the SMA cross"
+                          : v === "FLOW"
+                            ? "Executed volume only: the side doing the trading starts the trade"
+                            : "Entry on the SMA cross"
                   )
               )}
             </div>

@@ -52,7 +52,7 @@ COLOUR_BODY_ATR_MAX = 5.0
 COLOUR_BODY_UNITS = ("PCT", "ATR")
 COLOUR_ATR_PERIOD = 14
 PATTERN_SETS = ("STRONG", "ALL")
-ENTRY_MODES = ("SMA", "PATTERN", "COLOUR", "NTH_CANDLE")
+ENTRY_MODES = ("SMA", "PATTERN", "COLOUR", "NTH_CANDLE", "FLOW")
 
 DEFAULTS = {
     "entry_mode": "SMA",
@@ -110,6 +110,11 @@ def uses_colour(cfg) -> bool:
 def uses_nth(cfg) -> bool:
     """The day's Nth candle colour (``entry_mode = "NTH_CANDLE"``, nth_candle.py)."""
     return str(setting(cfg, "entry_mode")).upper() == "NTH_CANDLE"
+
+
+def uses_flow(cfg) -> bool:
+    """Executed volume only (``entry_mode = "FLOW"``, flow_exit.py): nothing but the executed volume opens a trade."""
+    return str(setting(cfg, "entry_mode")).upper() == "FLOW"
 
 
 def per_candle(cfg) -> bool:
