@@ -46,6 +46,9 @@ export type ChartStyle = Record<LineKey, LineLook> & {
    * on their own strip under them. Display only. On by default (owner's request); stored as `pressureOver`, so a choice
    * saved under the old off-by-default name no longer keeps them under the candles. */
   pressureOver: boolean;
+  /** Draw the executed buyers / sellers lines as the share of the last N candles together (volume-weighted, 1 = each
+   * candle on its own). Display only; matches what the executed volume exit reads with a longer window. */
+  flowSmooth: number;
 };
 
 export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: string }> = {
@@ -71,6 +74,7 @@ export const DEFAULT_CHART_STYLE: ChartStyle = {
   heikinAshi: false,
   tradeReads: true,
   pressureOver: true,
+  flowSmooth: 1,
   sma9: { show: "on", color: "#F43F5E", width: 2, style: 0 },
   sma21: { show: "on", color: "#3B82F6", width: 2, style: 0 },
   vwap: { show: "auto", color: "#22D3EE", width: 2, style: 1 },
@@ -101,6 +105,8 @@ function clean(raw: unknown): ChartStyle {
   out.heikinAshi = src.heikinAshi === true;
   out.tradeReads = src.tradeReads !== false;
   out.pressureOver = src.pressureOver !== false;
+  const smooth = Math.round(Number(src.flowSmooth));
+  out.flowSmooth = Number.isFinite(smooth) ? Math.min(6, Math.max(1, smooth)) : 1;
   for (const key of Object.keys(LINE_NAMES) as LineKey[]) {
     const v = src[key] as Partial<LineLook> | undefined;
     if (!v || typeof v !== "object") continue;
@@ -243,6 +249,25 @@ export function flowReads(rows: { time: number }[], points: FlowPoint[] | null |
     if (buy + sell <= 0) return null;
     const src = kinds.size > 1 ? "ticks + candles" : kinds.has("T") ? "ticks" : "candles";
     return { buyPct: (100 * buy) / (buy + sell), buy, sell, src };
+  });
+}
+
+/** The executed split of the last `n` candles together (shares bought ÷ all traded over them, so a busy candle weighs
+ * more than a quiet one). Candles with no volume known are skipped; a candle with no read stays null. n ≤ 1 = unchanged. */
+export function smoothFlows(reads: (FlowRead | null)[], n: number): (FlowRead | null)[] {
+  if (n <= 1) return reads;
+  return reads.map((r, i) => {
+    if (r == null) return null;
+    let buy = 0;
+    let sell = 0;
+    for (let k = Math.max(0, i - n + 1); k <= i; k += 1) {
+      const x = reads[k];
+      if (x) {
+        buy += x.buy;
+        sell += x.sell;
+      }
+    }
+    return buy + sell > 0 ? { ...r, buy, sell, buyPct: (100 * buy) / (buy + sell) } : r;
   });
 }
 

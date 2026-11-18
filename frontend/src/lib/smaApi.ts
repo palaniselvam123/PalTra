@@ -340,6 +340,7 @@ export type SmaConfig = {
   /** 0 = the exit candle; else the last N closed minutes (1-60). */
   flow_exit_window?: number;
   flow_exit_loss?: boolean;
+  flow_exit_streak?: number;
   flow_exit_book?: boolean;
   /** EXIT = close the trade itself; CONFIRM = only let the other signal exits close when it agrees. */
   flow_exit_mode?: "EXIT" | "CONFIRM";

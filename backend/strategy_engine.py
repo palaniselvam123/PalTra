@@ -422,7 +422,7 @@ SNAPSHOT_FIELDS = (
     "pressure_exit", "pressure_exit_pct", "pressure_exit_any", "pressure_exit_all", "pressure_over_counter", "pressure_exit_flow", "pressure_exit_flow_window",
     "pressure_entry", "pressure_entry_pct",
     "pressure_flip", "pressure_flip_pct", "pressure_flip_flow",
-    "flow_exit", "flow_exit_pct", "flow_exit_window", "flow_exit_loss", "flow_exit_book", "flow_exit_mode",
+    "flow_exit", "flow_exit_pct", "flow_exit_window", "flow_exit_loss", "flow_exit_streak", "flow_exit_book", "flow_exit_mode",
     "flow_entry", "flow_entry_pct", "flow_entry_window",
     "flow_trigger", "flow_trigger_pct", "flow_trigger_window", "flow_trigger_book",
     "stop_handoff", "stop_handoff_loss",
@@ -1399,6 +1399,8 @@ class StrategyEngine:
         self._pressure_note: dict[str, str] = {}
         # Executed volume exit (flow_exit.py): the last window judged per stock (entry time, window end) and its reading.
         self._flow_seen: dict[str, tuple] = {}
+        # Readings in a row with the other side at the executed volume exit's % (flow_exit.streak): symbol → (entry ts, count).
+        self._flow_run: dict[str, tuple[float, int]] = {}
         self._ft_seen: dict[str, int] = {}  # executed volume entry: the last window end judged per stock
         # Executed volume entry: what the bot decided at each window end, per stock (display only; the chart's why line).
         self._ft_log: dict[str, list[dict]] = {}
@@ -6086,6 +6088,21 @@ class StrategyEngine:
         self._flow_seen[symbol] = key
         minutes = (end - start) // 60
         hit, note = flow_exit.judge(trade_flow.minutes(symbol, tape, start, end), pos.direction, flow_exit.pct(cfg), minutes)
+        need = flow_exit.streak(cfg)
+        if need > 1:
+            # N readings in a row: a reading with too little volume (hit None) neither counts nor breaks the run.
+            run_entry, count = self._flow_run.get(symbol, (opened.timestamp(), 0))
+            if run_entry != opened.timestamp():
+                count = 0
+            if hit:
+                count += 1
+            elif hit is not None:
+                count = 0
+            self._flow_run[symbol] = (opened.timestamp(), count)
+            if hit and count < need:
+                hit, note = False, f"{note}; {count} of {need} readings in a row"
+            elif hit:
+                note = f"{note}; {count} readings in a row"
         if hit and flow_exit.loss_only(cfg):
             sign = 1.0 if pos.direction == "LONG" else -1.0
             if (self.ltp - pos.entry_price) * sign >= 0:

@@ -352,6 +352,25 @@ export function ChartIndicators({
               </span>
             </label>
           </li>
+          <li className="py-2 text-xs">
+            <label
+              className="flex flex-wrap items-center gap-2"
+              title="The executed buyers / sellers lines as the share of the last N candles together (volume-weighted), so one candle's swing does not jump the line. Matches what the executed volume exit reads with a longer window, e.g. 2 candles = a 30-minute window on 15-minute candles."
+            >
+              <span className="font-semibold text-slate-100">Executed lines: average over</span>
+              <select
+                value={String(style.flowSmooth)}
+                onChange={(e) => onChange({ ...style, flowSmooth: Number(e.target.value) })}
+                className="rounded border border-white/15 bg-black/30 px-1 py-0.5 text-xs text-slate-100"
+              >
+                <option value="1">1 candle (each on its own)</option>
+                {[2, 3, 4, 5, 6].map((n) => (
+                  <option key={n} value={String(n)}>{n} candles</option>
+                ))}
+              </select>
+              <NewTag id="chart-flow-smooth" link={false} />
+            </label>
+          </li>
         </ul>
       </div>
       <p className="border-t border-white/10 px-3 py-2 text-xs text-slate-500">

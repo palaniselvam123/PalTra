@@ -23,7 +23,7 @@ import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
-import { type FlowPoint, type FlowRead, cvdValues, emaValues, flowReads, heikinAshi, pressureReads, pressureValues, shown, useChartStyle } from "@/lib/chartStyle";
+import { type FlowPoint, type FlowRead, cvdValues, emaValues, flowReads, heikinAshi, pressureReads, pressureValues, shown, smoothFlows, useChartStyle } from "@/lib/chartStyle";
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { NewTag } from "@/components/ui/NewTag";
@@ -1971,7 +1971,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     const anyWaiting = buyers.some((v) => v != null);
     const showBuyerLine = shown(look.pressure, anyWaiting);
     const showSellerLine = shown(look.pressureSell, anyWaiting);
-    const flows = flowReads(rows, chart.flow, bar);
+    const flows = smoothFlows(flowReads(rows, chart.flow, bar), look.flowSmooth);
     const anyFlow = flows.some((v) => v != null);
     // Auto: the executed lines go with the waiting lines (they read best together).
     const showFlow = shown(look.flow, (showBuyerLine || showSellerLine) && anyFlow);
@@ -2369,7 +2369,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   })();
   const shownBuyers = shownRead ? shownRead.buy_pct : null;
   // The executed buy / sell split of this candle (estimated): what traded, next to what is waiting.
-  const flowRows = useMemo(() => flowReads(rows, view?.flow, bar), [rows, view?.flow, bar]);
+  const flowRows = useMemo(() => smoothFlows(flowReads(rows, view?.flow, bar), look.flowSmooth), [rows, view?.flow, bar, look.flowSmooth]);
   const anyFlowRead = flowRows.some((v) => v != null);
   const showFlowBuy = shown(look.flow, showBuyers && anyFlowRead);
   const showFlowSell = shown(look.flowSell, showBuyers && anyFlowRead);

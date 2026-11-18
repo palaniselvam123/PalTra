@@ -246,7 +246,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `first_minute`: the entry minute counts when the trade opened in its first `ENTRY_GRACE_SEC` 15 s) and the last closed
   minute is in the tape; under half the window's minutes with volume = no read. Closes via `_exit_now` (`FLOW_EXIT`, LIVE
   stop cancelled first; a LIVE position restored without its stop id is left to that stop); the latest reading is
-  `books[].flow_note`. Groupable in "How exits combine" (`exit_join` key `FLOW`). Counts as an exit for
+  `books[].flow_note`. **Readings in a row** (`flow_exit_streak` 1-5, default 1; per bot and per stock, PAPER and LIVE, replays too; owner's request: one candle's estimated split swings back and forth): with 2+ the other side must be at the % on that many judged windows one after another (`flow_exit.streak`, `StrategyEngine._flow_run`, memory only, reset per trade; a reading the other way starts again, one with too little volume neither counts nor breaks it) before the exit closes; Settings: the "Close only after" menu on the card. **Chart** (display only): Indicators → "Executed lines: average over N candles" (`chartStyle.flowSmooth` 1-6, `smoothFlows`: the last N candles' bought and sold shares added up). Groupable in "How exits combine" (`exit_join` key `FLOW`). Counts as an exit for
   `strategyChecks.noExitOn`. The Strategy lab does not know it; the stock research baseline keeps it off.
   **Entry check too** (`flow_entry`, off by default; `flow_entry_pct` 55, 50-95; `flow_entry_window` 3 = the last N closed
   1-minute candles or 0 = one exit candle's length ending at the last closed minute; per bot and per stock, PAPER and LIVE,
