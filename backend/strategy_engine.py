@@ -1095,7 +1095,7 @@ def chart_filters(cfg) -> dict:
         "flow_trigger_pct": flow_exit.trigger_pct(cfg),
         "flow_trigger_window": flow_exit.trigger_window(cfg),
         "flow_trigger_book": flow_exit.trigger_book(cfg),
-        "flow_entry": flow_exit.entry_on(cfg),
+        "flow_entry": flow_exit.entry_on(cfg) and not flow_exit.only_mode(cfg),  # not read in executed-only mode
         "flow_entry_pct": flow_exit.entry_pct(cfg),
         "flow_entry_window": flow_exit.entry_window(cfg),
         "candle_minutes": int(getattr(cfg, "candle_minutes", 1) or 1),
@@ -3267,8 +3267,10 @@ class StrategyEngine:
             )
             if small:
                 entry_block = f"{entry_block}; {small}" if entry_block else small
-        if flow_exit.entry_on(cfg):
+        only_flow = flow_exit.only_mode(cfg)
+        if flow_exit.entry_on(cfg) and not only_flow:
             # Executed volume (flow_exit.py): the real order's own side must have done the set % of the shares traded.
+            # Not read in "Executed volume only" mode: its own % and window already decide (one rule, no duplicate).
             side = "LONG" if signal == "BULLISH" else "SHORT"
             if getattr(cfg, "flip_orders", False):
                 side = "SHORT" if side == "LONG" else "LONG"
@@ -3279,7 +3281,8 @@ class StrategyEngine:
             flow = flow_exit.entry_refusal(points, side, flow_exit.entry_pct(cfg), (end - start) // 60)
             if flow:
                 entry_block = f"{entry_block}; {flow}" if entry_block else flow
-        if pressure_exit.entry_mode(cfg) != "OFF" and pressure_exit.from_most_active(
+        # Waiting orders are never read in "Executed volume only" mode (as its label says).
+        if not only_flow and pressure_exit.entry_mode(cfg) != "OFF" and pressure_exit.from_most_active(
             trade_sources(cfg).get((self._focus or "").upper())
         ):
             # Most active stocks (pressure_exit.py): the order's own side must still hold at least the set %.

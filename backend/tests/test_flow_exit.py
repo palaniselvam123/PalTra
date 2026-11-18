@@ -261,6 +261,13 @@ async def test_flow_only_mode_trades_executed_volume_not_crosses(db):  # noqa: F
     assert any(t["direction"] == "LONG" for t in sma)                                   # the cross trades in SMA mode
     assert only and only[0]["direction"] == "SHORT" and only[0]["entry_reason"].startswith("EXECUTED_VOLUME")
     assert not any(t["entry_reason"].startswith("SMA_CROSS") for t in only)              # crosses never enter
+    # The executed volume entry check (a second, duplicate executed rule) is not read in this mode: a check that
+    # would refuse (95 % over an hour of quiet, half-and-half candles) leaves the trigger's trade alone.
+    strict = dict(flow_entry=True, flow_entry_pct=95, flow_entry_window=60)
+    checked = await replay_symbol(frame, "FLO", [DAY], _settings(db, entry_mode="SMA", flow_trigger=True, **base, **strict))
+    still = await replay_symbol(frame, "FLO", [DAY], _settings(db, entry_mode="FLOW", **base, **strict))
+    assert not any(t["entry_reason"].startswith("EXECUTED_VOLUME") for t in checked)    # outside it, the check refuses
+    assert still and still[0]["entry_reason"].startswith("EXECUTED_VOLUME")
 
 
 def test_chart_filters_carry_the_executed_volume_entry_for_the_why_line():
@@ -274,7 +281,9 @@ def test_chart_filters_carry_the_executed_volume_entry_for_the_why_line():
     got = chart_filters(cfg)
     assert got["entry_mode"] == "FLOW" and got["flow_trigger"] is True       # the mode turns the trigger on
     assert (got["flow_trigger_pct"], got["flow_trigger_window"], got["flow_trigger_book"]) == (70, 0, 0.0)
-    assert (got["flow_entry"], got["flow_entry_pct"], got["flow_entry_window"]) == (True, 56, 5)
+    assert (got["flow_entry"], got["flow_entry_pct"], got["flow_entry_window"]) == (False, 56, 5)  # not read here
+    sma = chart_filters(SimpleNamespace(**{**vars(cfg), "entry_mode": "SMA"}))
+    assert sma["flow_entry"] is True                                          # read as a check in the other modes
     assert (got["candle_minutes"], got["reentry_wait_candles"], got["max_trades_per_stock"]) == (15, 2, 8)
 
 
