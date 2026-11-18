@@ -43,8 +43,9 @@ export type ChartStyle = Record<LineKey, LineLook> & {
   /** Mark on the buyers / sellers strip, at each trade's entry and exit, the executed % the bot read then. */
   tradeReads: boolean;
   /** Draw the buyers / sellers lines over the candles (like the SMA lines, 0-100 % across the candle area) instead of
-   * on their own strip under them. Display only. */
-  pressureOnCandles: boolean;
+   * on their own strip under them. Display only. On by default (owner's request); stored as `pressureOver`, so a choice
+   * saved under the old off-by-default name no longer keeps them under the candles. */
+  pressureOver: boolean;
 };
 
 export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: string }> = {
@@ -69,7 +70,7 @@ export const DEFAULT_CHART_STYLE: ChartStyle = {
   candleDown: "#F43F5E",
   heikinAshi: false,
   tradeReads: true,
-  pressureOnCandles: false,
+  pressureOver: true,
   sma9: { show: "on", color: "#F43F5E", width: 2, style: 0 },
   sma21: { show: "on", color: "#3B82F6", width: 2, style: 0 },
   vwap: { show: "auto", color: "#22D3EE", width: 2, style: 1 },
@@ -99,7 +100,7 @@ function clean(raw: unknown): ChartStyle {
   }
   out.heikinAshi = src.heikinAshi === true;
   out.tradeReads = src.tradeReads !== false;
-  out.pressureOnCandles = src.pressureOnCandles === true;
+  out.pressureOver = src.pressureOver !== false;
   for (const key of Object.keys(LINE_NAMES) as LineKey[]) {
     const v = src[key] as Partial<LineLook> | undefined;
     if (!v || typeof v !== "object") continue;

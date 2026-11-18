@@ -290,7 +290,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   whole candle, which can include minutes after the order). The same is saved at the exit (`TradeLog.exit_flow`, from
   `_finalize_trade` over the executed volume exit's window, else 3 minutes): "Executed at exit" on the card, and with the
   Indicators tick **Mark what the bot read at each entry and exit** (`chartStyle.tradeReads`, on by default) dots on the
-  buyers / sellers strip ("in B32 S68 09:15-09:30", "out …") on the first strip line that is on. **Same candle as the
+  buyers / sellers strip ("in B32 S68 09:15-09:30", "out …") on the first strip line that is on, for the chart's own book
+  only (the replayed run, or the desk's mode; `trades`, not every book) and only for moments inside the candles on screen. **Same candle as the
   chart** (owner's request): window 0 of the entry check / executed volume entry (`flow_exit.entry_span`) is the last
   *closed* exit candle from 09:15 (the candle the chart draws at that size), no longer one candle's length back from the
   order; each executed volume card has a "Read the same candle as the chart" tick (`StrategyConfigPanel.SameCandle`, sets
@@ -322,8 +323,8 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   once a later minute is on the tape as well as `FINAL_AFTER_SEC` by the clock: a replay's tape ends in the forming minute
   (part of its volume), which the wall clock used to call finished, so replays kept partial numbers (blanks, wrong splits)
   that the chart, the entry check and the exit then read.
-  **Over the candles** (Indicators → "Draw the buyers / sellers lines over the candles", `chartStyle.pressureOnCandles`, off by
-  default; display only): the four lines' 0-100 scale spans the candle area (`StrategyChart` `CANDLE_MARGINS`) like the SMA
+  **Over the candles** (Indicators → "Draw the buyers / sellers lines over the candles", `chartStyle.pressureOver`, on by
+  default (owner's request; the old off-by-default key `pressureOnCandles` is no longer read); display only): the four lines' 0-100 scale spans the candle area (`StrategyChart` `CANDLE_MARGINS`) like the SMA
   lines, and the strips below no longer make room for them.
 - Bollinger exit (`bb_exit`: `OFF` default | `BAND` | `MIDDLE` | `BOTH`,
   PAPER and LIVE): `indicators.bollinger_exit`, read once per closed candle

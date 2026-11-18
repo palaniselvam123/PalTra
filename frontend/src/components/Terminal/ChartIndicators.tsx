@@ -341,8 +341,8 @@ export function ChartIndicators({
             >
               <input
                 type="checkbox"
-                checked={style.pressureOnCandles}
-                onChange={(e) => onChange({ ...style, pressureOnCandles: e.target.checked })}
+                checked={style.pressureOver}
+                onChange={(e) => onChange({ ...style, pressureOver: e.target.checked })}
                 className="mt-0.5 accent-[#10B981]"
               />
               <span>
