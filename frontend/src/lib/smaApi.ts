@@ -1840,6 +1840,18 @@ export type ChartFilters = {
   /** Always in a trade (always_in.py) and its reverse-after-a-loss option, for the chart's "why" line. */
   always_in?: boolean;
   always_in_reverse?: boolean;
+  /** Executed volume entry (flow_exit.py): the trigger and the entry check's levels and windows (minutes, 0 = the
+   * last closed candle of the bot's size), for the "why" line of "Enter on: Executed volume only". */
+  flow_trigger?: boolean;
+  flow_trigger_pct?: number;
+  flow_trigger_window?: number;
+  flow_trigger_book?: number;
+  flow_entry?: boolean;
+  flow_entry_pct?: number;
+  flow_entry_window?: number;
+  candle_minutes?: number;
+  reentry_wait_candles?: number;
+  max_trades_per_stock?: number;
 };
 
 /** A loan the practice wallet took because the free balance was short of an entry's margin. */

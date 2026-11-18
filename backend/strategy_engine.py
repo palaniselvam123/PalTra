@@ -1089,6 +1089,18 @@ def chart_filters(cfg) -> dict:
         # Always in a trade (always_in.py): the chart's "why" line says how a flat stock is entered.
         "always_in": always_in.enabled(cfg),
         "always_in_reverse": always_in.reverse_on(cfg),
+        # Executed volume entry (flow_exit.py): the "why" line of "Enter on: Executed volume only" reads the same
+        # windows and levels as the bot (display only).
+        "flow_trigger": flow_exit.trigger_on(cfg),
+        "flow_trigger_pct": flow_exit.trigger_pct(cfg),
+        "flow_trigger_window": flow_exit.trigger_window(cfg),
+        "flow_trigger_book": flow_exit.trigger_book(cfg),
+        "flow_entry": flow_exit.entry_on(cfg),
+        "flow_entry_pct": flow_exit.entry_pct(cfg),
+        "flow_entry_window": flow_exit.entry_window(cfg),
+        "candle_minutes": int(getattr(cfg, "candle_minutes", 1) or 1),
+        "reentry_wait_candles": int(getattr(cfg, "reentry_wait_candles", 0) or 0),
+        "max_trades_per_stock": int(getattr(cfg, "max_trades_per_stock", 0) or 0),
     }
 
 
