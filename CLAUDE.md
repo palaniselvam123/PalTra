@@ -2810,7 +2810,12 @@ No credentials are needed. The desk starts on the simulated feed.
 - **Deploys come from `main` only**, through
   `.github/workflows/test-and-deploy.yml`:
   - every pull request and push runs the backend tests (Python 3.13,
-    `requirements-dev.txt`) and the frontend typecheck plus static export
+    `requirements-dev.txt`) and the frontend typecheck plus static export. The backend tests run in 4 parts on 4
+    runners at once (`backend-part`, `scripts/test_parts.py` shares the test files out by size), each part on every
+    CPU of its runner (pytest-xdist, `-n auto --dist loadfile`); the job named "Backend tests" passes once every part
+    did. A deploy by hand (workflow_dispatch) skips them when that commit already passed "Backend tests" on its push to
+    `main` (`tested-before`, read through the Actions API); otherwise they run as usual. Tests that write a shared file
+    must use `tmp_path`, since several test files run side by side
   - **backtest server first** (owner's choice): a push to `main` that passes both deploys
     **only the backtest server** (`deploy-backtest`, `fly.backtest.toml`, needs `DEPLOY_BACKTEST`),
     at any hour, with the exported `frontend/out/` (built in CI, not committed)
