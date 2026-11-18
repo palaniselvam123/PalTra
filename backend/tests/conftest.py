@@ -15,10 +15,11 @@ os.environ.setdefault("US_DESK", "off")
 os.environ.setdefault("DESK_REPLAY_HOURS", "any")  # CI runs at any hour; the market-hours refusal has its own test
 
 # Importing the research store writes its schema. Keep that off the real
-# research_data/research.db.
-os.environ.setdefault(
-    "RESEARCH_DB_PATH", os.path.join(tempfile.mkdtemp(prefix="paltra-research-"), "research.db")
-)
+# research_data/research.db. Under pytest-xdist every worker gets its own file: the workers inherit the controller's
+# environment, so a path set there was one SQLite file shared by every worker ("database is locked" while collecting).
+if os.environ.get("PYTEST_XDIST_WORKER") or "RESEARCH_DB_PATH" not in os.environ or os.environ.get("_PALTRA_TEST_RESEARCH_DB"):
+    os.environ["RESEARCH_DB_PATH"] = os.path.join(tempfile.mkdtemp(prefix="paltra-research-"), "research.db")
+    os.environ["_PALTRA_TEST_RESEARCH_DB"] = "1"
 
 import pytest
 
