@@ -261,3 +261,18 @@ async def test_flow_only_mode_trades_executed_volume_not_crosses(db):  # noqa: F
     assert any(t["direction"] == "LONG" for t in sma)                                   # the cross trades in SMA mode
     assert only and only[0]["direction"] == "SHORT" and only[0]["entry_reason"].startswith("EXECUTED_VOLUME")
     assert not any(t["entry_reason"].startswith("SMA_CROSS") for t in only)              # crosses never enter
+
+
+def test_chart_filters_carry_the_executed_volume_entry_for_the_why_line():
+    from types import SimpleNamespace
+
+    from strategy_engine import chart_filters
+
+    cfg = SimpleNamespace(entry_mode="FLOW", flow_trigger=False, flow_trigger_pct=70, flow_trigger_window=0,
+                          flow_trigger_book=55, flow_entry=True, flow_entry_pct=56, flow_entry_window=5,
+                          candle_minutes=15, reentry_wait_candles=2, max_trades_per_stock=8)
+    got = chart_filters(cfg)
+    assert got["entry_mode"] == "FLOW" and got["flow_trigger"] is True       # the mode turns the trigger on
+    assert (got["flow_trigger_pct"], got["flow_trigger_window"], got["flow_trigger_book"]) == (70, 0, 0.0)
+    assert (got["flow_entry"], got["flow_entry_pct"], got["flow_entry_window"]) == (True, 56, 5)
+    assert (got["candle_minutes"], got["reentry_wait_candles"], got["max_trades_per_stock"]) == (15, 2, 8)

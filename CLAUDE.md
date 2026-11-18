@@ -283,7 +283,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`trigger_on`) with no waiting-orders check (`trigger_book` 0); `StrategyEngine.on_minute` returns before every cross /
   turn / join / re-entry / counter entry (an opposite cross neither closes nor reverses), and the Most active enter-at-once
   and always-in passes are skipped, so only `_flow_trigger_pass` opens trades (its % and window); the stop, target, ticked
-  exits (e.g. the executed volume exit) and square-off close them. The bot's own candle size stays (ATR, exits, chart). **Readings at entry** (display only): `_open`
+  exits (e.g. the executed volume exit) and square-off close them. The bot's own candle size stays (ATR, exits, chart). The chart's "why" line in this mode (`StrategyChart.flowWhy`, `chart_filters` carries `flow_trigger*`, `flow_entry*`, `candle_minutes`, `reentry_wait_candles`, `max_trades_per_stock`) says what the bot read at each candle close (window, buyers / sellers %, the level) and why no order followed (entry check with its own window, wait after an exit, per-stock cap), never an SMA cross. **Readings at entry** (display only): `_open`
   saves `TradeLog.entry_flow` (JSON, `flow_exit.entry_reads`: executed buy % over the entry check's window before the order,
   else the last 3 minutes, and the latest fresh waiting-orders read with its time); `_trade_dict` carries it and the chart's
   trade card shows "Executed at entry" / "Waiting at entry", so the numbers match what the bot judged (the hover line shows a

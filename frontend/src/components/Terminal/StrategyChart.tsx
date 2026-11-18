@@ -23,7 +23,7 @@ import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
-import { type FlowRead, cvdValues, emaValues, flowReads, heikinAshi, pressureReads, pressureValues, shown, useChartStyle } from "@/lib/chartStyle";
+import { type FlowPoint, type FlowRead, cvdValues, emaValues, flowReads, heikinAshi, pressureReads, pressureValues, shown, useChartStyle } from "@/lib/chartStyle";
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { NewTag } from "@/components/ui/NewTag";
@@ -508,6 +508,96 @@ function colourWhy(c: Candle, next: Candle | undefined, markers: ChartPayload["m
   return parts.join(" ");
 }
 
+/** Buyers' % of the executed volume over [start, end) from the per-minute points, as the bot's flow_exit.split
+ * (null with no volume, or under half the window's minutes with volume). */
+function flowSplit(points: FlowPoint[] | null, start: number, end: number): number | null {
+  if (!points?.length) return null;
+  let buy = 0;
+  let sell = 0;
+  let minutes = 0;
+  for (const pt of points) {
+    if (pt.time < start || pt.time >= end || pt.buy + pt.sell <= 0) continue;
+    buy += pt.buy;
+    sell += pt.sell;
+    minutes += 1;
+  }
+  const need = Math.max(1, Math.floor((end - start) / 60 / 2));
+  if (minutes === 0 || minutes < need || buy + sell <= 0) return null;
+  return (100 * buy) / (buy + sell);
+}
+
+/** The minutes an executed-volume read covers when a candle closes at `end`: the last `win` 1-minute candles, or with
+ * 0 the closed candle of the bot's size ending there (flow_exit.entry_span). */
+function flowSpan(end: number, win: number, botBar: number): [number, number] {
+  return win > 0 ? [end - win * 60, end] : [end - botBar * 60, end];
+}
+
+/** "Enter on: Executed volume only" (flow_exit.only_mode): the bot never trades a cross; at each candle close it reads
+ * the executed buy / sell split and buys / sells when one side did the set %. Says what it read on this candle. */
+function flowWhy(
+  c: Candle,
+  next: Candle | undefined,
+  markers: ChartPayload["markers"],
+  filters: ChartFilters,
+  bar: number,
+  botBar: number,
+  points: FlowPoint[] | null,
+): string {
+  const end = c.time + bar * 60;
+  const level = filters.flow_trigger_pct ?? 60;
+  const win = filters.flow_trigger_window ?? 0;
+  const closeMins = istMinutes(end);
+  const cutoffText = filters.entry_cutoff_time ?? "15:00";
+  const cutoff = hhmmToMinutes(cutoffText) ?? 15 * 60;
+  const parts: string[] = [];
+  const winWords = win > 0 ? `the last ${win} minute${win === 1 ? "" : "s"}` : `the ${botBar}-min candle`;
+  if (win === 0 && bar !== botBar) parts.push(`The bot reads ${botBar}-min candles (set the chart to ${botBar} min to see the ones it reads).`);
+  const [s0, s1] = flowSpan(end, win, botBar);
+  const buy = flowSplit(points, s0, s1);
+  const span = `${istClock(s0)}–${istClock(s1)}`;
+  if (buy == null) {
+    parts.push(`Executed volume only: at ${istClock(end)} the bot reads who did the trading over ${winWords} (${span}); too little volume known to read it here.`);
+  } else {
+    const side = buy >= level ? "buy" : 100 - buy >= level ? "sell" : null;
+    parts.push(
+      `Executed volume only (no SMA cross): at ${istClock(end)} the bot read ${winWords} (${span}): buyers ${Math.round(buy)}% · sellers ${Math.round(
+        100 - buy,
+      )}%. It needs ${level}% one way${side ? `, so this asks for a ${side}` : ", so no order"}.`,
+    );
+    if (side) {
+      const filledNext = next && markers.some((m) => m.kind === "ENTRY" && m.time >= next.time && m.time < next.time + bar * 60);
+      const entered = filledNext || markers.some((m) => m.kind === "ENTRY" && m.time >= end && m.time < end + 90);
+      if (entered) parts.push("The entry at the start of the next candle came from it.");
+      else if (closeMins < 9 * 60 + 20) parts.push("No order: before 09:20 the bot takes no entries.");
+      else if (closeMins >= cutoff) parts.push(`No order: it closed after the entry cut-off (${cutoffText}).`);
+      else {
+        const reasons: string[] = [];
+        if (filters.flow_entry) {
+          const ew = filters.flow_entry_window ?? 3;
+          const [e0, e1] = flowSpan(end, ew, botBar);
+          const eb = flowSplit(points, e0, e1);
+          const own = eb == null ? null : side === "buy" ? eb : 100 - eb;
+          const need = filters.flow_entry_pct ?? 55;
+          reasons.push(
+            own == null
+              ? `the executed volume entry check (${ew > 0 ? `last ${ew} min` : "same candle"}, ${need}%) had too little volume to read`
+              : own < need
+                ? `the executed volume entry check said no: ${side === "buy" ? "buyers" : "sellers"} did ${Math.round(own)}% over ${istClock(e0)}–${istClock(
+                    e1,
+                  )}, needs ${need}%`
+                : `the executed volume entry check passed (${Math.round(own)}% over ${istClock(e0)}–${istClock(e1)})`,
+          );
+        }
+        if ((filters.reentry_wait_candles ?? 0) > 0) reasons.push(`it may still be waiting ${filters.reentry_wait_candles} candle(s) after its last exit`);
+        if ((filters.max_trades_per_stock ?? 0) > 0) reasons.push(`it may have had its ${filters.max_trades_per_stock} trades today`);
+        reasons.push("the stock was not armed then, or the bot was not running");
+        parts.push(`No order followed: ${reasons.join("; ")}.`);
+      }
+    }
+  }
+  return parts.join(" ");
+}
+
 function whyNoTrade(p: {
   rows: Candle[];
   i: number;
@@ -518,6 +608,8 @@ function whyNoTrade(p: {
   bar: number;
   /** The bot's own candle size (the turn entry reads it). */
   botBar: number;
+  /** Executed buy / sell per 1-minute candle (the "Executed volume only" entry reads it). */
+  flow?: FlowPoint[] | null;
 }): string {
   const { rows, i, blocked, markers, filters, bar, botBar } = p;
   const c = rows[i];
@@ -551,6 +643,7 @@ function whyNoTrade(p: {
   if (refused) return `${refused.direction === "LONG" ? "Buy" : "Sell"} cross here, refused: ${refused.reason}.`;
   if (p.forming) return "This candle is still forming: the bot judges it only when it closes.";
   if (filters?.entry_mode === "COLOUR") return colourWhy(c, rows[i + 1], markers, filters, bar);
+  if (filters?.entry_mode === "FLOW") return flowWhy(c, rows[i + 1], markers, filters, bar, botBar, p.flow ?? null);
   const sideOf = (r?: Candle) => (r && r.sma9 != null && r.sma21 != null ? Math.sign(r.sma9 - r.sma21) : 0);
   const side = sideOf(c);
   const prevSide = sideOf(rows[i - 1]);
@@ -2286,6 +2379,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           filters,
           bar,
           botBar: botCandle,
+          flow: view?.flow ?? null,
         })
       : "";
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
