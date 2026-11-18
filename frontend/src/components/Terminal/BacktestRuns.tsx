@@ -301,6 +301,8 @@ export function strategyLabel(s: Settings): string {
         s.pattern_trend ? ", with SMA trend" : ""
       })`
     );
+  } else if (String(s.entry_mode ?? "SMA") === "FLOW") {
+    parts.push(`Executed volume only: ${s.flow_trigger_pct ?? 60}% one way over ${Number(s.flow_trigger_window ?? 3) === 0 ? "the last candle" : `${s.flow_trigger_window ?? 3} min`}`);
   } else if (String(s.entry_mode ?? "SMA") === "NTH_CANDLE") {
     const n = Number(s.nth_candle_no ?? 2);
     parts.push(

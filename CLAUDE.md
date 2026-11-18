@@ -277,7 +277,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the % of the shares traded over the window (`flow_exit.split` / `trigger_side`) → a buy, sellers → a sell; then the order's
   side must hold `flow_trigger_book` % of the waiting orders in a Most active read at most `pressure_exit.MAX_AGE_SEC` old
   (`book_refusal`; no fresh read = no order); the order goes through `apply_signal(..., why="EXECUTED_VOLUME")`, so every
-  entry check, the stop, flip, cut-off, caps and one LIVE bot per stock apply. **Readings at entry** (display only): `_open`
+  entry check, the stop, flip, cut-off, caps and one LIVE bot per stock apply. **Executed volume only** (`entry_mode =
+  "FLOW"`, owner's request: trade on executed orders only, not waiting orders or candle colours; Settings → 1. When to
+  enter → Enter on, the Strategy card's "Executed volume"): `flow_exit.only_mode` turns the trigger on by itself
+  (`trigger_on`) with no waiting-orders check (`trigger_book` 0); `StrategyEngine.on_minute` returns before every cross /
+  turn / join / re-entry / counter entry (an opposite cross neither closes nor reverses), and the Most active enter-at-once
+  and always-in passes are skipped, so only `_flow_trigger_pass` opens trades (its % and window); the stop, target, ticked
+  exits (e.g. the executed volume exit) and square-off close them. The bot's own candle size stays (ATR, exits, chart). **Readings at entry** (display only): `_open`
   saves `TradeLog.entry_flow` (JSON, `flow_exit.entry_reads`: executed buy % over the entry check's window before the order,
   else the last 3 minutes, and the latest fresh waiting-orders read with its time); `_trade_dict` carries it and the chart's
   trade card shows "Executed at entry" / "Waiting at entry", so the numbers match what the bot judged (the hover line shows a

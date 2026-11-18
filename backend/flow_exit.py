@@ -259,8 +259,14 @@ DEFAULT_TRIGGER_PCT = 60.0
 DEFAULT_TRIGGER_BOOK = 55.0
 
 
+def only_mode(cfg) -> bool:
+    """`entry_mode = "FLOW"`: executed volume is the only entry (no cross, colour, pattern or waiting-orders entry)."""
+    value = cfg.get("entry_mode") if isinstance(cfg, dict) else getattr(cfg, "entry_mode", None)
+    return str(value or "").upper() == "FLOW"
+
+
 def trigger_on(cfg) -> bool:
-    return bool(getattr(cfg, "flow_trigger", False))
+    return bool(getattr(cfg, "flow_trigger", False)) or only_mode(cfg)
 
 
 def trigger_pct(cfg) -> float:
@@ -282,7 +288,9 @@ def trigger_window(cfg) -> int:
 
 
 def trigger_book(cfg) -> float:
-    """The waiting-orders check in %, 0 = not checked."""
+    """The waiting-orders check in %, 0 = not checked (never checked in the executed-volume-only entry mode)."""
+    if only_mode(cfg):
+        return 0.0
     value = getattr(cfg, "flow_trigger_book", None)
     try:
         value = float(DEFAULT_TRIGGER_BOOK if value is None else value)

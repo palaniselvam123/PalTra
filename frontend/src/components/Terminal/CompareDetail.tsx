@@ -312,7 +312,7 @@ function Scoreboard({ detail, runs }: { detail: Detail; runs: Run[] }) {
 
 // ---- each run's set-up (shown even when the runs do not differ) ------------------------------------------------------
 
-const ENTRY_MODE: Record<string, string> = { SMA: "SMA cross", PATTERN: "Candle patterns", COLOUR: "Candle colour", NTH_CANDLE: "Second candle" };
+const ENTRY_MODE: Record<string, string> = { SMA: "SMA cross", PATTERN: "Candle patterns", COLOUR: "Candle colour", NTH_CANDLE: "Second candle", FLOW: "Executed volume only" };
 const STOP_TYPE: Record<string, string> = {
   ATR: "ATR stop",
   TSL: "Trailing stop",

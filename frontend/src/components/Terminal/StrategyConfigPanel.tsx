@@ -563,7 +563,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     max_trades_per_stock: Math.min(100, Math.max(0, Math.round(Number(form.max_trades_per_stock ?? 0)) || 0)),
     reentry_wait_candles: Math.min(10, Math.max(0, Math.round(Number(form.reentry_wait_candles ?? 0)) || 0)),
     entry_mode:
-      form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" || form.entry_mode === "NTH_CANDLE" ? form.entry_mode : "SMA",
+      form.entry_mode === "PATTERN" || form.entry_mode === "COLOUR" || form.entry_mode === "NTH_CANDLE" || form.entry_mode === "FLOW"
+        ? form.entry_mode
+        : "SMA",
     nth_candle_no: Math.min(6, Math.max(1, Math.round(Number(form.nth_candle_no ?? 2)) || 2)),
     nth_candle_minutes: ([1, 3, 5, 10, 15].includes(Number(form.nth_candle_minutes)) ? Number(form.nth_candle_minutes) : 5) as 1 | 3 | 5 | 10 | 15,
     nth_min_body_pct: Math.min(2, Math.max(0, Number(form.nth_min_body_pct ?? 0) || 0)),
@@ -1020,8 +1022,21 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   <option value="PATTERN">Candle patterns</option>
                   <option value="COLOUR">Candle colour (hold until the other colour)</option>
                   <option value="NTH_CANDLE">Second candle (the day&apos;s Nth candle, once a day)</option>
+                  <option value="FLOW">Executed volume only (no candle colour, cross or waiting orders)</option>
                 </select>
               </label>
+              {form.entry_mode === "FLOW" ? (
+                <p className="col-span-2 rounded-md bg-sky-500/10 p-2 text-xs text-slate-300 ring-1 ring-inset ring-sky-400/30">
+                  <NewTag id="flow-only" /> Only the executed volume opens a trade: a stock is bought once buyers did the % of
+                  the shares traded set in{" "}
+                  <a href="#sma-flow-trigger" className="text-sky-300 underline">
+                    Enter on executed volume
+                  </a>{" "}
+                  (its % and window), and sold once sellers did. No SMA cross, candle colour, pattern or waiting orders open a
+                  trade, an opposite cross does not close one, and the waiting orders are not checked. The stop, target, the
+                  ticked exits (for example the executed volume exit) and the square-off close it.
+                </p>
+              ) : null}
               {form.entry_mode === "NTH_CANDLE" ? (
                 <>
                   <label className="block text-sm text-slate-300">
@@ -5127,7 +5142,8 @@ function FlowTrigger({
   set: (key: keyof SmaConfig, value: string | boolean) => void;
   isOwn: (key: keyof SmaConfig) => boolean;
 }) {
-  const on = Boolean(form.flow_trigger);
+  const only = String(form.entry_mode ?? "SMA").toUpperCase() === "FLOW";
+  const on = Boolean(form.flow_trigger) || only;
   const pct = Number(form.flow_trigger_pct ?? 60);
   const shown = Number.isFinite(pct) ? pct : 60;
   const win = Number(form.flow_trigger_window ?? 3);
@@ -5137,7 +5153,7 @@ function FlowTrigger({
   return (
     <div id="sma-flow-trigger" className="mb-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-white/10">
       <label className="flex items-start gap-2 text-sm text-slate-200">
-        <input type="checkbox" className="mt-1" checked={on} onChange={(e) => set("flow_trigger", e.target.checked)} />
+        <input type="checkbox" className="mt-1" checked={on} disabled={only} onChange={(e) => set("flow_trigger", e.target.checked)} />
         <span>
           {(isOwn("flow_trigger") || isOwn("flow_trigger_pct") || isOwn("flow_trigger_window") || isOwn("flow_trigger_book")) && <OwnTag />}
           <b className="text-slate-100">Enter on executed volume</b> — the side doing the trading starts the trade, the waiting orders
@@ -5160,14 +5176,20 @@ function FlowTrigger({
         <FlowWindowPick disabled={!on} value={win} candleLabel="the last closed candle" onChange={(v) => set("flow_trigger_window", v)} />
       </div>
       <SameCandle disabled={!on} value={win} onChange={(v) => set("flow_trigger_window", v)} />
-      <div className={clsx("mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
+      {only ? (
+        <p className="mt-1 text-xs text-sky-300">
+          On by itself: &quot;Enter on&quot; is set to Executed volume only, so these numbers start every trade and the waiting orders
+          are not checked.
+        </p>
+      ) : null}
+      <div className={clsx("mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300", (!on || only) && "hidden")}>
         and that side holds at least
         <input type="number" min={0} max={95} step={1} disabled={!on} value={bookShown} onChange={(e) => set("flow_trigger_book", e.target.value)} aria-label="Waiting orders the order's side must hold, %" className={box} />
         % of the waiting orders (0 = not checked)
       </div>
       <p className="mt-1 text-xs text-slate-400">
         Example at {shown}% / {bookShown}%: sellers did {Math.min(95, shown + 8)}% of the shares traded {win === 0 ? "in the last candle" : `in the last ${win} minutes`}
-        {bookShown > 0 ? ` and sellers hold ${Math.min(95, bookShown + 10)}% of the waiting orders` : ""}: the bot sells.
+        {bookShown > 0 && !only ? ` and sellers hold ${Math.min(95, bookShown + 10)}% of the waiting orders` : ""}: the bot sells.
       </p>
     </div>
   );

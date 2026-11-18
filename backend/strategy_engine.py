@@ -2136,6 +2136,15 @@ class StrategyEngine:
             return await self._colour_minute(symbol, frame, cfg, now)
         if uses_nth(cfg):
             return await self._nth_minute(symbol, frame, cfg, now)
+        if flow_exit.only_mode(cfg):
+            # Executed volume only (flow_exit.py): no cross, turn, join or re-entry opens a trade here (and an opposite
+            # cross does not close one); `_flow_trigger_pass` enters, the stop / ticked exits / square-off close.
+            if symbol in self.positions:
+                text = f"{symbol} holding — executed volume only: the stop, the ticked exits or the square-off close it"
+            else:
+                text = f"{symbol} no order on the candle — executed volume only (entries come from the executed volume)"
+            self._signals.setdefault(symbol, text)
+            return text
         self._warn_upcoming(symbol, frame, cfg, now)
         # A cross that was already printed when the bot started, or when this
         # stock was armed, is skipped. The next cross on a newer closed bar
@@ -2205,7 +2214,7 @@ class StrategyEngine:
         per stock. Market hours, the cut-off, the Trade list, caps, the loss lock and one LIVE bot per stock still
         apply (`direct_order`)."""
         symbol_cfg = _cfg_for(cfg, symbol)
-        if pressure_exit.entry_mode(symbol_cfg) != "AT_ARM" or self.status != "RUNNING":
+        if pressure_exit.entry_mode(symbol_cfg) != "AT_ARM" or self.status != "RUNNING" or flow_exit.only_mode(symbol_cfg):
             return
         if not pressure_exit.from_most_active(trade_sources(symbol_cfg).get(symbol)):
             return
@@ -2315,7 +2324,7 @@ class StrategyEngine:
         Asked once per closed candle while the entry checks say no, and again at once after any exit.
         """
         symbol_cfg = _cfg_for(cfg, symbol)
-        if not always_in.enabled(symbol_cfg) or self.status != "RUNNING":
+        if not always_in.enabled(symbol_cfg) or self.status != "RUNNING" or flow_exit.only_mode(symbol_cfg):
             return
         pos = self.positions.get(symbol)
         if pos is not None:

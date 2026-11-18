@@ -181,7 +181,7 @@ FIELD_HELP = {
     "sc_need": "smaller-candle colours: sizes needed with AT_LEAST",
     "sc_entry": "entry check: the last N smaller candles must be green to buy / red to sell",
     "sc_confirm": "a colour-turn exit waits until the smaller candles agree with the turn",
-    "entry_mode": "SMA (cross) | PATTERN (candle patterns) | COLOUR (candle colour) | NTH_CANDLE (the day's Nth candle colour, once a day)",
+    "entry_mode": "SMA (cross) | PATTERN (candle patterns) | COLOUR (candle colour) | NTH_CANDLE (the day's Nth candle colour, once a day) | FLOW (executed volume only: enters when one side did flow_trigger_pct % of the shares traded over flow_trigger_window; no cross, colour, pattern or waiting-orders entry, no waiting-orders check)",
     "nth_candle_no": "second candle entry: which candle of the day is read (1-6, default 2)",
     "nth_candle_minutes": "second candle entry: that candle's size in minutes (1, 3, 5, 10, 15; the bot's own candle in this mode)",
     "nth_min_body_pct": "second candle entry: smallest body in % of the close that orders (0 = any)",

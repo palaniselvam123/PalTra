@@ -229,3 +229,35 @@ def test_last_exit_candle_is_the_candle_the_chart_draws():
     assert flow_exit.entry_span(_ts(9, 36, 0), 0, 15) == (int(_ts(9, 15)), int(_ts(9, 30)))
     assert flow_exit.entry_span(_ts(12, 30, 5), 0, 15) == (int(_ts(12, 15)), int(_ts(12, 30)))
     assert flow_exit.entry_span(_ts(12, 30, 5), 10, 15) == (int(_ts(12, 20)), int(_ts(12, 30)))
+
+
+# ---- executed volume only (entry_mode FLOW) -------------------------------------------------------------------------
+
+def test_flow_only_mode_reads_no_waiting_orders():
+    cfg = type("C", (), {"entry_mode": "FLOW", "flow_trigger": False, "flow_trigger_book": 70})()
+    assert flow_exit.only_mode(cfg) and flow_exit.trigger_on(cfg) and flow_exit.trigger_book(cfg) == 0.0
+    assert not flow_exit.only_mode(type("C", (), {"entry_mode": "COLOUR"})())
+    from main import ConfigUpdate
+    assert ConfigUpdate(entry_mode="FLOW").entry_mode == "FLOW"
+
+
+@pytest.mark.asyncio
+async def test_flow_only_mode_trades_executed_volume_not_crosses(db):  # noqa: F811
+    from sma_research.replayer import replay_symbol
+    from tests.test_candle_patterns import DAY, DAY0, _quiet, _rows
+    from tests.test_gap_mode import _settings
+
+    # A clean rise from 11:00 makes the SMAs cross up (an SMA bot buys it), but no second was recorded there; the only
+    # executed volume read is 10:00-10:05, where every second ticks down: sellers. No Most active read exists at all.
+    start = int(dt.datetime.combine(DAY, dt.time(10, 0), tzinfo=IST).timestamp())
+    for minute in range(5):
+        for i, price in enumerate([1000.0, 999.9, 999.8, 999.7, 999.6]):
+            tick_store.add("FLO", start + minute * 60 + i * 10, price - 0.05 * minute)
+    rise = [(1000.0 + 0.3 * i, 1000.3 + 0.3 * i) for i in range(30)]
+    frame = pd.DataFrame(_rows(DAY0, _quiet(375)) + _rows(DAY, _quiet(105) + rise + _quiet(240, 1009.0)))
+    base = dict(qty=1, use_stop=False, flow_trigger_pct=60, flow_trigger_window=3, flow_trigger_book=80)
+    sma = await replay_symbol(frame, "FLO", [DAY], _settings(db, entry_mode="SMA", **base))
+    only = await replay_symbol(frame, "FLO", [DAY], _settings(db, entry_mode="FLOW", **base))
+    assert any(t["direction"] == "LONG" for t in sma)                                   # the cross trades in SMA mode
+    assert only and only[0]["direction"] == "SHORT" and only[0]["entry_reason"].startswith("EXECUTED_VOLUME")
+    assert not any(t["entry_reason"].startswith("SMA_CROSS") for t in only)              # crosses never enter
