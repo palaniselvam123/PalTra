@@ -319,6 +319,10 @@ export type SmaConfig = {
   pressure_exit_pct?: number;
   /** The buyers / sellers reading holds the counter-candle exit while the trade's side stays above the %. */
   pressure_over_counter?: boolean;
+  /** The fade exit also needs the other side's executed volume at least this % (0 = not checked). */
+  pressure_exit_flow?: number;
+  /** Its window in minutes (1-60), 0 = the exit candle just closed. */
+  pressure_exit_flow_window?: number;
   /** Most active stocks: OFF | CHECK (entries need their side still >= pressure_entry_pct) | AT_ARM (also enter at once). */
   pressure_entry?: "OFF" | "CHECK" | "AT_ARM";
   pressure_entry_pct?: number;

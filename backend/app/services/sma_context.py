@@ -231,6 +231,8 @@ FIELD_HELP = {
     "pressure_entry_pct": "buyers / sellers % a Most active stock's entry needs (30-95)",
     "pressure_flip": "candle-colour mode, Most active stocks: when the colour points one way but the other side (sellers against a buy, buyers against a sell) holds at least pressure_flip_pct % in a fresh Most active read and the last close is on their side of today's VWAP, the trade goes their way instead (entry reason PRESSURE_FLIP)",
     "pressure_flip_pct": "buyers / sellers % that overrules the candle colour (55-95)",
+    "pressure_exit_flow": "with pressure_exit, the fade exit also needs the other side to have done this % of the shares traded over pressure_exit_flow_window minutes (executed volume, estimated); held otherwise, too little volume lets it close; 0 = not checked",
+    "pressure_exit_flow_window": "the executed volume window of pressure_exit_flow in minutes (1-60), 0 = the exit candle just closed",
     "pressure_flip_flow": "with pressure_flip, the other side must also hold this % of the colour candle's executed volume (estimated from the per-second prices, else the candle's shape); 0 = not checked",
     "flow_exit": "close a trade once the other side did flow_exit_pct % of the shares traded at market (estimated, trade_flow.py) over the window: a buy when sellers did, a sell when buyers did",
     "flow_exit_pct": "the other side's % of the executed volume that closes the trade (50-95, default 60)",

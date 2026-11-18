@@ -521,6 +521,10 @@ class BotConfig(Base):
     pressure_exit_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=55.0)
     # The buyers / sellers reading overrules the counter-candle exit while the trade's side still holds (pressure_exit.py).
     pressure_over_counter: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # The fade exit also needs the other side to have done this % of the shares traded over pressure_exit_flow_window
+    # minutes (0 = the exit candle just closed; trade_flow.py); 0 % = not checked.
+    pressure_exit_flow: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    pressure_exit_flow_window: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
     # Most active stocks: OFF | CHECK (entries need their side still >= pressure_entry_pct) | AT_ARM (also enter at once).
     pressure_entry: Mapped[str | None] = mapped_column(String(8), nullable=True, default="OFF")
     pressure_entry_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=65.0)
