@@ -419,7 +419,7 @@ SNAPSHOT_FIELDS = (
     "entry_candle_confirm", "entry_candle_pct", "entry_candle_max", "handoff_candle",
     "slope_exit", "slope_lookback", "slope_bend_pct", "slope_turn", "slope_turn_pct",
     "vturn_exit", "vturn_move_pct", "vturn_turn_pct", "vturn_within", "vturn_handoff", "handoff_now", "pivot_target",
-    "pressure_exit", "pressure_exit_pct", "pressure_over_counter", "pressure_exit_flow", "pressure_exit_flow_window",
+    "pressure_exit", "pressure_exit_pct", "pressure_exit_any", "pressure_over_counter", "pressure_exit_flow", "pressure_exit_flow_window",
     "pressure_entry", "pressure_entry_pct",
     "pressure_flip", "pressure_flip_pct", "pressure_flip_flow",
     "flow_exit", "flow_exit_pct", "flow_exit_window", "flow_exit_loss", "flow_exit_book", "flow_exit_mode",
@@ -5996,7 +5996,8 @@ class StrategyEngine:
             return
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
         hit, note = pressure_exit.judge(
-            symbol, pos.direction, opened.timestamp(), self._now().timestamp(), pressure_exit.pct(cfg)
+            symbol, pos.direction, opened.timestamp(), self._now().timestamp(), pressure_exit.pct(cfg),
+            from_entry=pressure_exit.from_entry(cfg),
         )
         if not hit:
             if self._pressure_note.get(symbol) != note:

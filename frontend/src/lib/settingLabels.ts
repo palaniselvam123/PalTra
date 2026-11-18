@@ -188,6 +188,7 @@ export const SETTING_LABELS: Record<string, string> = {
   pressure_exit: "Most active: exit when buyers / sellers fade",
   pressure_exit_pct: "buyers / sellers fade exit %",
   pressure_over_counter: "buyers / sellers overrule the counter-candle exit",
+  pressure_exit_any: "Buyers / sellers fade exit: close even if that side was never above the %",
   pressure_exit_flow: "Buyers / sellers fade exit: executed volume must agree (%)",
   pressure_exit_flow_window: "Buyers / sellers fade exit: executed volume window (min, 0 = exit candle)",
   pressure_entry: "Most active: when to enter",

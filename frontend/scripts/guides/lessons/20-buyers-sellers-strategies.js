@@ -149,7 +149,7 @@ ${L.table(["Setting (3. When to exit)", "Closes a buy when…", "Kind", "Default
 ])}
 <p>For a sell, swap buyers and sellers everywhere.</p>
 ${L.cols([
-  ["F. The fade exit", `<p>Closes when the side that started the trade loses its hold on the waiting orders. It arms only once that side was above the level, so a trade that started without the pressure is not closed by it.</p>
+  ["F. The fade exit", `<p>Closes when the side that started the trade loses its hold on the waiting orders. It arms only once that side was above the level, so a trade that started without the pressure is not closed by it, unless <b>Close even if that side was never above the %</b> is ticked: then it watches from the entry.</p>
 <div class="ex">At 55 %: a buy armed when buyers were 75 % closes at the read where buyers drop to 55 %.</div>`],
   ["G. Executed volume must agree", `<p>Waiting orders can turn for a minute and come back. With G, the fade exit closes only when the trading turned too; otherwise the trade is held and judged again at the next read. Too little volume to read lets the exit go.</p>
 <div class="ex">Buyers waiting fall to 52 %, but buyers still did 64 % of the trading → held. Next read: sellers did 61 % → closed.</div>`],
@@ -184,6 +184,7 @@ ${L.table(["Setting in that backtest", "What it needed for a short", "At 10:00 (
   ["Trailing stop", "2 % above the entry, about ₹75 away", "not reached", "hold"],
 ])}
 <p><b>To close it at 10:15:</b> tick I, <b>55 %</b>, "Read the same candle as the chart", "Close the trade by itself", "The waiting orders must agree too" <b>off</b> (the waiting orders still favoured the short, so with it on I would never fire). At 60 % it would still have held: buyers did 59 %, one point short. Optional: "Only while the trade is losing" (the short was under water at 10:00).</p>
+<p><b>Or with the waiting orders and the trading together:</b> fade exit at <b>70 %</b>, tick <b>Close even if that side was never above the %</b> (sellers were 63 % at the entry, never above 70 %) and <b>Executed volume must agree</b> at <b>55 %</b>, the exit candle: sellers 67 % ≤ 70 <b>and</b> buyers 59 % ≥ 55 → closed at 10:15.</p>
 <p><b>To not enter it at all:</b> the entry dot read buyers 66 % / sellers 35 % executed at 09:27-09:30. D at 55 % would have refused the short: sellers did only 35 % of the trading.</p>
 
 <h2 class="page">6. Recipes</h2>
@@ -193,6 +194,7 @@ ${L.table(["I want to…", "Tick", "Numbers to start with"], [
   ["keep my colour / cross strategy, but skip entries against the flow", "D", "55 %, Read the same candle as the chart"],
   ["exit when the trading turns, even if the waiting orders still favour me (BSE)", "I, close by itself; waiting must agree off", "55 %, the exit candle"],
   ["exit when the waiting orders turn, but not on a one-scan blip", "F + G", "F 55 % · G 55 %, 3 min"],
+  ["exit on waiting ≤ X % AND executed ≥ Y %, even if the side never held more than X % (BSE)", "F + Close even if never above + G", "F 70 % · G 55 %, the exit candle"],
   ["stop the colour exit shaking me out while the trading is still with me", "J (confirm)", "60 %, the exit candle"],
   ["cut only losing trades on the trading turning", "I + Only while losing", "55-60 %"],
   ["hold Most active trades through a pullback while the orders still back them", "F + H", "F 55 %"],
