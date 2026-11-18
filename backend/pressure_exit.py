@@ -218,6 +218,13 @@ def read_before(symbol: str, at_ts: float) -> dict | None:
     return points[-1] if points else None
 
 
+def every_stock(cfg) -> bool:
+    """`pressure_exit_all`: the fade exit runs on every armed stock, not only those armed from Most active (owner's BSE
+    case: a stock armed by hand never had the exit). The reads are still the day's Most active scans, so a stock the scan
+    never read has none and is left alone."""
+    return bool(getattr(cfg, "pressure_exit_all", False))
+
+
 def from_entry(cfg) -> bool:
     """`pressure_exit_any`: the fade exit watches from the entry, no need for the side to have been above the level."""
     return bool(getattr(cfg, "pressure_exit_any", False))

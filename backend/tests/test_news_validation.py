@@ -86,8 +86,13 @@ def test_previous_session_close_skips_the_weekend():
 
 @pytest.mark.asyncio
 async def test_validate_reads_the_days_alerts(db, monkeypatch):  # noqa: F811
-    from app.models.database import NewsAlert, async_session
+    import app.models.database as models_db
+    from app.models.database import NewsAlert
 
+    # Its own in-memory database (the `db` fixture): the desk's shared file only had the table when another test
+    # file had created it earlier in the same process, which parallel test runs do not promise.
+    monkeypatch.setattr(models_db, "async_session", db)
+    async_session = db
     utc = dt.datetime(2026, 10, 28, 10, 15, tzinfo=IST).astimezone(dt.timezone.utc).replace(tzinfo=None)
     body = {"items": [{"title": "ACME bags big order", "at": "2026-10-28T10:15:00+05:30", "sentiment": "POSITIVE", "impact": "HIGH"}]}
     async with async_session() as s:
