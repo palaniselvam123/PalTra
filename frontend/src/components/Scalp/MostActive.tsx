@@ -31,7 +31,8 @@ const SORT_LABEL: Record<ActiveSort, string> = {
   value: "Money traded",
   rvol: "Volume vs usual",
   change: "Biggest move",
-  pressure: "Buyer/seller imbalance",
+  pressure: "Buyer/seller imbalance (waiting)",
+  flow: "Buyer/seller imbalance (executed)",
   speed: "Fastest move now (speed)",
   vwap: "Furthest from average price",
 };
@@ -41,12 +42,26 @@ const RANK_KEY: Record<ActiveSort, (r: ActiveStock) => number> = {
   rvol: (r) => r.rvol ?? 0,
   change: (r) => Math.abs(r.change_pct ?? 0),
   pressure: (r) => Math.abs((r.buy_share ?? 0.5) - 0.5),
+  flow: (r) => Math.abs((r.flow_buy ?? 50) - 50),
   speed: (r) => Math.abs(r.speed_pct_min ?? 0),
   vwap: (r) => Math.abs(r.vwap_dist_pct ?? 0),
 };
-type ColKey = "symbol" | "ltp" | "change" | "speed" | "value" | "rvol" | "buy" | "vwap" | "bias";
+type ColKey = "symbol" | "ltp" | "change" | "speed" | "value" | "rvol" | "buy" | "flow" | "vwap" | "bias";
 type Col = "rank" | ColKey | "actions";
-const COLUMNS: readonly Col[] = ["rank", "symbol", "ltp", "change", "speed", "value", "rvol", "buy", "vwap", "bias", "actions"];
+const COLUMNS: readonly Col[] = ["rank", "symbol", "ltp", "change", "speed", "value", "rvol", "buy", "flow", "vwap", "bias", "actions"];
+/** Waiting orders vs executed volume: do they point the same way? (the Most active "Waiting vs executed" filter) */
+type AgreePick = "ALL" | "AGREE" | "DISAGREE";
+function leanOf(pct: number | null | undefined): -1 | 0 | 1 {
+  if (pct == null) return 0;
+  return pct > 50 ? 1 : pct < 50 ? -1 : 0;
+}
+function agreePasses(pick: AgreePick, r: ActiveStock): boolean {
+  if (pick === "ALL") return true;
+  const wait = leanOf(r.buy_share == null ? null : r.buy_share * 100);
+  const done = leanOf(r.flow_buy);
+  if (!wait || !done) return false;
+  return pick === "AGREE" ? wait === done : wait !== done;
+}
 /** How many stocks the table shows after ranking (kept per browser); "All" = every stock the scan read. */
 const TOP_CHOICES = [40, 100, 250] as const;
 const TOP_KEY = "scalp.active.top";
@@ -62,7 +77,7 @@ function savedTop(): number {
 const clockIst = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
 
-const CSV_HEAD = ["Rank", "Stock", "LTP", "Day %", "Speed %/min", "Traded Rs cr", "Vol vs usual", "Buyers %", "Buy qty", "Sell qty", "vs avg %", "Avg price", "Bias"];
+const CSV_HEAD = ["Rank", "Stock", "LTP", "Day %", "Speed %/min", "Traded Rs cr", "Vol vs usual", "Buyers %", "Buy qty", "Sell qty", "Executed buy %", "Executed window", "Executed buy % day", "vs avg %", "Avg price", "Bias"];
 const num = (v: number | null | undefined, d = 2) => (v == null ? "" : v.toFixed(d));
 function activeCsv(rows: ActiveStock[]): string {
   const lines = rows.map((r, i) =>
@@ -77,6 +92,9 @@ function activeCsv(rows: ActiveStock[]): string {
       r.buy_share == null ? "" : Math.round(r.buy_share * 100),
       r.buy_qty ?? "",
       r.sell_qty ?? "",
+      num(r.flow_buy, 1),
+      r.flow_from && r.flow_to ? `${r.flow_from}-${r.flow_to}` : "",
+      num(r.flow_day_buy, 1),
       num(r.vwap_dist_pct),
       num(r.avg_price),
       r.bias === "NONE" ? "" : r.bias,
@@ -164,6 +182,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
   const [minValue, setMinValue] = useState(0);
   const [query, setQuery] = useState("");
   const [minSpeed, setMinSpeed] = useState(0);
+  const [minFlow, setMinFlow] = useState(0);
+  const [agree, setAgree] = useState<AgreePick>("ALL");
   const [scanning, setScanning] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -314,7 +334,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
 
   const auto = data?.auto;
   const [autoBusy, setAutoBusy] = useState(false);
-  const saveAuto = async (change: { on?: boolean; every_min?: number }) => {
+  const saveAuto = async (change: { on?: boolean; every_min?: number; flow_on?: boolean; flow_minutes?: number; flow_top?: number }) => {
     setAutoBusy(true);
     setNote(null);
     try {
@@ -351,11 +371,13 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           (priceMin <= 0 || r.ltp >= priceMin) &&
           (priceMax <= 0 || r.ltp <= priceMax) &&
           (minRvol <= 0 || (r.rvol ?? 0) >= minRvol) &&
+          (minFlow <= 0 || (r.flow_buy != null && Math.max(r.flow_buy, 100 - r.flow_buy) >= minFlow)) &&
+          agreePasses(agree, r) &&
           trendPasses(trendPick, tq.get(r.symbol)) &&
           firstPasses(fcPick, fc.get(r.symbol), fc.size > 0) &&
           ticks.shows(r.symbol)
       ),
-    [source, query, minSpeed, priceMin, priceMax, minRvol, trendPick, tq, fcPick, fc, ticks]
+    [source, query, minSpeed, priceMin, priceMax, minRvol, minFlow, agree, trendPick, tq, fcPick, fc, ticks]
   );
 
   // Show the trend score and phase from the last Trend quality scan as it is (no new scan); refreshed with each Most active scan.
@@ -425,6 +447,8 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
         return r.rvol;
       case "buy":
         return r.buy_share;
+      case "flow":
+        return r.flow_buy ?? null;
       case "vwap":
         return r.vwap_dist_pct;
       case "bias":
@@ -537,6 +561,52 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                   : "The server scans by itself while the market is open (09:15–15:30), no browser needed."}
           </span>
           {auto.on && auto.last_error ? <span className="text-amber-300">{auto.last_error}</span> : null}
+          <span className="flex w-full flex-wrap items-center gap-x-2 gap-y-1.5 border-t border-slate-800 pt-1.5">
+            <label className="inline-flex min-h-9 items-center gap-2 font-semibold text-slate-200">
+              <input
+                type="checkbox"
+                checked={auto.flow_on ?? true}
+                disabled={autoBusy}
+                onChange={(e) => void saveAuto({ flow_on: e.target.checked })}
+                className="accent-[#10B981]"
+              />
+              Read executed buy vs sell <NewTag id="active-executed" link={false} />
+            </label>
+            <label className="inline-flex items-center gap-1.5">
+              for the busiest
+              <select
+                value={auto.flow_top ?? 60}
+                disabled={autoBusy || auto.flow_on === false}
+                onChange={(e) => void saveAuto({ flow_top: Number(e.target.value) })}
+                className="min-h-9 rounded-md border border-slate-700 bg-surface2 px-2 text-sm text-slate-100"
+              >
+                {[20, 40, 60, 100, 150, 250].map((n) => (
+                  <option key={n} value={n}>
+                    {n === 250 ? "all" : n} stocks
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="inline-flex items-center gap-1.5">
+              over
+              <select
+                value={auto.flow_minutes ?? 15}
+                disabled={autoBusy || auto.flow_on === false}
+                onChange={(e) => void saveAuto({ flow_minutes: Number(e.target.value) })}
+                className="min-h-9 rounded-md border border-slate-700 bg-surface2 px-2 text-sm text-slate-100"
+              >
+                {(auto.flow_choices ?? [0, 1, 3, 5, 10, 15, 30, 60]).map((m) => (
+                  <option key={m} value={m}>
+                    {m === 0 ? "the whole day" : `the last ${m} min`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="text-slate-400">
+              One 1-minute candle download per stock after the quotes (the bots go first on Groww). Estimated: the
+              recorded seconds by the tick rule, else each candle&apos;s shape.
+            </span>
+          </span>
         </div>
       ) : null}
       <Explain className="mb-3" lead={`The most traded F&O stocks, ranked ${auto?.on ? `every ${every} minutes` : "on each Scan now"}. Market data only — nothing here places an order.`}>
@@ -673,6 +743,27 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           step={0.1}
           suffix="×"
           hint="Volume so far against the 20-day usual for this time of day; 0 = any"
+        />
+        <NumberFilter
+          label="Executed: one side at least"
+          value={minFlow}
+          onChange={setMinFlow}
+          min={0}
+          max={95}
+          step={5}
+          suffix="%"
+          hint="Buyers or sellers did at least this share of the shares traded (the Executed column); 0 = any"
+        />
+        <SelectFilter
+          label="Waiting vs executed"
+          value={agree}
+          onChange={(v) => setAgree(v as AgreePick)}
+          options={[
+            { value: "ALL", label: "Any" },
+            { value: "AGREE", label: "Same side" },
+            { value: "DISAGREE", label: "Opposite sides" },
+          ]}
+          className="w-36"
         />
         <SelectFilter
           label="Trend quality"
@@ -838,6 +929,16 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
                       onSort={onSort}
                       title="Total buy vs sell quantity waiting in the order book"
                       drag={cols.dragProps("buy")}
+                    />
+                  ),
+                  flow: (
+                    <SortTh
+                      label={<>Executed buy vs sell <NewTag id="active-executed" link={false} /></>}
+                      k="flow"
+                      sort={colSort}
+                      onSort={onSort}
+                      title="Of the shares that actually traded over the last minutes (Auto scan row sets the window), the share bought vs sold at market. Estimated: Groww does not say which side started a trade."
+                      drag={cols.dragProps("flow")}
                     />
                   ),
                   vwap: (
@@ -1008,6 +1109,7 @@ function ActiveRowView({
             )}
           </td>
         ),
+        flow: <FlowCell row={row} />,
         vwap: (
           <td className={clsx("py-1.5 pr-2 text-right font-mono", (row.vwap_dist_pct ?? 0) >= 0 ? "text-profit" : "text-loss")}>
             {pct(row.vwap_dist_pct)}
@@ -1157,5 +1259,34 @@ function MissedList({ missed, failed, query }: { missed: ActiveMissed[] | null; 
         </p>
       )}
     </div>
+  );
+}
+
+/** Executed buy vs sell: the share bought at market over the scan's window (a bar like Buyers vs sellers). */
+function FlowCell({ row }: { row: ActiveStock }) {
+  const buy = row.flow_buy;
+  if (buy == null) {
+    return (
+      <td className="py-1.5 pr-2">
+        <span className="text-xs text-slate-500" title="Not read: the executed volume is read for the busiest stocks only (Auto scan row), or there was no volume yet">—</span>
+      </td>
+    );
+  }
+  const lead = buy >= 50 ? `Buyers ${buy.toFixed(0)}%` : `Sellers ${(100 - buy).toFixed(0)}%`;
+  const day = row.flow_day_buy != null ? ` · whole day buyers ${row.flow_day_buy.toFixed(0)}%` : "";
+  const when = row.flow_from && row.flow_to ? ` over ${row.flow_from}-${row.flow_to}` : "";
+  return (
+    <td className="py-1.5 pr-2">
+      <div
+        className="flex items-center gap-1.5"
+        title={`${lead} of the shares traded${when} (estimated from ${row.flow_src ?? "candles"})${day}`}
+      >
+        <div className="flex h-1.5 w-16 overflow-hidden rounded bg-loss/60">
+          <div className="h-full bg-profit" style={{ width: `${Math.round(buy)}%` }} />
+        </div>
+        <span className="font-mono text-xs text-slate-300">{Math.round(buy)}%</span>
+        {row.flow_day_buy != null ? <span className="font-mono text-[11px] text-slate-500">day {Math.round(row.flow_day_buy)}%</span> : null}
+      </div>
+    </td>
   );
 }

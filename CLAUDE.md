@@ -1835,6 +1835,16 @@ spinning top), body and range) / Matched / Call columns
   `POST /api/scan-history/{id}/check` on the same saved run; `scan_accuracy` kind `active`: the call is the row's bias,
   else its day move's sign; groups all / bias long / bias short / volume 2× usual; Call / 30 min / 1 hour / At close / Best
   columns and the per-group summary). Read-only.
+  **Executed buy vs sell** (`active_stocks.flow_read` / `ActiveScanner._read_flow`; owner's request: the waiting orders
+  are only intentions): after the quotes, each pass downloads today's 1-minute candles (`get_candles_window`, after
+  `groww_pressure.wait_for_bots`) for the busiest `flow_top` (60, 10-250) rows by money traded and reads the executed buy %
+  with `trade_flow.minutes` (recorded seconds by the tick rule, else the candle shape; forming minute dropped) over the
+  last `flow_minutes` (15; `FLOW_MINUTES` 0 = since 09:15) closed minutes (`flow_buy`, `flow_from` / `flow_to`, `flow_src`)
+  and the whole day (`flow_day_buy`). `flow_on` (on by default), saved in `AutoSettings`, `PUT /api/scalp/active/auto`
+  (`flow_on`, `flow_minutes`, `flow_top`); the card's Auto scan row "Read executed buy vs sell for the busiest N stocks over
+  …". Column "Executed buy vs sell" (`MostActive.FlowCell`), CSV, Rank by "Buyer/seller imbalance (executed)" (`SORTS`
+  `flow`), filters "Executed: one side at least" and "Waiting vs executed" (same / opposite sides). Saved with every scan,
+  so History and the auto-arm replay see it. Market data only.
   **Auto scan** (`active_stocks.AutoSettings`, `active_auto.json` next to the desk DB, `ACTIVE_AUTO_FILE`): the server runs
   the Most active scan by itself every `every_min` minutes (`EVERY_CHOICES` 1-60: 1, 2, 3, 4, 5, 10…, default 5) while NSE is open, no browser
   needed (`ActiveScanner.start_background`, checked every `CHECK_SEC` 15 s; a manual Scan now counts as a run; Pause scans
@@ -1912,7 +1922,13 @@ spinning top), body and range) / Matched / Call columns
   (`routes_scalp.keep_active_scan` → `_pressure_alert` → `after_active_scan`) every row whose `buy_share` (waiting buy orders ÷
   all waiting orders) is ≥ that % (buyers) or ≤ 100 − that % (sellers), with price, share, day move and volume vs usual. Each
   stock and side once per IST day per alert (`_SENT`, memory), at most `MAX_NAMES` 15 a message, through
-  `alert_notifier.send_quiet`. `GET/PUT /api/scalp-alerts`; the Scalp page's Alerts tab (`components/Scalp/ScalpAlertsCard.tsx`) **Last check** (`last`, `scalp_alerts_log.json` next to the settings with `recent`, so a restart keeps the
+  `alert_notifier.send_quiet`. **Judge by** (`pressure_basis` `WAITING` default | `EXECUTED` | `BOTH`, `pressure_flow_pct`
+  60, 50-95; `scalp_alerts.control_side`): the waiting orders as above, the Most active row's executed buy % (`flow_buy`) at
+  least that % bought (buyers) / sold (sellers), or both on the same side; a row without an executed read never passes
+  EXECUTED / BOTH. The live auto-arm (`pressure_picks`) and the auto-arm replay (`auto_arm.active_hits(..., basis,
+  flow_pct)`, `AutoArmRule.basis` / `flow_pct`, `AutoArmStart`, the desk link's active-scans query) read the same rule;
+  scans saved before carry no executed read. The Alerts card's "Judge by" menu and "Executed share at least" box.
+  `GET/PUT /api/scalp-alerts`; the Scalp page's Alerts tab (`components/Scalp/ScalpAlertsCard.tsx`) **Last check** (`last`, `scalp_alerts_log.json` next to the settings with `recent`, so a restart keeps the
   day's story): each scan in market hours notes per alert the stocks read, how many met the thresholds, how many were new
   and whether Telegram took the message (`_delivery` on the `DeliveryResult`; the card's `LastCheck` line, amber with the
   reason when it did not). A message Telegram refused is not marked sent for the day (`_mark(..., failed=)`), so the next

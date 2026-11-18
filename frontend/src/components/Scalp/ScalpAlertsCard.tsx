@@ -100,11 +100,51 @@ export function ScalpAlertsCard() {
             </label>
             <p className="mt-1 text-xs leading-relaxed text-slate-400">
               After each <b>Most active</b> scan: a stock where buyers (or sellers) hold at least this share of the orders waiting in
-              the order book. The message gives the price, the share, the day&apos;s move and volume vs usual.
+              the order book, of the shares actually traded (executed), or both. The message gives the price, the shares, the
+              day&apos;s move and volume vs usual. The auto-arm below follows the same rule.
             </p>
             <div className="mt-2 flex flex-wrap items-end gap-3 text-xs text-slate-400">
               <label className="flex flex-col gap-1">
-                Share at least (type any number, 50-95)
+                <span className="flex items-center gap-1">
+                  Judge by
+                  <NewTag id="alert-executed-basis" />
+                </span>
+                <select
+                  className={select}
+                  value={view.pressure_basis ?? "WAITING"}
+                  disabled={busy}
+                  title="Waiting orders = the order book's buy vs sell quantity. Executed = the shares that traded at market over the Most active card's window (its Executed column, estimated). Both = both on the same side."
+                  onChange={(e) => void save({ pressure_basis: e.target.value as NonNullable<ScalpAlerts["pressure_basis"]> })}
+                >
+                  <option value="WAITING">Waiting orders</option>
+                  <option value="EXECUTED">Executed volume</option>
+                  <option value="BOTH">Both (same side)</option>
+                </select>
+              </label>
+              {(view.pressure_basis ?? "WAITING") !== "WAITING" ? (
+                <label className="flex flex-col gap-1">
+                  Executed share at least (50-95)
+                  <span className="flex items-center gap-1">
+                    <input
+                      key={view.pressure_flow_pct}
+                      type="number"
+                      min={50}
+                      max={95}
+                      step={1}
+                      defaultValue={view.pressure_flow_pct ?? 60}
+                      disabled={busy}
+                      onBlur={(e) => {
+                        const v = Math.min(95, Math.max(50, Number(e.target.value) || 60));
+                        if (v !== view.pressure_flow_pct) void save({ pressure_flow_pct: v });
+                      }}
+                      className={clsx(select, "w-20")}
+                    />
+                    %
+                  </span>
+                </label>
+              ) : null}
+              <label className={clsx("flex flex-col gap-1", view.pressure_basis === "EXECUTED" && "opacity-50")}>
+                Waiting share at least (type any number, 50-95)
                 <span className="flex items-center gap-1">
                   <input
                     key={view.pressure_pct}

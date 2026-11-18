@@ -3833,6 +3833,10 @@ export type ScalpAlerts = {
   pressure_min_value_cr: number;
   /** Volume vs usual at least (×, 0 = any). */
   pressure_min_rvol?: number;
+  /** What "in control" reads: the waiting orders, the executed volume (the Most active row's executed buy %) or both. */
+  pressure_basis?: "WAITING" | "EXECUTED" | "BOTH";
+  /** Executed share (%) at or above which buyers / sellers are in control (EXECUTED / BOTH). */
+  pressure_flow_pct?: number;
   /** Auto-arm (backend auto_arm.py): arm the stocks these thresholds pick on a PAPER bot. */
   arm_strong_on: boolean;
   arm_strong_bot: number;

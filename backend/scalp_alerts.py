@@ -8,6 +8,10 @@
   stock whose waiting buy orders are at least `pressure_pct` (50-95, default 70) % of the order book (buyers) or
   whose sell orders are (sellers) goes out with its price, the share, the day's move and volume vs usual.
   `pressure_side` keeps BOTH / BUY / SELL; `pressure_min_value_cr` drops thinly traded stocks.
+  **Judged by** (`pressure_basis`, owner's request): `WAITING` (default, the waiting orders above), `EXECUTED` (the
+  shares that actually traded: the Most active row's executed buy % `flow_buy`, at least `pressure_flow_pct` (50-95,
+  default 60) % bought = buyers, sold = sellers) or `BOTH` (both, the same side). `control_side` judges a row; the
+  auto-arm (auto_arm.py) and its replay read the same rule.
 
 Each stock and side is sent at most once per IST day per alert (`_SENT`, memory only: a restart may send again),
 at most `MAX_NAMES` per message, through the quiet-runner Telegram channel (the trade channel when that one is
@@ -29,6 +33,7 @@ log = logging.getLogger("sma.scalp_alerts")
 
 SIDES = ("BOTH", "UP", "DOWN")
 PRESSURE_SIDES = ("BOTH", "BUY", "SELL")
+BASES = ("WAITING", "EXECUTED", "BOTH")
 MAX_NAMES = 15
 # Short names for the seven strong-trend checks (trend_strength.CHECKS / MORNING_CHECKS).
 CHECK_WORDS = {
@@ -68,6 +73,10 @@ class Settings:
     pressure_min_value_cr: float = 0.0
     # Volume vs usual at least (× the same minutes of earlier sessions, the Most active row's `rvol`); 0 = any.
     pressure_min_rvol: float = 0.0
+    # What "in control" reads: WAITING orders, EXECUTED volume (flow_buy) or BOTH agreeing; pressure_flow_pct for
+    # the executed share.
+    pressure_basis: str = "WAITING"
+    pressure_flow_pct: float = 60.0
     # Auto-arm (auto_arm.py): arm the stocks these thresholds pick on a PAPER bot. Off by default.
     arm_strong_on: bool = False
     arm_strong_bot: int = 1
@@ -112,6 +121,11 @@ def clean(raw: dict) -> Settings:
     s.pressure_side = raw.get("pressure_side") if raw.get("pressure_side") in PRESSURE_SIDES else s.pressure_side
     s.pressure_min_value_cr = max(0.0, min(100000.0, float(raw.get("pressure_min_value_cr", 0) or 0)))
     s.pressure_min_rvol = max(0.0, min(MAX_RVOL, float(raw.get("pressure_min_rvol", 0) or 0)))
+    s.pressure_basis = raw.get("pressure_basis") if raw.get("pressure_basis") in BASES else s.pressure_basis
+    try:
+        s.pressure_flow_pct = max(50.0, min(95.0, float(raw.get("pressure_flow_pct", s.pressure_flow_pct) or s.pressure_flow_pct)))
+    except (TypeError, ValueError):
+        pass
     s.arm_strong_on = bool(raw.get("arm_strong_on", s.arm_strong_on))
     s.arm_pressure_on = bool(raw.get("arm_pressure_on", s.arm_pressure_on))
     s.arm_strong_bot = _bot(raw.get("arm_strong_bot"), s.arm_strong_bot)
@@ -276,32 +290,74 @@ def rvol_ok(rvol, need: float) -> bool:
     return value is not None and value >= need
 
 
+def _flow(value) -> float | None:
+    v = _num(value)
+    return v if v is not None and 0.0 <= v <= 100.0 else None
+
+
+def control_side(row: dict, basis: str, wait_pct: float, flow_pct: float) -> tuple[str, float | None, float | None] | None:
+    """(BUY / SELL, waiting % on that side, executed % on that side) when the row's buyers or sellers are in control
+    by `basis`: WAITING orders at least `wait_pct` %, EXECUTED volume (`flow_buy`) at least `flow_pct` %, or BOTH on
+    the same side. None otherwise (an unknown read never passes)."""
+    share = usable_share(row.get("buy_share"))
+    flow = _flow(row.get("flow_buy"))
+    wait_side = flow_side = None
+    if share is not None:
+        if share * 100.0 >= wait_pct:
+            wait_side = "BUY"
+        elif (1.0 - share) * 100.0 >= wait_pct:
+            wait_side = "SELL"
+    if flow is not None:
+        if flow >= flow_pct:
+            flow_side = "BUY"
+        elif 100.0 - flow >= flow_pct:
+            flow_side = "SELL"
+    if basis == "EXECUTED":
+        side = flow_side
+    elif basis == "BOTH":
+        side = wait_side if wait_side is not None and wait_side == flow_side else None
+    else:
+        side = wait_side
+    if side is None:
+        return None
+    wait = None if share is None else round((share if side == "BUY" else 1.0 - share) * 100.0, 1)
+    done = None if flow is None else round(flow if side == "BUY" else 100.0 - flow, 1)
+    return side, wait, done
+
+
+def basis_words(s) -> str:
+    """The rule in a few words, for the alert's headline."""
+    basis = getattr(s, "pressure_basis", "WAITING")
+    if basis == "EXECUTED":
+        return f"executed volume {s.pressure_flow_pct:g}% or more"
+    if basis == "BOTH":
+        return f"waiting orders {s.pressure_pct:g}% and executed volume {s.pressure_flow_pct:g}% or more"
+    return f"{s.pressure_pct:g}% or more"
+
+
 def pressure_picks(rows: list[dict], s: Settings, now: dt.datetime, alerting: bool = True) -> list[dict]:
     """The stocks whose buyers (or sellers) hold at least `pressure_pct` % of the waiting orders, not sent today.
     `alerting=False` (auto_arm.py): every stock passing the thresholds, whether the alert is on or sent already."""
     if alerting and not s.pressure_on:
         return []
     sent = _sent("pressure", now) if alerting else {}
-    need = s.pressure_pct / 100.0
+    basis = s.pressure_basis
     out = []
     for r in rows:
-        share = usable_share(r.get("buy_share"))
-        if share is None:
+        got = control_side(r, basis, s.pressure_pct, s.pressure_flow_pct)
+        if got is None:
             continue
-        if share >= need:
-            side, pct = "BUY", share * 100.0
-        elif 1.0 - share >= need:
-            side, pct = "SELL", (1.0 - share) * 100.0
-        else:
-            continue
+        side, wait, done = got
         if s.pressure_side != "BOTH" and s.pressure_side != side:
             continue
         if (_num(r.get("value_cr")) or 0.0) < s.pressure_min_value_cr or (r.get("symbol"), side) in sent:
             continue
         if not rvol_ok(r.get("rvol"), s.pressure_min_rvol):
             continue
+        pct = done if basis == "EXECUTED" else wait
         out.append({
-            "symbol": r.get("symbol"), "side": side, "pct": round(pct, 1), "price": _num(r.get("ltp")),
+            "symbol": r.get("symbol"), "side": side, "pct": pct, "wait_pct": wait, "flow_pct": done,
+            "price": _num(r.get("ltp")),
             "change_pct": _num(r.get("change_pct")), "rvol": _num(r.get("rvol")), "value_cr": _num(r.get("value_cr")),
         })
     out.sort(key=lambda p: -p["pct"])
@@ -310,15 +366,23 @@ def pressure_picks(rows: list[dict], s: Settings, now: dt.datetime, alerting: bo
 
 def pressure_text(picks: list[dict], s: Settings) -> str:
     floor = f", volume ≥ {s.pressure_min_rvol:g}× usual" if s.pressure_min_rvol > 0 else ""
-    lines = [f"⚖️ Buyers / sellers in control, {s.pressure_pct:g}% or more{floor} ({len(picks)}) — Scalp, Most active"]
+    lines = [f"⚖️ Buyers / sellers in control, {basis_words(s)}{floor} ({len(picks)}) — Scalp, Most active"]
     for p in picks:
-        who = f"🟢 Buyers {p['pct']:.0f}%" if p["side"] == "BUY" else f"🔴 Sellers {p['pct']:.0f}%"
+        who = "🟢 Buyers" if p["side"] == "BUY" else "🔴 Sellers"
+        reads = []
+        if p.get("wait_pct") is not None:
+            # Waiting orders only (the old message): just the share; with an executed read, both named.
+            reads.append(f"{p['wait_pct']:.0f}%" if p.get("flow_pct") is None else f"{p['wait_pct']:.0f}% waiting")
+        if p.get("flow_pct") is not None:
+            reads.append(f"{p['flow_pct']:.0f}% executed")
+        who = f"{who} {' / '.join(reads)}" if reads else who
         price = f"₹{p['price']:.2f}" if p["price"] is not None else "price n/a"
         move = f" · day {p['change_pct']:+.2f}%" if p["change_pct"] is not None else ""
         rvol = f" · volume {p['rvol']:.1f}× usual" if p["rvol"] is not None else ""
         money = f" · ₹{p['value_cr']:.1f} cr traded" if p.get("value_cr") is not None else ""
         lines.append(f"{p['symbol']} · {who} · {price}{move}{rvol}{money}")
-    lines.append("Share of the orders waiting in the order book right now. Information only: no order was placed.")
+    lines.append("Waiting = share of the orders in the order book; executed = share of the shares traded at market "
+                 "(estimated). Information only: no order was placed.")
     return "\n".join(lines)
 
 

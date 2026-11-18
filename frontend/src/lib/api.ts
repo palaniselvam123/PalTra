@@ -593,6 +593,14 @@ export type ActiveStock = {
   bias: "LONG" | "SHORT" | "NONE";
   /** % per minute since the previous scan (signed); null on the first scan or after a long gap. */
   speed_pct_min?: number | null;
+  /** Executed buy % of the shares traded over the last flow minutes (0-100, estimated; backend active_stocks.flow_read). */
+  flow_buy?: number | null;
+  /** The same since 09:15. */
+  flow_day_buy?: number | null;
+  /** "ticks", "candles" or "ticks + candles": how the split was read. */
+  flow_src?: string | null;
+  flow_from?: string | null;
+  flow_to?: string | null;
 };
 
 /** A buyers' share worth showing: a one-sided order book (no buy or no sell orders waiting, exactly 0 or 1) is a
@@ -601,7 +609,7 @@ export function usableShare(v: number | null | undefined): number | null {
   return v != null && Number.isFinite(v) && v > 0 && v < 1 ? v : null;
 }
 
-export type ActiveSort = "value" | "rvol" | "change" | "pressure" | "speed" | "vwap";
+export type ActiveSort = "value" | "rvol" | "change" | "pressure" | "flow" | "speed" | "vwap";
 
 /** One saved most-active scan (without its rows). */
 export type ActiveHistoryRun = {
@@ -679,6 +687,11 @@ export type ActiveAuto = {
   /** Next automatic pass (IST, ISO); null while off, paused or the market is shut. */
   next_at: string | null;
   last_error: string | null;
+  /** Executed buy % read in each pass: on, over the last N minutes (0 = since 09:15), for the busiest `flow_top`. */
+  flow_on?: boolean;
+  flow_minutes?: number;
+  flow_top?: number;
+  flow_choices?: number[];
 };
 
 export type ScalpMonitorResponse = {
@@ -1498,7 +1511,7 @@ export const api = {
   /** Stop the Most active pass that is running; the last finished scan stays. */
   scalpActiveStop: () => request<{ stopped: boolean }>("/api/scalp/active/stop", { method: "POST" }),
   /** The most-active auto scan: on / off and every N minutes (saved on the server). */
-  scalpActiveAuto: (body: { on?: boolean; every_min?: number }) =>
+  scalpActiveAuto: (body: { on?: boolean; every_min?: number; flow_on?: boolean; flow_minutes?: number; flow_top?: number }) =>
     request<ActiveAuto>("/api/scalp/active/auto", { method: "PUT", body: JSON.stringify(body) }),
   /** Pause / resume the desk's Scalp work (monitor scoring + history fill, alerts, most-active scan). */
   scalpPause: (paused: boolean) =>

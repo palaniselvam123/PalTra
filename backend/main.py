@@ -2836,6 +2836,9 @@ class AutoArmStart(BaseModel):
     min_value_cr: float | None = Field(default=None, ge=0, le=100000)
     #: Volume vs usual at least (×, 0 = any); None = the alert's own (pressure_min_rvol).
     min_rvol: float | None = Field(default=None, ge=0, le=100)
+    #: Buyers / sellers judged by WAITING orders, EXECUTED volume or BOTH; None = the alert's own (pressure_basis).
+    basis: Literal["WAITING", "EXECUTED", "BOTH"] | None = None
+    flow_pct: float | None = Field(default=None, ge=50, le=95)
     max_day: int | None = Field(default=None, ge=1, le=auto_arm.MAX_DAY)
     #: Price range (₹, 0 = no bound); None = the auto-arm's own (arm_price_min / arm_price_max).
     price_min: float | None = Field(default=None, ge=0, le=1_000_000)
@@ -2853,13 +2856,13 @@ async def _auto_arm_scans(day: dt.date, rule: "auto_arm.AutoArmRule") -> tuple[l
     scans = await asyncio.to_thread(auto_arm.saved_scans, day)
     if scans:
         return auto_arm.active_hits(scans, rule.pct, rule.pressure_side, rule.min_value_cr, rule.price_min, rule.price_max,
-                                    rule.min_rvol), None
+                                    rule.min_rvol, rule.basis, rule.flow_pct), None
     if server_role.is_backtest() and server_role.backtest_link_token():
         from urllib.parse import urlencode
 
         query = urlencode({"day": day.isoformat(), "pct": rule.pct, "side": rule.pressure_side,
                            "min_value_cr": rule.min_value_cr, "min_rvol": rule.min_rvol, "price_min": rule.price_min,
-                           "price_max": rule.price_max})
+                           "price_max": rule.price_max, "basis": rule.basis, "flow_pct": rule.flow_pct})
         try:
             body = await backtest_server._desk_get(f"/api/link/backtest/active-scans?{query}")
         except Exception as exc:  # noqa: BLE001
@@ -2902,6 +2905,8 @@ async def replay_auto_arm(body: AutoArmStart):
         pct=body.pct or alerts.pressure_pct, pressure_side=body.pressure_side or alerts.pressure_side,
         min_value_cr=alerts.pressure_min_value_cr if body.min_value_cr is None else body.min_value_cr,
         min_rvol=alerts.pressure_min_rvol if body.min_rvol is None else body.min_rvol,
+        basis=body.basis or alerts.pressure_basis,
+        flow_pct=body.flow_pct or alerts.pressure_flow_pct,
         max_day=body.max_day or alerts.arm_max_day,
         price_min=alerts.arm_price_min if body.price_min is None else body.price_min,
         price_max=alerts.arm_price_max if body.price_max is None else body.price_max,
@@ -3998,6 +4003,9 @@ class ScalpAlertUpdate(BaseModel):
     pressure_side: Literal["BOTH", "BUY", "SELL"] | None = None
     pressure_min_value_cr: float | None = Field(default=None, ge=0, le=100000)
     pressure_min_rvol: float | None = Field(default=None, ge=0, le=100)
+    # What "in control" reads: waiting orders, executed volume (the Most active row's flow_buy) or both.
+    pressure_basis: Literal["WAITING", "EXECUTED", "BOTH"] | None = None
+    pressure_flow_pct: float | None = Field(default=None, ge=50, le=95)
     # Auto-arm (auto_arm.py): PAPER bots unless arm_live is ticked (needs confirm_live).
     arm_strong_on: bool | None = None
     arm_strong_bot: int | None = Field(default=None, ge=1, le=5)

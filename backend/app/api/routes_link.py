@@ -197,7 +197,7 @@ async def backtest_settings(request: Request):
 @router.get(BACKTEST_ACTIVE)
 async def backtest_active_scans(request: Request, day: str, pct: float = 70.0, side: str = "BOTH",
                                 min_value_cr: float = 0.0, price_min: float = 0.0, price_max: float = 0.0,
-                                min_rvol: float = 0.0):
+                                min_rvol: float = 0.0, basis: str = "WAITING", flow_pct: float = 60.0):
     """One day's saved Most active scans reduced to the first time each stock's buyers or sellers reached `pct` % (the
     auto-arm replay on the backtest server, auto_arm.py). Read-only."""
     _backtest_authorized(request)
@@ -210,10 +210,11 @@ async def backtest_active_scans(request: Request, day: str, pct: float = 70.0, s
         when = dt.date.fromisoformat(day)
     except ValueError as exc:
         raise HTTPException(400, "day must be YYYY-MM-DD") from exc
-    if side not in ("BOTH", "BUY", "SELL") or not (50.0 <= pct <= 99.0):
+    if side not in ("BOTH", "BUY", "SELL") or not (50.0 <= pct <= 99.0) or basis not in ("WAITING", "EXECUTED", "BOTH") \
+            or not (50.0 <= flow_pct <= 95.0):
         raise HTTPException(400, "Bad side or percentage")
     scans = await asyncio.to_thread(auto_arm.saved_scans, when)
-    return {"scans": len(scans), "hits": [list(h) for h in auto_arm.active_hits(scans, pct, side, max(0.0, min_value_cr), max(0.0, price_min), max(0.0, price_max), max(0.0, min_rvol))]}
+    return {"scans": len(scans), "hits": [list(h) for h in auto_arm.active_hits(scans, pct, side, max(0.0, min_value_cr), max(0.0, price_min), max(0.0, price_max), max(0.0, min_rvol), basis, flow_pct)]}
 
 
 @router.post(BACKTEST_SCANS)

@@ -398,13 +398,18 @@ async def most_active(
 class ActiveAutoBody(BaseModel):
     on: bool | None = None
     every_min: int | None = None
+    # Executed buy % (active_stocks.flow_read): on/off, the window in minutes (0 = since 09:15), how many stocks.
+    flow_on: bool | None = None
+    flow_minutes: int | None = None
+    flow_top: int | None = Field(default=None, ge=10, le=250)
 
 
 @router.put("/active/auto")
 async def most_active_auto(body: ActiveAutoBody):
     """The auto scan's switch and interval, saved on the server (no browser needed). Market data only."""
     try:
-        active_scanner.set_auto(on=body.on, every_min=body.every_min)
+        active_scanner.set_auto(on=body.on, every_min=body.every_min, flow_on=body.flow_on,
+                                flow_minutes=body.flow_minutes, flow_top=body.flow_top)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except OSError as exc:

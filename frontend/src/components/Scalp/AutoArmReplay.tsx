@@ -124,7 +124,13 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
     ? [
         source !== "ACTIVE" ? `strong ${alerts.strong_side === "BOTH" ? "up or down" : alerts.strong_side.toLowerCase()} trend, ${alerts.strong_min_checks} of 7 checks or more` : null,
         source !== "TREND"
-          ? `${alerts.pressure_side === "BOTH" ? "buyers or sellers" : alerts.pressure_side === "BUY" ? "buyers" : "sellers"} at ${alerts.pressure_pct}% or more${alerts.pressure_min_value_cr ? `, ₹${alerts.pressure_min_value_cr} cr traded` : ""}${alerts.pressure_min_rvol ? `, volume ${alerts.pressure_min_rvol}× usual` : ""}`
+          ? `${alerts.pressure_side === "BOTH" ? "buyers or sellers" : alerts.pressure_side === "BUY" ? "buyers" : "sellers"} at ${
+              alerts.pressure_basis === "EXECUTED"
+                ? `${alerts.pressure_flow_pct ?? 60}% or more of the shares traded (executed; scans saved from now on carry it)`
+                : alerts.pressure_basis === "BOTH"
+                  ? `${alerts.pressure_pct}% or more waiting and ${alerts.pressure_flow_pct ?? 60}% or more executed`
+                  : `${alerts.pressure_pct}% or more`
+            }${alerts.pressure_min_value_cr ? `, ₹${alerts.pressure_min_value_cr} cr traded` : ""}${alerts.pressure_min_rvol ? `, volume ${alerts.pressure_min_rvol}× usual` : ""}`
           : null,
         alerts.arm_price_min || alerts.arm_price_max
           ? `priced ${alerts.arm_price_min ? `₹${alerts.arm_price_min}` : "any"} to ${alerts.arm_price_max ? `₹${alerts.arm_price_max}` : "any"}`
