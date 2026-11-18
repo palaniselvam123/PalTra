@@ -164,7 +164,11 @@ jobs:
   release-gate:
     name: Release gate
     needs: [backend-tests, frontend-build]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    # !cancelled(): on a push "Already tested on main?" is skipped, and without a status function GitHub skips every
+    # job after a skipped one, so the merge never deployed the backtest server.
+    if: >-
+      ${{ !cancelled() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      && needs.backend-tests.result == 'success' && needs.frontend-build.result == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       backtest: ${{ steps.check.outputs.backtest }}
@@ -227,7 +231,7 @@ jobs:
   deploy-backtest:
     name: Deploy backtest server to Fly.io
     needs: [backend-tests, frontend-build, release-gate]
-    if: needs.release-gate.outputs.backtest == 'true'
+    if: ${{ !cancelled() && needs.release-gate.result == 'success' && needs.release-gate.outputs.backtest == 'true' }}
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
@@ -254,7 +258,7 @@ jobs:
   deploy:
     name: Deploy main desk to Fly.io
     needs: [backend-tests, frontend-build, release-gate]
-    if: needs.release-gate.outputs.desk == 'true'
+    if: ${{ !cancelled() && needs.release-gate.result == 'success' && needs.release-gate.outputs.desk == 'true' }}
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
