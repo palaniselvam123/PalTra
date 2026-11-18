@@ -247,6 +247,7 @@ FIELD_HELP = {
     "flow_trigger_pct": "the executed buyers' / sellers' % that starts a trade (50-95, default 60)",
     "flow_trigger_window": "the executed volume entry's window in minutes, 0 = one exit candle's length",
     "flow_trigger_book": "the order's side's % of the waiting orders (fresh Most active read) the executed volume entry needs, 0 = not checked",
+    "pressure_exit_any": "with pressure_exit, watch from the entry: close once the trade's side is at or below pressure_exit_pct even if it was never above it (off = only after that side was above the level)",
     "pressure_over_counter": "Most active stocks with the fade exit on: hold the counter-candle exit while a fresh Most active read still shows the trade's side above pressure_exit_pct (no fresh read = the counter-candle exit works as usual)",
     "cross_exit": "an opposite SMA cross closes the trade and reverses (off = held through a cross)",
     "bb_exit": "Bollinger exit: OFF | BAND | MIDDLE | BOTH", "bb_period": "Bollinger period", "bb_std": "Bollinger std dev",

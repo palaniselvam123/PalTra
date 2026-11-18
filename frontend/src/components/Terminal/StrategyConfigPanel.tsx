@@ -478,6 +478,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     pressure_exit: Boolean(form.pressure_exit),
     pressure_exit_pct: Math.min(95, Math.max(30, Number(form.pressure_exit_pct ?? 55) || 55)),
     pressure_over_counter: Boolean(form.pressure_over_counter),
+    pressure_exit_any: Boolean(form.pressure_exit_any),
     pressure_exit_flow: (() => {
       const v = Number(form.pressure_exit_flow ?? 0) || 0;
       return v <= 0 ? 0 : Math.min(95, Math.max(50, v));
@@ -3897,7 +3898,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.stop_plan && (f.stop_type ?? "ATR") === "ATR")
     add({ group: "stop", key: "stop_plan", text: `Stop plan: breakeven at +${f.plan_be_r ?? 1.5}R, Supertrend trail from +${f.plan_trail_r ?? 2}R`, off: { stop_plan: false } });
   if (f.pressure_exit)
-    add({ group: "exit", key: "pressure_exit", text: `Most active stocks close when the buyers (a buy) / sellers (a sell) fade to ${f.pressure_exit_pct ?? 55}% or below${Number(f.pressure_exit_flow ?? 0) > 0 ? ` and the other side did ${f.pressure_exit_flow}% of the shares traded ${Number(f.pressure_exit_flow_window ?? 3) === 0 ? "in the exit candle" : `in the last ${f.pressure_exit_flow_window ?? 3} min`}` : ""}`, off: { pressure_exit: false } });
+    add({ group: "exit", key: "pressure_exit", text: `Most active stocks close when the buyers (a buy) / sellers (a sell) ${f.pressure_exit_any ? "are" : "fade to"} ${f.pressure_exit_pct ?? 55}% or below${f.pressure_exit_any ? " (watched from the entry)" : ""}${Number(f.pressure_exit_flow ?? 0) > 0 ? ` and the other side did ${f.pressure_exit_flow}% of the shares traded ${Number(f.pressure_exit_flow_window ?? 3) === 0 ? "in the exit candle" : `in the last ${f.pressure_exit_flow_window ?? 3} min`}` : ""}`, off: { pressure_exit: false } });
   if ((f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM") && flowOnly)
     add({ group: "enter", key: "pressure_entry", text: "Most active waiting orders entry — not used: Executed volume only never reads the waiting orders (turn it off)", off: { pressure_entry: "OFF" }, warn: true });
   else if (f.pressure_entry === "CHECK" || f.pressure_entry === "AT_ARM")
@@ -5060,9 +5061,40 @@ function PressureExit({
         % or below
       </label>
       <p className="mt-1 text-xs text-slate-400">
-        Example at {Number.isFinite(pct) ? pct : 55}%: a buy armed when buyers were 75% closes when buyers drop to{" "}
-        {Number.isFinite(pct) ? pct : 55}%; a sell armed at sellers 75% closes when sellers drop to {Number.isFinite(pct) ? pct : 55}%.
+        {form.pressure_exit_any ? (
+          <>
+            Watched from the entry: a sell closes at the first read since the entry with sellers at{" "}
+            {Number.isFinite(pct) ? pct : 55}% or below (a buy: buyers), even if they were never above it.
+          </>
+        ) : (
+          <>
+            It starts watching only once that side has been <b className="text-slate-200">above</b>{" "}
+            {Number.isFinite(pct) ? pct : 55}% since the entry. Example: a sell armed at sellers 75% closes when sellers drop to{" "}
+            {Number.isFinite(pct) ? pct : 55}%; a sell opened with sellers at 63% is never closed by it (tick the box below for that).
+          </>
+        )}
       </p>
+      <label className="mt-2 flex items-start gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={Boolean(form.pressure_exit_any)}
+          disabled={!on}
+          onChange={(e) => set("pressure_exit_any", e.target.checked)}
+          className="mt-1 accent-[#10B981]"
+        />
+        <span>
+          {isOwn("pressure_exit_any") && <OwnTag />}
+          <b className="text-slate-100">Close even if that side was never above the %</b> <NewTag id="pressure-exit-any" />{" "}
+          <InfoTip label="About watching the fade exit from the entry">
+            Off: the fade exit starts only after the trade&apos;s own side has been above the % (from the read before the entry
+            on), so a trade that started without the pressure is never closed by it. On: it watches from the entry, so the first
+            Most active read since the entry with that side at the % or below closes the trade. With &quot;Executed volume must
+            agree&quot; ticked below, the other side must also have done that much of the trading (an AND). Example (BSE, 6 Nov):
+            a short opened with sellers at 63%, sellers 67% at 10:11 and buyers 59% of the 10:00 candle&apos;s trading: at 70% /
+            55% it closes at 10:15.
+          </InfoTip>
+        </span>
+      </label>
       <label className="mt-2 flex items-start gap-2 text-sm text-slate-300">
         <input
           type="checkbox"

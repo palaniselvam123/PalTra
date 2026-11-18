@@ -138,8 +138,12 @@ def side_share(share: float, direction: str) -> float:
     return round((share if direction == "LONG" else 1.0 - share) * 100.0, 1)
 
 
-def judge(symbol: str, direction: str, entry_ts: float, now_ts: float, level: float) -> tuple[bool, str]:
-    """(close?, plain note) for an open trade. Reads at or before now only (a replay's past clock sees none)."""
+def judge(
+    symbol: str, direction: str, entry_ts: float, now_ts: float, level: float, from_entry: bool = False
+) -> tuple[bool, str]:
+    """(close?, plain note) for an open trade. Reads at or before now only (a replay's past clock sees none).
+    `from_entry` (`pressure_exit_any`): watch from the entry, so a trade whose side was never above the level closes
+    too once a read since the entry is at or below it (owner's BSE case: a short opened with sellers at 63 %)."""
     rows = _rows(symbol, now_ts)
     if not rows:
         return False, "no Most active read of this stock yet"
@@ -154,10 +158,12 @@ def judge(symbol: str, direction: str, entry_ts: float, now_ts: float, level: fl
     looked = ([before[-1]] if before else []) + since
     peak = max(side_share(s, direction) for _, s in looked)
     now_share = side_share(last_s, direction)
-    if peak <= level:
+    if peak <= level and not from_entry:
         return False, f"{who} {now_share:g}% — never above {level:g}% since the entry, fade exit not armed"
     if now_share <= level:
         at = dt.datetime.fromtimestamp(last_t, IST).strftime("%H:%M")
+        if peak <= level:
+            return True, f"{who} at {now_share:g}% at {at} (never above {level:g}%; exit at {level:g}% or below from the entry)"
         return True, f"{who} faded to {now_share:g}% at {at} (was {peak:g}%, exit at {level:g}% or below)"
     return False, f"{who} {now_share:g}% (exit at {level:g}% or below)"
 
@@ -210,6 +216,11 @@ def read_before(symbol: str, at_ts: float) -> dict | None:
     points = series(symbol, dt.datetime.combine(dt.datetime.fromtimestamp(at_ts, IST).date(), dt.time(0, 0),
                                                 tzinfo=IST).timestamp(), at_ts)
     return points[-1] if points else None
+
+
+def from_entry(cfg) -> bool:
+    """`pressure_exit_any`: the fade exit watches from the entry, no need for the side to have been above the level."""
+    return bool(getattr(cfg, "pressure_exit_any", False))
 
 
 def over_counter(cfg) -> bool:

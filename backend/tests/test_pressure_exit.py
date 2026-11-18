@@ -443,3 +443,79 @@ def test_fade_exit_flow_settings():
     assert pressure_exit.exit_flow_window(type("C", (), {"pressure_exit_flow_window": 0})()) == 0
     assert pressure_exit.exit_flow_window(type("C", (), {})()) == 3
     assert ConfigUpdate(pressure_exit_flow=60, pressure_exit_flow_window=15).pressure_exit_flow_window == 15
+
+
+def test_watch_from_the_entry_closes_a_short_that_never_had_the_pressure():
+    """Owner's BSE case: a short opened with sellers at 63 %, 67 % at 10:00 and a 70 % exit level."""
+    entry = BASE.timestamp()
+    pressure_exit.note_scan(_scan(BASE - dt.timedelta(minutes=2), BSE=0.37))   # sellers 63 % before the entry
+    pressure_exit.note_scan(_scan(BASE + dt.timedelta(minutes=11), BSE=0.33))  # sellers 67 %
+    hit, note = pressure_exit.judge("BSE", "SHORT", entry, entry + 12 * 60, 70)
+    assert not hit and "not armed" in note                                      # off: needs sellers above 70 % first
+    hit, note = pressure_exit.judge("BSE", "SHORT", entry, entry + 12 * 60, 70, from_entry=True)
+    assert hit and "sellers at 67%" in note and "never above 70%" in note
+    # Still above the level: no exit either way.
+    assert not pressure_exit.judge("BSE", "SHORT", entry, entry + 12 * 60, 60, from_entry=True)[0]
+    # A side that was above it reads as a fade, as before.
+    pressure_exit.note_scan(_scan(BASE + dt.timedelta(minutes=13), BSE=0.20))  # sellers 80 %
+    pressure_exit.note_scan(_scan(BASE + dt.timedelta(minutes=15), BSE=0.32))  # sellers 68 %
+    hit, note = pressure_exit.judge("BSE", "SHORT", entry, entry + 16 * 60, 70, from_entry=True)
+    assert hit and "faded to 68%" in note
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("any_, flow_buy, closes", [
+    (True, 0.59, True),    # watched from the entry, buyers did 59 % (≥ 55): closed
+    (True, 0.45, False),   # buyers did 45 %: held by the executed volume check
+    (False, 0.59, False),  # off: sellers were never above 70 %, nothing happens
+])
+async def test_engine_watch_from_entry_with_the_executed_check(monkeypatch, tmp_path, any_, flow_buy, closes):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/p.db")
+    import database
+    import pandas as pd
+
+    import trade_flow
+    from strategy_engine import OpenPosition, StrategyEngine
+    from tests.test_sma_atr_terminal import _FakeBroker
+
+    database.reset_engine()
+    database.init_db()
+    eng = StrategyEngine(broker=_FakeBroker())
+    now = dt.datetime(2026, 11, 6, 10, 15, 30, tzinfo=IST)
+    monkeypatch.setattr(eng, "_now", lambda: now)
+    entry = dt.datetime(2026, 11, 6, 9, 30, 5, tzinfo=IST)
+    pressure_exit.note_scan(_scan(entry - dt.timedelta(minutes=3), BSE=0.37))
+    pressure_exit.note_scan(_scan(dt.datetime(2026, 11, 6, 10, 11, tzinfo=IST), BSE=0.33))
+    eng._focus = "BSE"
+    eng._tapes["BSE"] = pd.DataFrame({"ts": [int(now.timestamp()) - 60]})
+    monkeypatch.setattr(
+        trade_flow, "minutes",
+        lambda symbol, tape, start, end: [
+            {"time": t, "buy": 100 * flow_buy, "sell": 100 * (1 - flow_buy), "src": "T"} for t in range(start, end, 60)
+        ],
+    )
+    eng.position = OpenPosition(
+        direction="SHORT", qty=10, entry_price=3763.0, ma_cross_price=3763.0, atr_at_entry=16.0, sl_trigger=0.0,
+        sl_order_id="", entry_order_id="E", entry_time=entry, trade_id=0, mode="PAPER", stop_active=False,
+    )
+    eng.status, eng.ltp = "RUNNING", 3776.0
+    exits = []
+
+    async def fake_exit(cfg, price, reason):
+        exits.append(reason)
+
+    monkeypatch.setattr(eng, "_exit_now", fake_exit)
+    cfg = type("C", (), {"symbol": "BSE", "pressure_exit": True, "pressure_exit_pct": 70, "pressure_exit_any": any_,
+                         "candle_minutes": 15, "pressure_exit_flow": 55, "pressure_exit_flow_window": 0,
+                         "trade_sources": json.dumps({"BSE": "Most active"})})()
+    await eng._watch_pressure_fade(cfg)
+    assert exits == (["PRESSURE_FADE"] if closes else [])
+    database.reset_engine()
+
+
+def test_watch_from_entry_setting():
+    from main import ConfigUpdate
+
+    assert not pressure_exit.from_entry(type("C", (), {})())
+    assert pressure_exit.from_entry(type("C", (), {"pressure_exit_any": True})())
+    assert ConfigUpdate(pressure_exit_any=True).pressure_exit_any is True
