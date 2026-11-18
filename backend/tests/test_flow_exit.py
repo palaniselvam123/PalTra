@@ -303,3 +303,67 @@ def test_executed_volume_entry_keeps_its_decisions_for_the_chart():
     for i in range(StrategyEngine.FT_LOG_KEEP + 5):
         eng._ft_note("FLO", 2_000_000 + i * 60, "x")
     assert len(eng._ft_log["FLO"]) == StrategyEngine.FT_LOG_KEEP
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("need,shares,closes_at", [
+    (1, [0.70], 1),                         # one reading, as before
+    (2, [0.70, 0.40, 0.70, 0.70], 4),       # a run broken by a buyers' candle starts again
+    (2, [0.70, None, 0.70], 3),             # too little volume neither counts nor breaks the run
+    (3, [0.70, 0.70], None),                # not enough readings yet
+])
+async def test_executed_volume_exit_needs_readings_in_a_row(monkeypatch, tmp_path, need, shares, closes_at):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/f.db")
+    import database
+    from strategy_engine import OpenPosition, StrategyEngine
+    from tests.test_sma_atr_terminal import _FakeBroker
+
+    database.reset_engine()
+    database.init_db()
+    eng = StrategyEngine(broker=_FakeBroker())
+    entry = dt.datetime(2026, 11, 16, 10, 0, 5, tzinfo=IST)
+    clock = {"now": entry}
+    monkeypatch.setattr(eng, "_now", lambda: clock["now"])
+    eng._focus = "ACME"
+    eng.position = OpenPosition(
+        direction="LONG", qty=10, entry_price=100.0, ma_cross_price=100.0, atr_at_entry=1.0, sl_trigger=0.0,
+        sl_order_id="", entry_order_id="E", entry_time=entry, trade_id=0, mode="PAPER", stop_active=False,
+    )
+    eng.status, eng.ltp = "RUNNING", 99.0
+    reads = iter(shares)
+    current = {}
+
+    def fake_minutes(symbol, tape, start, end):
+        share = current["share"]
+        if share is None:
+            return []
+        return [{"time": t, "buy": 100 * (1 - share), "sell": 100 * share, "src": "T"} for t in range(start, end, 60)]
+
+    monkeypatch.setattr(trade_flow, "minutes", fake_minutes)
+    exits = []
+
+    async def fake_exit(cfg, price, reason):
+        exits.append(reason)
+
+    monkeypatch.setattr(eng, "_exit_now", fake_exit)
+    cfg = type("C", (), {"symbol": "ACME", "flow_exit": True, "flow_exit_pct": 60, "flow_exit_window": 0,
+                         "flow_exit_streak": need, "candle_minutes": 15})()
+    monkeypatch.setattr(eng, "_exit_minutes", lambda symbol, c: 15)
+    closed = None
+    for i, share in enumerate(reads, start=1):
+        current["share"] = share
+        clock["now"] = dt.datetime(2026, 11, 16, 10, 15, 30, tzinfo=IST) + dt.timedelta(minutes=15 * (i - 1))
+        eng._tapes["ACME"] = pd.DataFrame({"ts": [int(clock["now"].timestamp()) - 30]})
+        await eng._watch_flow_exit(cfg)
+        if exits and closed is None:
+            closed = i
+    assert closed == closes_at
+    database.reset_engine()
+
+
+def test_streak_setting():
+    from main import ConfigUpdate
+
+    assert flow_exit.streak(type("C", (), {})()) == 1
+    assert flow_exit.streak(type("C", (), {"flow_exit_streak": 9})()) == 5
+    assert ConfigUpdate(flow_exit_streak=3).flow_exit_streak == 3

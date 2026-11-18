@@ -116,6 +116,20 @@ def confirm_span(now_ts: float, entry_ts: float, win: int, exit_minutes: int) ->
     return start, end
 
 
+MAX_STREAK = 5
+
+
+def streak(cfg) -> int:
+    """`flow_exit_streak`: how many readings in a row (each judged window: each closed exit candle with window 0) must
+    show the other side at the % before the executed volume exit closes; 1 = one reading, as before. Owner's request: one
+    candle's estimated split swings back and forth, so a single reading was too jumpy to exit on."""
+    try:
+        value = int(getattr(cfg, "flow_exit_streak", 1) or 1)
+    except (TypeError, ValueError):
+        value = 1
+    return max(1, min(MAX_STREAK, value))
+
+
 def loss_only(cfg) -> bool:
     return bool(getattr(cfg, "flow_exit_loss", False))
 

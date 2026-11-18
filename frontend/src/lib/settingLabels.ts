@@ -200,6 +200,7 @@ export const SETTING_LABELS: Record<string, string> = {
   flow_exit: "Executed volume exit",
   flow_exit_pct: "Executed volume exit: other side at least %",
   flow_exit_window: "Executed volume exit: window (min, 0 = exit candle)",
+  flow_exit_streak: "Executed volume exit: readings in a row",
   flow_exit_loss: "Executed volume exit: only while losing",
   flow_exit_book: "Executed volume exit: waiting orders must agree",
   flow_trigger: "Enter on executed volume",

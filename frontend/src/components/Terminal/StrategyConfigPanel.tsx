@@ -497,6 +497,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     flow_exit_pct: Math.min(95, Math.max(50, Number(form.flow_exit_pct ?? 60) || 60)),
     flow_exit_window: flowWindow(form.flow_exit_window),
     flow_exit_loss: Boolean(form.flow_exit_loss),
+    flow_exit_streak: Math.min(5, Math.max(1, Math.round(Number(form.flow_exit_streak ?? 1)) || 1)),
     flow_exit_book: Boolean(form.flow_exit_book),
     flow_exit_mode: String(form.flow_exit_mode ?? "EXIT").toUpperCase() === "CONFIRM" ? "CONFIRM" : "EXIT",
     flow_trigger: Boolean(form.flow_trigger),
@@ -3909,7 +3910,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.flow_exit && String(f.flow_exit_mode ?? "EXIT").toUpperCase() === "CONFIRM")
     add({ group: "exit", key: "flow_exit", text: `Exits close only when the other side did ${f.flow_exit_pct ?? 60}% of the shares traded ${Number(f.flow_exit_window ?? 3) === 0 ? "in the exit candle" : `in the last ${f.flow_exit_window ?? 3} min`} (executed volume confirms the exit)`, off: { flow_exit: false } });
   else if (f.flow_exit)
-    add({ group: "exit", key: "flow_exit", text: `Close when the other side did ${f.flow_exit_pct ?? 60}% of the shares traded ${Number(f.flow_exit_window ?? 3) === 0 ? "in the exit candle" : `in the last ${f.flow_exit_window ?? 3} min`} (executed volume, estimated)${f.flow_exit_loss ? ", only while losing" : ""}${f.flow_exit_book ? ", waiting orders agreeing" : ""}`, off: { flow_exit: false } });
+    add({ group: "exit", key: "flow_exit", text: `Close when the other side did ${f.flow_exit_pct ?? 60}% of the shares traded ${Number(f.flow_exit_window ?? 3) === 0 ? "in the exit candle" : `in the last ${f.flow_exit_window ?? 3} min`} (executed volume, estimated)${Number(f.flow_exit_streak ?? 1) > 1 && f.flow_exit_mode !== "CONFIRM" ? `, ${f.flow_exit_streak} readings in a row` : ""}${f.flow_exit_loss ? ", only while losing" : ""}${f.flow_exit_book ? ", waiting orders agreeing" : ""}`, off: { flow_exit: false } });
   if (f.pressure_exit && f.pressure_over_counter)
     add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
@@ -5545,6 +5546,30 @@ function FlowExit({
       </div>
       {!confirm && (
       <>
+      <label className={clsx("mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
+        {isOwn("flow_exit_streak") && <OwnTag />}
+        Close only after
+        <select
+          disabled={!on}
+          value={String(Number(form.flow_exit_streak ?? 1) || 1)}
+          onChange={(e) => set("flow_exit_streak", e.target.value)}
+          aria-label="Readings in a row the executed volume exit needs"
+          className="min-h-11 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        >
+          <option value="1">1 reading (as before)</option>
+          {[2, 3, 4, 5].map((n) => (
+            <option key={n} value={String(n)}>{n} readings in a row</option>
+          ))}
+        </select>
+        <NewTag id="flow-exit-streak" />
+        <InfoTip label="About readings in a row">
+          One candle&apos;s executed split swings back and forth, so one reading can be noise. With 2 or more, the other
+          side must be at the % on that many readings one after another (with &quot;the exit candle&quot;, that many closed
+          candles in a row); a reading the other way starts the count again, and a reading with too little volume neither
+          counts nor breaks it. Example at 60% with 2: sellers did 64% of the 10:00 candle and 61% of the 10:15 candle →
+          a buy closes at 10:30; 64% then 45% → held.
+        </InfoTip>
+      </label>
       <label className={clsx("mt-2 flex items-center gap-2 text-sm text-slate-300", !on && "opacity-50")}>
         <input type="checkbox" disabled={!on} checked={Boolean(form.flow_exit_loss)} onChange={(e) => set("flow_exit_loss", e.target.checked)} />
         {isOwn("flow_exit_loss") && <OwnTag />}

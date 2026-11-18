@@ -545,6 +545,8 @@ class BotConfig(Base):
     flow_exit_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=60.0)
     flow_exit_window: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
     flow_exit_loss: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Readings in a row the executed volume exit needs (flow_exit.streak); 1 = one reading.
+    flow_exit_streak: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
     flow_exit_book: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # EXIT = the executed volume closes the trade itself; CONFIRM = it only lets the other signal exits close (flow_exit.py).
     flow_exit_mode: Mapped[str | None] = mapped_column(String(10), nullable=True, default="EXIT")
