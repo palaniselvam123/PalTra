@@ -225,6 +225,9 @@ class AutoArmRule:
     min_value_cr: float = 0.0
     #: Volume vs usual at least (×, 0 = any).
     min_rvol: float = 0.0
+    #: Buyers / sellers judged by WAITING orders, EXECUTED volume or BOTH (scalp_alerts.control_side).
+    basis: str = "WAITING"
+    flow_pct: float = 60.0
     max_day: int = 10
     #: Trading stops here each day (positions squared off, the day ends); None = the usual 15:30 close.
     until: dt.time | None = None
@@ -247,6 +250,7 @@ class AutoArmRule:
             "first": self.first.strftime("%H:%M"), "last": self.last.strftime("%H:%M"), "every_min": self.every_min,
             "minutes": self.minutes, "candles": self.candles, "min_checks": self.min_checks, "side": self.side, "pct": self.pct,
             "pressure_side": self.pressure_side, "min_value_cr": self.min_value_cr, "min_rvol": self.min_rvol,
+            "basis": self.basis, "flow_pct": self.flow_pct,
             "max_day": self.max_day,
             "price_min": self.price_min, "price_max": self.price_max,
             "until": self.until.strftime("%H:%M") if self.until else None,
@@ -372,18 +376,21 @@ def arm_windows(day: dt.date, picks: list[dict]) -> dict[str, list[tuple[int, in
 
 
 def active_hits(scans: list[dict], pct: float, side: str, min_value_cr: float, price_min: float = 0.0,
-                price_max: float = 0.0, min_rvol: float = 0.0) -> list[tuple[str, str, str, float]]:
+                price_max: float = 0.0, min_rvol: float = 0.0, basis: str = "WAITING",
+                flow_pct: float = 60.0) -> list[tuple[str, str, str, float]]:
     """(HH:MM armed, symbol, BUY/SELL, %) from one day's saved Most active scans (each {as_of, rows}), first per stock.
 
     A stock is armed the minute after its own order-book read (`read_at`; a scan saved before rows carried it falls
     back to the scan's start): a read at 10:04:30 arms at 10:05, like a live scan that read it then. A pass takes
     minutes, so the scan's start would arm stocks read late in it before anyone could have seen them. A one-sided
-    order book (no buy or no sell orders waiting) is never a hit (pressure_exit.usable_share)."""
+    order book (no buy or no sell orders waiting) is never a hit (pressure_exit.usable_share).
+
+    `basis` WAITING / EXECUTED / BOTH reads the waiting orders, the row's executed buy % (`flow_buy`, saved on scans
+    since it was added; older rows never pass EXECUTED / BOTH) or both (scalp_alerts.control_side); the % returned is
+    the executed one with EXECUTED, else the waiting one."""
     import scalp_alerts
-    from pressure_exit import usable_share
     from pressure_study import in_session
 
-    need = float(pct) / 100.0
     first: dict[str, tuple[dt.datetime, str, float]] = {}
     for scan in sorted(scans, key=lambda x: str(x.get("as_of") or "")):
         if not in_session(scan):
@@ -394,8 +401,7 @@ def active_hits(scans: list[dict], pct: float, side: str, min_value_cr: float, p
             continue
         for r in scan.get("rows") or []:
             sym = str(r.get("symbol") or "").upper()
-            share = usable_share(r.get("buy_share"))
-            if not sym or share is None:
+            if not sym:
                 continue
             try:
                 value = float(r.get("value_cr") or 0.0)
@@ -405,12 +411,11 @@ def active_hits(scans: list[dict], pct: float, side: str, min_value_cr: float, p
                 continue
             if not scalp_alerts.rvol_ok(r.get("rvol"), min_rvol):
                 continue
-            if share >= need:
-                s, p = "BUY", share * 100
-            elif 1.0 - share >= need:
-                s, p = "SELL", (1.0 - share) * 100
-            else:
+            got = scalp_alerts.control_side(r, basis, float(pct), float(flow_pct))
+            if got is None:
                 continue
+            s, wait, done = got
+            p = done if basis == "EXECUTED" else wait
             if side != "BOTH" and side != s:
                 continue
             when = start

@@ -179,6 +179,7 @@ def rule_from_dict(data: dict, sma_fast: int = 9, sma_slow: int = 21):
             pct=float(data.get("pct") or 70.0), pressure_side=str(data.get("pressure_side") or "BOTH"),
             min_value_cr=float(data.get("min_value_cr") or 0.0), max_day=int(data.get("max_day") or 10),
             price_min=float(data.get("price_min") or 0.0), price_max=float(data.get("price_max") or 0.0),
+            basis=str(data.get("basis") or "WAITING"), flow_pct=float(data.get("flow_pct") or 60.0),
             active_hits={str(k): [tuple(h) for h in v] for k, v in hits.items() if isinstance(v, list)},
         )
     return PickRule(

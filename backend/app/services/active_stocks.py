@@ -14,6 +14,11 @@ Groww quote per stock and ranks them by what the crowd is doing:
   above it, today's buyers are in profit.
 * **Speed** — the price change since the previous scan, in % per minute
   (signed; none on the day's first scan or after a gap of over 30 minutes).
+* **Executed buy %** (`flow_buy`, owner's request: the waiting orders are only intentions) — of the shares that
+  actually traded over the last `flow_minutes` closed minutes (0 = since 09:15), the share bought at market,
+  estimated by trade_flow.py (the bots' recorded seconds by the tick rule, else each 1-minute candle's shape), plus
+  the whole day's (`flow_day_buy`). One 1-minute candle download per stock, for the busiest `flow_top` stocks by money
+  traded only (`flow_on`, on by default), after the quotes; Groww's rate limit goes to the bots first.
 
 Every finished pass can be kept (`on_done`, saved to the scan history as kind
 `active` by routes_scalp), so the page can show what any past scan said.
@@ -71,6 +76,11 @@ class ActiveRow:
     bias: str                       # LONG / SHORT / NONE
     speed_pct_min: float | None = None  # % per minute since the previous scan (signed)
     read_at: str | None = None          # IST time this stock's quote (order book) was read; the scan's as_of is its start
+    flow_buy: float | None = None       # executed buy % of the shares traded over the last flow_minutes (0-100)
+    flow_day_buy: float | None = None   # the same since 09:15
+    flow_src: str | None = None         # "ticks" / "candles" / "ticks + candles" (trade_flow.source_word)
+    flow_from: str | None = None        # HH:MM the window starts
+    flow_to: str | None = None          # HH:MM it ends (the last closed minute's end)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -157,7 +167,41 @@ SORTS = {
     "pressure": lambda r: abs((r.buy_share or 0.5) - 0.5),
     "speed": lambda r: abs(r.speed_pct_min or 0.0),
     "vwap": lambda r: abs(r.vwap_dist_pct or 0.0),
+    "flow": lambda r: abs((r.flow_buy if r.flow_buy is not None else 50.0) - 50.0),
 }
+
+FLOW_MINUTES = (0, 1, 3, 5, 10, 15, 30, 60)   # 0 = since 09:15
+DEFAULT_FLOW_MINUTES = 15
+DEFAULT_FLOW_TOP = 60
+FLOW_TOP_MAX = MAX_UNIVERSE
+
+
+def flow_read(symbol: str, frame, now_ts: float, minutes: int) -> dict:
+    """Executed buy % of one stock from today's 1-minute candles (ts, open, high, low, close, running volume): over
+    the last `minutes` closed minutes (0 = all of today's) and over the whole day. The forming minute is left out.
+    {} when there is no closed minute with volume."""
+    import trade_flow
+
+    if frame is None or len(frame) == 0:
+        return {}
+    closed = frame[frame["ts"].astype(float) + 60 <= float(now_ts)]
+    if len(closed) == 0:
+        return {}
+    first = float(closed["ts"].min())
+    end = float(closed["ts"].max()) + 60
+    start = first if not minutes else max(first, end - int(minutes) * 60)
+    day = trade_flow.minutes(symbol, closed, first, end)
+    win = [p for p in day if p["time"] >= start]
+    out: dict = {}
+    pct = trade_flow.share(win, "LONG")
+    if pct is None:
+        return {}
+    out["flow_buy"] = pct
+    out["flow_day_buy"] = trade_flow.share(day, "LONG")
+    out["flow_src"] = trade_flow.source_word(win)
+    when = lambda t: dt.datetime.fromtimestamp(t, IST).strftime("%H:%M")  # noqa: E731
+    out["flow_from"], out["flow_to"] = when(start), when(end)
+    return out
 
 
 def add_speed(rows: list[ActiveRow], prev: dict[str, float], prev_at: dt.datetime | None, now: dt.datetime) -> None:
@@ -179,6 +223,10 @@ def add_speed(rows: list[ActiveRow], prev: dict[str, float], prev_at: dt.datetim
 class AutoSettings:
     on: bool = True
     every_min: int = DEFAULT_EVERY
+    # Executed volume (flow_read): read for the busiest flow_top stocks, over the last flow_minutes (0 = the day).
+    flow_on: bool = True
+    flow_minutes: int = DEFAULT_FLOW_MINUTES
+    flow_top: int = DEFAULT_FLOW_TOP
 
 
 def auto_path() -> Path:
@@ -211,6 +259,18 @@ def clean_auto(raw: dict | None) -> AutoSettings:
     except (TypeError, ValueError):
         every = DEFAULT_EVERY
     out.every_min = every if every in EVERY_CHOICES else DEFAULT_EVERY
+    if "flow_on" in raw:
+        out.flow_on = bool(raw["flow_on"])
+    try:
+        mins = int(raw.get("flow_minutes", DEFAULT_FLOW_MINUTES))
+    except (TypeError, ValueError):
+        mins = DEFAULT_FLOW_MINUTES
+    out.flow_minutes = mins if mins in FLOW_MINUTES else DEFAULT_FLOW_MINUTES
+    try:
+        top = int(raw.get("flow_top", DEFAULT_FLOW_TOP))
+    except (TypeError, ValueError):
+        top = DEFAULT_FLOW_TOP
+    out.flow_top = max(10, min(FLOW_TOP_MAX, top))
     return out
 
 
@@ -267,11 +327,20 @@ class ActiveScanner:
             self.auto = load_auto()
         return self.auto
 
-    def set_auto(self, on: bool | None = None, every_min: int | None = None) -> AutoSettings:
+    def set_auto(self, on: bool | None = None, every_min: int | None = None, flow_on: bool | None = None,
+                 flow_minutes: int | None = None, flow_top: int | None = None) -> AutoSettings:
         cur = self.auto_settings
         raw = asdict(cur)
         if on is not None:
             raw["on"] = on
+        if flow_on is not None:
+            raw["flow_on"] = bool(flow_on)
+        if flow_minutes is not None:
+            if int(flow_minutes) not in FLOW_MINUTES:
+                raise ValueError(f"flow_minutes must be one of {', '.join(map(str, FLOW_MINUTES))}")
+            raw["flow_minutes"] = int(flow_minutes)
+        if flow_top is not None:
+            raw["flow_top"] = int(flow_top)
         if every_min is not None:
             if int(every_min) not in EVERY_CHOICES:
                 raise ValueError(f"every_min must be one of {', '.join(map(str, EVERY_CHOICES))}")
@@ -305,6 +374,10 @@ class ActiveScanner:
             "on": cfg.on,
             "every_min": cfg.every_min,
             "every_choices": list(EVERY_CHOICES),
+            "flow_on": cfg.flow_on,
+            "flow_minutes": cfg.flow_minutes,
+            "flow_top": cfg.flow_top,
+            "flow_choices": list(FLOW_MINUTES),
             "next_at": nxt.astimezone(IST).isoformat() if nxt and cfg.on and is_market_open() else None,
             "last_error": self.auto_error,
         }
@@ -390,6 +463,11 @@ class ActiveScanner:
                 # Stopped by the person (the card's Stop): the last finished scan stays on screen.
                 self.error = "Stopped by you. The last finished scan is still shown."
                 return
+            if self.auto_settings.flow_on and rows:
+                await self._read_flow(client, rows, now)
+                if self._stop:
+                    self.error = "Stopped by you. The last finished scan is still shown."
+                    return
             add_speed(rows, self._prev, self._prev_at, now)
             if rows:
                 self._prev = {r.symbol: r.ltp for r in rows}
@@ -407,6 +485,45 @@ class ActiveScanner:
                     log.exception("could not keep the most-active scan")
         finally:
             self.running = False
+
+    async def _read_flow(self, client, rows: list[ActiveRow], now: dt.datetime) -> None:
+        """Executed buy % (flow_read) for the busiest flow_top rows by money traded: one 1-minute candle download
+        each, today only. A stock whose candles cannot be read keeps no executed %."""
+        import pandas as pd
+
+        cfg = self.auto_settings
+        fetch = getattr(client, "get_candles_window", None)
+        if fetch is None:
+            return
+        busiest = sorted(rows, key=SORTS["value"], reverse=True)[: cfg.flow_top]
+        start = dt.datetime.combine(now.date(), SESSION_OPEN)
+        end = now.astimezone(IST).replace(tzinfo=None)
+        now_ts = now.timestamp()
+        sem = asyncio.Semaphore(CONCURRENCY)
+
+        async def one(row: ActiveRow) -> None:
+            async with sem:
+                if self.paused or self._stop:
+                    return
+                await groww_pressure.wait_for_bots()
+                try:
+                    bars = await fetch(row.symbol, 1, start, end)
+                except Exception:  # noqa: BLE001 — no candles just means no executed % for that stock
+                    return
+                finally:
+                    await asyncio.sleep(CALL_GAP_SEC)
+                if not bars:
+                    return
+                frame = pd.DataFrame(bars, columns=["ts", "open", "high", "low", "close", "volume"])
+                try:
+                    got = flow_read(row.symbol, frame, now_ts, cfg.flow_minutes)
+                except Exception:  # noqa: BLE001
+                    log.exception("executed volume read failed for %s", row.symbol)
+                    return
+                for key, value in got.items():
+                    setattr(row, key, value)
+
+        await asyncio.gather(*(one(r) for r in busiest))
 
     def stop_pass(self) -> bool:
         """Stop the pass that is running (manual or automatic). True when one was running."""
@@ -467,6 +584,8 @@ class ActiveScanner:
             "running": self.running,
             "error": self.error,
             "sort": sort if sort in SORTS else "value",
+            "flow": {"on": self.auto_settings.flow_on, "minutes": self.auto_settings.flow_minutes,
+                     "top": self.auto_settings.flow_top},
             "rows": [r.as_dict() for r in rows],
         }
 

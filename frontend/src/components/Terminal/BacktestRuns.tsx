@@ -106,7 +106,10 @@ export function pickRuleRows(run: { settings: Settings; days_total?: number; sta
     }
     if (src !== "TREND") {
       const who = s("pressure_side") === "BUY" ? "buyers" : s("pressure_side") === "SELL" ? "sellers" : "buyers or sellers";
-      rows.push(["Buyers / sellers", `${who} at ${n("pct") ?? 70}% or more of the waiting orders`]);
+      const basis = s("basis");
+      const wait = `${n("pct") ?? 70}% or more of the waiting orders`;
+      const done = `${n("flow_pct") ?? 60}% or more of the shares traded (executed)`;
+      rows.push(["Buyers / sellers", `${who} at ${basis === "EXECUTED" ? done : basis === "BOTH" ? `${wait} and ${done}` : wait}`]);
       rows.push(["Money traded at least", n("min_value_cr") ? `Rs ${n("min_value_cr")} cr` : "any"]);
       const days = Array.isArray(r.active_days) ? (r.active_days as string[]).length : 0;
       rows.push(["Days with saved Most active scans", String(days)]);
