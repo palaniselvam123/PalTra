@@ -1987,7 +1987,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     fill(flowSellRef.current, showFlowSell, flows.map((f) => (f == null ? null : 100 - f.buyPct)));
     // Over the candles (Indicators → "Draw the buyers / sellers lines over the candles"): the 0-100 scale spans the
     // candle area like the SMA lines, and the strips below no longer make room for it.
-    const pressureOver = look.pressureOnCandles;
+    const pressureOver = look.pressureOver;
     const strips = ([["atr", showAtr], ["rsi", showRsi], ["cvd", showCvd], ["pressure", showPressure && !pressureOver]] as const)
       .filter(([, on]) => on)
       .map(([id]) => id);
@@ -2048,6 +2048,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       const sym = (past?.symbol ?? symbol ?? "").toUpperCase();
       const shown = host === flowRef.current ? flows.map((f) => f != null) : host === flowSellRef.current ? flows.map((f) => f != null) : buyers.map((v) => v != null);
       const first = rows[0].time;
+      // A moment after the last candle on screen (another day or run of the same stock) gets no dot: it used to be
+      // pinned to the last candle, so every later trade piled up at the right edge.
+      const last = rows[rows.length - 1].time + bar * 60;
       // The candle a moment falls in that has a point on the host line (else the nearest earlier one with a point).
       const at = (sec: number) => {
         let pick: number | null = null;
@@ -2061,13 +2064,14 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         const when = text ? parseClock(text) : null;
         return when ? Math.floor(when.getTime() / 1000) : null;
       };
-      for (const t of allTrades ?? trades) {
+      // This book's trades only (the run being replayed, or the desk's mode), never every book the desk keeps.
+      for (const t of trades) {
         if ((t.symbol ?? "").toUpperCase() !== sym) continue;
         for (const [read, time, word, color, pos] of [
           [t.entry_flow, sec(t.entry_time), "in", "#38BDF8", "belowBar"],
           [t.exit_flow, sec(t.exit_time), "out", "#F59E0B", "aboveBar"],
         ] as const) {
-          if (time == null || time < first || read?.buy == null) continue;
+          if (time == null || time < first || time >= last || read?.buy == null) continue;
           const c = at(time);
           if (c == null) continue;
           const span = read.from != null && read.to != null ? ` ${hhmm(read.from)}-${hhmm(read.to)}` : "";
