@@ -238,6 +238,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "pressure_exit_pct": "FLOAT DEFAULT 55",
             "pressure_over_counter": "BOOLEAN DEFAULT 0",
             "pressure_exit_any": "BOOLEAN DEFAULT 0",
+            "pressure_exit_all": "BOOLEAN DEFAULT 0",
             "pressure_exit_flow": "FLOAT DEFAULT 0",
             "pressure_exit_flow_window": "INTEGER DEFAULT 3",
             "pressure_entry": "VARCHAR(8) DEFAULT 'OFF'",

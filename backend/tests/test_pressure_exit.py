@@ -76,12 +76,14 @@ def test_needs_a_fresh_read_after_entry_and_a_peak_above():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("source,on,closes", [
-    ("Auto-arm: Most active", True, True),
-    ("Trend quality", True, False),
-    ("Auto-arm: Most active", False, False),
+@pytest.mark.parametrize("source,on,closes,every", [
+    ("Auto-arm: Most active", True, True, False),
+    ("Trend quality", True, False, False),
+    ("Auto-arm: Most active", False, False, False),
+    ("Manual", True, True, True),        # pressure_exit_all: any armed stock
+    ("Manual", False, False, True),      # still needs the fade exit itself
 ])
-async def test_engine_closes_only_most_active_stocks(monkeypatch, tmp_path, source, on, closes):
+async def test_engine_closes_only_most_active_stocks(monkeypatch, tmp_path, source, on, closes, every):
     monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/p.db")
     import database
     from strategy_engine import OpenPosition, StrategyEngine
@@ -109,7 +111,7 @@ async def test_engine_closes_only_most_active_stocks(monkeypatch, tmp_path, sour
         exits.append(reason)
 
     monkeypatch.setattr(eng, "_exit_now", fake_exit)
-    cfg = type("C", (), {"symbol": "ACME", "pressure_exit": on, "pressure_exit_pct": 55,
+    cfg = type("C", (), {"symbol": "ACME", "pressure_exit": on, "pressure_exit_pct": 55, "pressure_exit_all": every,
                          "trade_sources": json.dumps({"ACME": source})})()
     await eng._watch_pressure_fade(cfg)
     assert exits == (["PRESSURE_FADE"] if closes else [])
@@ -519,3 +521,11 @@ def test_watch_from_entry_setting():
     assert not pressure_exit.from_entry(type("C", (), {})())
     assert pressure_exit.from_entry(type("C", (), {"pressure_exit_any": True})())
     assert ConfigUpdate(pressure_exit_any=True).pressure_exit_any is True
+
+
+def test_every_stock_setting():
+    from main import ConfigUpdate
+
+    assert not pressure_exit.every_stock(type("C", (), {})())
+    assert pressure_exit.every_stock(type("C", (), {"pressure_exit_all": True})())
+    assert ConfigUpdate(pressure_exit_all=True).pressure_exit_all is True

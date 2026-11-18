@@ -524,6 +524,8 @@ class BotConfig(Base):
     # The fade exit watches from the entry: closes once the trade's side is at or below the level even if it was never
     # above it (pressure_exit.from_entry; owner's BSE case).
     pressure_exit_any: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # The fade exit runs on every armed stock, not only Most active ones (pressure_exit.every_stock).
+    pressure_exit_all: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # The fade exit also needs the other side to have done this % of the shares traded over pressure_exit_flow_window
     # minutes (0 = the exit candle just closed; trade_flow.py); 0 % = not checked.
     pressure_exit_flow: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)

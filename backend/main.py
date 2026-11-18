@@ -871,6 +871,7 @@ class ConfigUpdate(BaseModel):
     pressure_exit_pct: float | None = Field(default=None, ge=30, le=95)
     pressure_over_counter: bool | None = None
     pressure_exit_any: bool | None = None
+    pressure_exit_all: bool | None = None
     pressure_exit_flow: float | None = Field(default=None, ge=0, le=95)
     pressure_exit_flow_window: int | None = Field(default=None, ge=0, le=60)
     pressure_entry: Literal["OFF", "CHECK", "AT_ARM"] | None = None
@@ -1959,6 +1960,7 @@ def _gap_dict(row) -> dict:
         "pressure_exit_pct": pressure_exit_mod.pct(row),
         "pressure_over_counter": bool(getattr(row, "pressure_over_counter", False)),
         "pressure_exit_any": bool(getattr(row, "pressure_exit_any", False)),
+        "pressure_exit_all": bool(getattr(row, "pressure_exit_all", False)),
         "pressure_exit_flow": pressure_exit_mod.exit_flow_pct(row),
         "pressure_exit_flow_window": pressure_exit_mod.exit_flow_window(row),
         "pressure_entry": pressure_exit_mod.entry_mode(row),
