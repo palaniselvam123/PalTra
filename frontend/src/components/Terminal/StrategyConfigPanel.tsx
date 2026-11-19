@@ -567,6 +567,14 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
       ? String(form.fade_unarm_rule ?? "PHASE").toUpperCase()
       : "PHASE",
     fade_unarm_min: Math.min(240, Math.max(5, Math.round(Number(form.fade_unarm_min ?? 30) || 30))),
+    tq_entry: Boolean(form.tq_entry),
+    tq_entry_score: Math.min(100, Math.max(0, Math.round(Number(form.tq_entry_score ?? 70)))) || 0,
+    tq_entry_phase: form.tq_entry_phase !== false,
+    tq_only: form.tq_only !== false,
+    tq_exit: Boolean(form.tq_exit),
+    tq_exit_score: Math.min(100, Math.max(0, Math.round(Number(form.tq_exit_score ?? 40)))) || 0,
+    tq_exit_phase: form.tq_exit_phase !== false,
+    tq_all: Boolean(form.tq_all),
     breakout_trend_checks: String(form.breakout_trend_checks ?? ""),
     breakout_trend_need: Math.min(7, Math.max(1, Math.round(Number(form.breakout_trend_need ?? 6) || 6))),
     use_or_volume: Boolean(form.use_or_volume),
@@ -1284,6 +1292,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         <div className="min-w-0">
           <OrderFlowCheck form={form} set={set} isOwn={isOwn} />
           <BuyersSellersMap form={form} set={set} />
+          <TrendTrade form={form} set={set} isOwn={isOwn} />
           <PressureEntry form={form} set={set} isOwn={isOwn} />
           <FlowTrigger form={form} set={set} isOwn={isOwn} />
           <Only s="sma trend turn colour">
@@ -3958,6 +3967,24 @@ export function activeRules(f: SmaConfig): Rule[] {
       text: `After ${Number(f.chop_losses)} losing trades on a stock today, it moves to Bot 2`,
       off: { chop_losses: "0" },
     });
+  if (f.tq_entry)
+    add({
+      group: "enter",
+      key: "tq_entry",
+      text: `${f.tq_all ? "Every armed stock" : "Trend quality auto-armed stocks"}: entered on the trend once its score is ${
+        f.tq_entry_score ?? 70
+      } or more${f.tq_entry_phase === false ? "" : " and the phase agrees"}${f.tq_only === false ? "" : " (only the trend opens them)"}`,
+      off: { tq_entry: false },
+    });
+  if (f.tq_exit)
+    add({
+      group: "exit",
+      key: "tq_exit",
+      text: `${f.tq_all ? "Every armed stock" : "Trend quality auto-armed stocks"}: closed when ${
+        f.tq_exit_phase === false ? "" : "the phase turns choppy or the other way, or "
+      }the trend score falls under ${f.tq_exit_score ?? 40}`,
+      off: { tq_exit: false },
+    });
   if (f.fade_unarm)
     add({
       group: "advanced",
@@ -6279,5 +6306,87 @@ function FlattenExit({
         </span>
       </span>
     </label>
+  );
+}
+
+/** Trade on the trend reading (backend trend_trade.py): enter on the trend score / phase, close when it fades. Owner's
+ *  request: Trend quality auto-armed stocks entered and closed on the trend, not on an SMA cross. */
+function TrendTrade({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const own = (["tq_entry", "tq_entry_score", "tq_entry_phase", "tq_only", "tq_exit", "tq_exit_score", "tq_exit_phase", "tq_all"] as const).some(
+    (k) => isOwn(k),
+  );
+  const box = "min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9";
+  const entry = Boolean(form.tq_entry);
+  const exit = Boolean(form.tq_exit);
+  const inScore = Number(form.tq_entry_score ?? 70);
+  const outScore = Number(form.tq_exit_score ?? 40);
+  return (
+    <div id="sma-trend-trade" className="mb-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-white/10">
+      <p className="text-sm text-slate-300">
+        {own && <OwnTag />}
+        <b className="text-slate-100">Trade on the trend score / phase</b> <NewTag id="set-trend-trade" />{" "}
+        <InfoTip label="About trading on the trend reading">
+          The Trend quality card&apos;s own reading, worked out by the bot on the candles it trades (the candle size above, or the
+          colour candles in candle colour mode) from the prices it already has: the trend score (0-100, the share of the 7
+          strong-trend checks passed for the side the SMAs point to) and the phase now (up, down or choppy). Entry: a flat stock is
+          bought when the trend points up with at least the score below (sold when down), and with the phase box ticked the phase
+          must point the same way. Asked once per closed candle; every entry check, the stop, flip, cut-off, caps, &quot;wait after an
+          exit&quot; and one LIVE bot per stock still apply. With &quot;only the trend opens trades&quot; the bot&apos;s own signal (SMA cross,
+          colour, turn…) no longer opens trades on these stocks; a cross still closes one. Exit: once per candle closed after the
+          entry, the trade closes when the phase turns choppy or the other way, or the score for its side falls under the second
+          level (the SMAs pointing the other way count as 0). &quot;Not enough candles yet&quot; never opens or closes on the phase. Stops,
+          targets and the square-off still work. Only stocks the Trend quality auto-arm armed, unless the last box is ticked.
+          PAPER and LIVE, backtests too (the auto-arm backtest&apos;s Trend quality picks count). Entry reason &quot;Trend quality&quot;,
+          exit &quot;TREND FADED&quot;.
+        </InfoTip>
+      </p>
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        <input type="checkbox" checked={entry} onChange={(e) => set("tq_entry", e.target.checked)} className="accent-[#10B981]" />
+        Enter when the trend score is at least
+        <input type="number" min={0} max={100} step={1} disabled={!entry} value={Number.isFinite(inScore) ? inScore : 70}
+          onChange={(e) => set("tq_entry_score", e.target.value)} className={box} aria-label="Trend score to enter at least" />
+      </label>
+      <div className={clsx("ml-6 space-y-1", !entry && "opacity-50")}>
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" disabled={!entry} checked={form.tq_entry_phase !== false} onChange={(e) => set("tq_entry_phase", e.target.checked)} />
+          and the phase points the same way (up to buy, down to sell)
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" disabled={!entry} checked={form.tq_only !== false} onChange={(e) => set("tq_only", e.target.checked)} />
+          Only the trend opens trades on these stocks (no SMA cross / colour entries)
+        </label>
+      </div>
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        <input type="checkbox" checked={exit} onChange={(e) => set("tq_exit", e.target.checked)} className="accent-[#10B981]" />
+        Close when the trend score falls under
+        <input type="number" min={0} max={100} step={1} disabled={!exit} value={Number.isFinite(outScore) ? outScore : 40}
+          onChange={(e) => set("tq_exit_score", e.target.value)} className={box} aria-label="Close when the trend score falls under" />
+      </label>
+      <label className={clsx("ml-6 flex items-center gap-2 text-sm text-slate-300", !exit && "opacity-50")}>
+        <input type="checkbox" disabled={!exit} checked={form.tq_exit_phase !== false} onChange={(e) => set("tq_exit_phase", e.target.checked)} />
+        or the phase turns choppy or the other way
+      </label>
+      <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+        <input type="checkbox" checked={Boolean(form.tq_all)} onChange={(e) => set("tq_all", e.target.checked)} />
+        Use it on every armed stock, not only Trend quality auto-armed ones
+      </label>
+      <p className="mt-1 text-xs text-slate-400">
+        Score = how many of the 7 strong-trend checks pass (5 of 7 = 71, 6 = 86, 7 = 100). Keep the close level well under the
+        entry level (for example 70 in, 40 out) so one weak candle does not close the trade.
+      </p>
+      {entry && exit && outScore >= inScore ? (
+        <p className="mt-1 text-xs text-amber-300">
+          The close level ({outScore}) is at or above the entry level ({inScore}): a trade may close on the first candle after it opens.
+        </p>
+      ) : null}
+    </div>
   );
 }

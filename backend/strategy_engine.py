@@ -107,6 +107,7 @@ import recovery
 import fade_unarm
 import pivots
 import pressure_exit
+import trend_trade
 import trade_flow
 import flow_exit
 import order_gate
@@ -185,6 +186,9 @@ def cross_exits(cfg) -> bool:
 
 # Why a trade opened, saved on TradeLog.entry_reason. A fill from a waiting limit adds
 # ":PULLBACK" (tall candle / breakout level) or ":EXTREME_LIMIT" (extreme_entry.py).
+# Candle boundaries from 09:15 IST (03:45 UTC on any day): the epoch second of 1970-01-01 09:15 IST.
+_TQ_ORIGIN = 9 * 3600 + 15 * 60 - 19_800
+
 ENTRY_REASONS = (
     "SMA_CROSS",
     "MOST_ACTIVE",
@@ -209,6 +213,7 @@ ENTRY_REASONS = (
     "EXIT_REVERSE",
     "MANUAL_REVERSE",
     "AUTO_REVIEW_REVERSE",
+    "TREND_QUALITY",
 )
 
 
@@ -439,6 +444,7 @@ SNAPSHOT_FIELDS = (
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "breakout_min_profit_pct",
     "breakout_min_profit_rs", "chop_losses", "fade_unarm", "fade_unarm_rule", "fade_unarm_min",
+    "tq_entry", "tq_entry_score", "tq_entry_phase", "tq_only", "tq_exit", "tq_exit_score", "tq_exit_phase", "tq_all",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "colour_inside_minutes", "colour_inside_body", "colour_exit_on", "colour_exit_count", "colour_exit_body", "colour_exit_inside", "colour_force", "colour_pull", "colour_pull_candles", "colour_pull_market", "candle_minutes",
     "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks", "nth_dir_rule",
     "exit_candle_minutes",
@@ -1424,6 +1430,11 @@ class StrategyEngine:
         # Most active entry at once (pressure_exit.entry_mode AT_ARM): symbol -> the IST day it was entered / refused.
         self._pe_done: dict[str, dt.date] = {}
         self._pe_note: dict[str, str] = {}
+        # Trade on the trend reading (trend_trade.py): the candle last asked per stock, the latest note, and per trade
+        # the exit candle last judged (memory only).
+        self._tq_tried: dict[str, int] = {}
+        self._tq_note: dict[str, str] = {}
+        self._tq_judged: dict[tuple, int] = {}
         self._review_bar: dict[str, int] = {}
         self._review_episode: dict[str, dict] = {}
         self.reviews: list[dict] = []
@@ -1726,6 +1737,8 @@ class StrategyEngine:
             self._trend_sent.clear()
             self._stock_losses.clear()
             self._fade_since.clear()
+            self._tq_tried.clear()
+            self._tq_judged.clear()
             self._warned.clear()
             self._rejects.clear()
             self._reject_sent.clear()
@@ -1935,6 +1948,9 @@ class StrategyEngine:
                 await self._pressure_entry_pass(symbol, cfg, now)
                 if self.status != "RUNNING":
                     break
+                await self._trend_entry_pass(symbol, frame, cfg, now)
+                if self.status != "RUNNING":
+                    break
                 await self._flow_trigger_pass(symbol, frame, cfg, now)
                 if self.status != "RUNNING":
                     break
@@ -1986,6 +2002,9 @@ class StrategyEngine:
             # After the candle's own signals (a fresh cross goes first): a Most active stock is entered at once while
             # its buyers / sellers hold, then still flat = always in enters now.
             await self._pressure_entry_pass(symbol, cfg, now)
+            if self.status != "RUNNING":
+                break
+            await self._trend_entry_pass(symbol, frame, cfg, now)
             if self.status != "RUNNING":
                 break
             await self._flow_trigger_pass(symbol, frame, cfg, now)
@@ -2072,6 +2091,7 @@ class StrategyEngine:
         await self._watch_gap_fade(symbol_cfg)
         await self._watch_pivot_target(symbol_cfg)
         await self._watch_pressure_fade(symbol_cfg)
+        await self._watch_trend_exit(symbol_cfg)
         await self._watch_flow_exit(symbol_cfg)
         await self._watch_order_gate(symbol_cfg)
 
@@ -3485,6 +3505,8 @@ class StrategyEngine:
                 return "closed on cross — trade cap locks the day"
             if (stock_cap := self._stock_cap_hit(cfg)) is not None:
                 return f"closed on {signal} — {stock_cap}"
+            if (trend_only := self._trend_only_hit(cfg, why)) is not None:
+                return f"closed on {signal} — {trend_only}"
             if (resting := self._reentry_wait_hit(cfg)) is not None:
                 return f"closed on {signal} — {resting}"
             if (cfg.symbol or "").upper() in self._recovery_blocked:
@@ -3506,6 +3528,8 @@ class StrategyEngine:
             return "entry blocked — trade cap"
         if (stock_cap := self._stock_cap_hit(cfg)) is not None:
             return f"{signal} ignored — {stock_cap}"
+        if (trend_only := self._trend_only_hit(cfg, why)) is not None:
+            return f"{signal} ignored — {trend_only}"
         if (resting := self._reentry_wait_hit(cfg)) is not None:
             return f"{signal} ignored — {resting}"
         if (cfg.symbol or "").upper() in self._recovery_blocked:
@@ -6878,6 +6902,89 @@ class StrategyEngine:
         self.halt_reason = ""
         self.last_signal = f"Trade cap raised to {cap}. Press Start. Open positions stay open."
         return True
+
+    def _trend_only_hit(self, cfg, why: str | None) -> str | None:
+        """Only the trend reading opens trades on this stock (trend_trade.py, `tq_only`): why this signal may not."""
+        name = (getattr(cfg, "symbol", "") or "").upper()
+        return trend_trade.blocks(cfg, trade_sources(cfg).get(name), why)
+
+    def _trend_read(self, symbol: str, cfg) -> dict | None:
+        """The Trend quality reading (phase, trend score) of one stock on the candles the bot trades (cached per
+        closed candle, from the 1-minute tape it already holds)."""
+        own = stock_overrides(cfg, symbol)
+        fast = int(own.get("sma_fast") or cfg.sma_fast or 9)
+        slow = int(own.get("sma_slow") or cfg.sma_slow or 21)
+        return stock_regime.cached(id(self), symbol, self._tapes.get(symbol), fast, slow, self._exit_minutes(symbol, cfg), self._now())
+
+    async def _trend_entry_pass(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> None:
+        """Trade on the trend reading (trend_trade.py): a flat armed stock is entered on the trend's side once its trend
+        score (and, ticked, its phase) agrees. Asked once per closed candle of the candles the bot trades; everything else
+        goes through apply_signal (every entry check, the stop, flip, caps, cut-off, one LIVE bot per stock)."""
+        symbol_cfg = _cfg_for(cfg, symbol)
+        if not trend_trade.entry_on(symbol_cfg) or self.status != "RUNNING":
+            return
+        if not trend_trade.applies(symbol_cfg, trade_sources(symbol_cfg).get(symbol)):
+            return
+        if symbol in self.positions or symbol in self._pullback:
+            return
+        if not market_is_open(now) or now.time() < OPENING_BUFFER_END or now.time() >= _entry_cutoff(symbol_cfg):
+            return
+        if not self._still_armed(symbol):
+            return
+        slot = (int(now.timestamp()) - _TQ_ORIGIN) // (max(1, int(self._exit_minutes(symbol, symbol_cfg))) * 60)
+        if self._tq_tried.get(symbol) == slot:
+            return
+        self._tq_tried[symbol] = slot
+        side, note = trend_trade.entry_call(self._trend_read(symbol, symbol_cfg), symbol_cfg)
+        if side is None:
+            text = f"{symbol} Trend quality entry: {note}"
+            if self._tq_note.get(symbol) != text:
+                self._tq_note[symbol] = text
+                self._signals[symbol] = text
+            return
+        enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
+        self._focus = symbol
+        self.ltp = self._ltps.get(symbol, self.ltp)
+        result = await self.apply_signal(
+            "BULLISH" if side == "LONG" else "BEARISH", enriched, symbol_cfg, now, alert=False, why=trend_trade.ENTRY_REASON
+        )
+        if result.startswith("blocked — order PENDING"):
+            self._tq_tried.pop(symbol, None)
+            return
+        text = f"{result} — Trend quality entry ({note})"
+        self._tq_note[symbol] = text
+        self._signals[symbol] = text
+        self.last_signal = text
+
+    async def _watch_trend_exit(self, cfg: BotConfig) -> None:
+        """Close a trade once its trend fades (trend_trade.py): the phase turns choppy or the other way, or the trend
+        score for its side falls under the level. Judged once per candle closed after the entry."""
+        pos = self.position
+        if pos is None or not trend_trade.exit_on(cfg) or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        if not trend_trade.applies(cfg, trade_sources(cfg).get(symbol)):
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other exits).
+            return
+        now = self._now()
+        span = max(1, int(self._exit_minutes(symbol, cfg))) * 60
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        # The newest candle boundary, counted from 09:15 IST like the bot's candles (candles.resample).
+        last_closed = _TQ_ORIGIN + ((int(now.timestamp()) - _TQ_ORIGIN) // span) * span
+        if last_closed <= int(opened.timestamp()):
+            return  # no candle has closed since the entry yet
+        key = (symbol, int(pos.trade_id))
+        if self._tq_judged.get(key) == last_closed:
+            return
+        self._tq_judged[key] = last_closed
+        hit, note = trend_trade.exit_call(self._trend_read(symbol, cfg), pos.signal_direction, cfg)
+        if not hit:
+            self._tq_note[symbol] = f"{symbol} in a trade: {note}"
+            return
+        self._signals[symbol] = f"{symbol} Trend quality exit — {note}"
+        await self._exit_now(cfg, self.ltp, trend_trade.EXIT_REASON)
 
     def _stock_cap_hit(self, cfg) -> str | None:
         """The per-stock daily cap (max_trades_per_stock, 0 = off): why this stock takes no more entries today."""

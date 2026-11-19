@@ -7,7 +7,10 @@ tape the bot already holds (`StrategyEngine._tapes`), so no extra Groww call:
 * `phase` BULL / BEAR / CHOP now, since when and its move, from `trend_phases` (efficiency over 6 candles and an ATR
   move, runs of 5+ candles).
 
-Cached per stock until a new candle closes. Nothing in the strategy reads it; no order path.
+Cached per stock until a new candle closes. The trend trade rule (trend_trade.py) and the fade un-arm read it;
+no order path.
+
+* `trend_side` / `trend_score` / `trend`: the card's strong-trend read (`trend_strength.read`, 7 checks).
 """
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ import pandas as pd
 
 import chop_scan
 import trend_phases
+import trend_strength
 from cross_scan import closed_bars
 from indicators import enrich
 
@@ -43,7 +47,15 @@ def read(frame_1m: pd.DataFrame | None, sma_fast: int, sma_slow: int, minutes: i
             avg_gap = sum(gaps) / len(gaps)
     found = trend_phases.phases(enriched, today * 86_400 - 19_800 + SESSION_OPEN_SEC)
     now_phase = found[-1] if found else None
+    # The Trend quality card's trend score (share of its 7 checks passed for the SMAs' side), read by trend_trade.py.
+    try:
+        strong = trend_strength.read(enriched, chop_scan._vwap_today(frame_1m, now), now=now, tape=frame_1m)
+    except Exception:  # noqa: BLE001 - a read that fails is no trend
+        strong = {}
     return {
+        "trend_side": strong.get("trend_side"),
+        "trend_score": strong.get("trend_score"),
+        "trend": strong.get("trend"),
         "minutes": int(minutes),
         "score": chop_scan.score_for(len(hits), minutes_since, avg_gap),
         "crosses": len(hits),

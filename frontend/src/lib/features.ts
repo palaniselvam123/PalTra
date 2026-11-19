@@ -641,7 +641,8 @@ export const FEATURES: Feature[] = [
     purpose: "Close a trade when the SMA 9 line stops falling (or rising) after a steep run, before it turns and before the SMA cross. One tick box, no slope numbers to type." },  { id: "bt-queue", area: "trend", added: "2026-11-19", pr: 482, href: "/scalp/#backtest", where: "Scalp → Backtest → Auto-arm replay → Backtest queue", title: "Backtest queue: auto-arm backtests one after another",
     purpose: "Queue several auto-arm backtests (one or more bots, any days) and they play one after another at full speed, so the backtest server never plays two at once and stays responsive." },
   { id: "bt-schedule", area: "trend", added: "2026-11-19", pr: 482, href: "/scalp/#backtest", where: "Scalp → Backtest → Auto-arm replay → Every weekday, backtest today", title: "Schedule a daily auto-arm backtest",
-    purpose: "Every weekday after a time you pick, today's auto-arm backtest is queued on the ticked bots with the settings you saved; the desk wakes the backtest server for it." },
+    purpose: "Every weekday after a time you pick, today's auto-arm backtest is queued on the ticked bots with the settings you saved; the desk wakes the backtest server for it." },  { id: "set-trend-trade", area: "settings", added: "2026-11-20", href: S("sma-trend-trade"), where: "Settings → 1. When to enter → Trade on the trend score / phase", title: "Trade Trend quality stocks on the trend score / phase",
+    purpose: "Trend quality auto-armed stocks (or every armed stock) are entered when the trend score and phase agree, and closed when the phase turns or the score drops, instead of on an SMA cross." },
 ];
 
 /** Today in IST, YYYY-MM-DD. */
@@ -672,7 +673,7 @@ export function featureById(id: string): Feature | undefined {
 const ANCHOR_GROUP: Record<string, string> = {
   "sma-candle-interval": "enter", "sma-day-extreme": "enter", "sma-colour-exit": "enter", "sma-colour-force": "enter",
   "sma-fresh": "check", "sma-exit-candle": "exit", "sma-slope-candle": "exit", "sma-small-colour": "exit",
-  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced", "sma-order-flow": "enter", "sma-flatten-exit": "exit",
+  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced", "sma-order-flow": "enter", "sma-flatten-exit": "exit", "sma-trend-trade": "enter",
 };
 
 /** The strategy form's group (enter, check, exit, gap, stop, risk, advanced) a Settings link opens, or null. */

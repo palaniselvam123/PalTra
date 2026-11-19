@@ -404,6 +404,15 @@ export type SmaConfig = {
   fade_unarm?: boolean;
   fade_unarm_rule?: "PHASE" | "SCORE" | "EITHER" | string;
   fade_unarm_min?: number;
+  /** Trade on the trend reading (trend_trade.py): enter on the trend score / phase, close when it fades; which stocks. */
+  tq_entry?: boolean;
+  tq_entry_score?: number;
+  tq_entry_phase?: boolean;
+  tq_only?: boolean;
+  tq_exit?: boolean;
+  tq_exit_score?: number;
+  tq_exit_phase?: boolean;
+  tq_all?: boolean;
   /** The strong-trend rule's checks ("stack:must,vwap:use,run:off,…") and how many must pass (1-7). */
   breakout_trend_checks?: string;
   breakout_trend_need?: number;
