@@ -3,6 +3,7 @@ import "./globals.css";
 import { ChatWidget } from "@/components/Chat/ChatWidget";
 import { NotificationProvider } from "@/components/Notifications/NotificationProvider";
 import { ServerAccent } from "@/components/ServerAccent";
+import { ServerStatus } from "@/components/Layout/ServerStatus";
 
 export const metadata: Metadata = {
   // Each route's layout names the page ("Scalp · PalTra"); the dashboard is plain "PalTra". The terminal's
@@ -45,6 +46,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <NotificationProvider>
           {children}
           <ChatWidget />
+          <ServerStatus />
         </NotificationProvider>
       </body>
     </html>
