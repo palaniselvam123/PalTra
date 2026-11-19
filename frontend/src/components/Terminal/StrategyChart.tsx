@@ -610,7 +610,54 @@ function flowWhy(
   return parts.join(" ");
 }
 
-function whyNoTrade(p: {
+type GateNote = NonNullable<ChartPayload["gate_notes"]>[number];
+
+/** What the simple order-flow check (order_gate.py) read on this candle, in words: an entry refused / allowed at a
+ * signal, or while in a trade why the candle did / did not close it. In a trade with nothing judged on this candle, the
+ * latest reading since the entry (the check judges each candle once it has closed). */
+function gateWhy(p: { c: Candle; bar: number; notes: GateNote[] | null; filters?: ChartFilters; heldSince: number | null }): string {
+  const { c, bar, notes, filters, heldSince } = p;
+  const list = notes ?? [];
+  const end = c.time + bar * 60;
+  const here = list.filter((n) => n.end > c.time && n.end <= end).sort((a, b) => b.end - a.end);
+  const say = (n: GateNote) => `Order-flow check at ${istClock(n.end)}: ${n.text}.`;
+  if (heldSince != null) {
+    const exitOn = Boolean(filters?.og_exit_exec || filters?.og_exit_wait);
+    if (!exitOn) return "";
+    const exitNote = here.find((n) => n.kind === "exit");
+    if (exitNote) {
+      return exitNote.ok
+        ? `${say(exitNote)} So the order-flow exit did not close the trade on this candle.`
+        : say(exitNote);
+    }
+    const before = list.filter((n) => n.kind === "exit" && n.end > heldSince && n.end <= end).sort((a, b) => b.end - a.end)[0];
+    const need = [filters?.og_exit_exec ? `executed ≤ ${filters.og_exit_exec_pct ?? 45}%` : "", filters?.og_exit_wait ? `waiting ≤ ${filters.og_exit_wait_pct ?? 45}%` : ""]
+      .filter(Boolean)
+      .join(" and ");
+    if (before) return `${say(before)} (Judged once each candle closes; it closes the trade only at ${need}.)`;
+    return `Order-flow exit: nothing judged yet — it reads each whole candle after the entry once it closes, and closes the trade at ${need}.`;
+  }
+  const entryNote = here.find((n) => n.kind === "entry");
+  return entryNote ? say(entryNote) : "";
+}
+
+function whyNoTrade(p: Parameters<typeof baseWhy>[0] & { gateNotes?: GateNote[] | null }): string {
+  const base = baseWhy(p);
+  const c = p.rows[p.i];
+  if (!c || p.forming) return base;
+  // Held at this candle? The latest entry before the candle's end with no exit before the candle's start.
+  const end = c.time + p.bar * 60;
+  const entry = p.markers.filter((m) => m.kind === "ENTRY" && m.time < end).sort((a, b) => b.time - a.time)[0];
+  const exit = entry ? p.markers.find((m) => m.kind === "EXIT" && m.trade_ref === entry.trade_ref && m.time >= entry.time) : undefined;
+  const held = entry && (!exit || exit.time >= c.time) ? entry.time : null;
+  const gate = gateWhy({ c, bar: p.bar, notes: p.gateNotes ?? null, filters: p.filters, heldSince: held });
+  if (!gate || base.includes(gate)) return base;
+  // A refused cross already quotes the check's words: keep the line short.
+  if (held == null && base.includes("order-flow check:")) return base;
+  return base ? `${base} ${gate}` : gate;
+}
+
+function baseWhy(p: {
   rows: Candle[];
   i: number;
   forming: boolean;
@@ -2399,6 +2446,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           botBar: botCandle,
           flow: view?.flow ?? null,
           flowDecisions: view?.flow_decisions ?? null,
+          gateNotes: view?.gate_notes ?? null,
         })
       : "";
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);

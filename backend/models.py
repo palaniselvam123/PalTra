@@ -550,6 +550,16 @@ class BotConfig(Base):
     flow_exit_book: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # EXIT = the executed volume closes the trade itself; CONFIRM = it only lets the other signal exits close (flow_exit.py).
     flow_exit_mode: Mapped[str | None] = mapped_column(String(10), nullable=True, default="EXIT")
+    # Simple order-flow check (order_gate.py): tick executed and / or waiting for the entry and the exit, each with a
+    # typed %. Entry: every ticked number at least its %. Exit: close once every ticked number is at or under its %.
+    og_entry_exec: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    og_entry_exec_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=60.0)
+    og_entry_wait: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    og_entry_wait_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=60.0)
+    og_exit_exec: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    og_exit_exec_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=45.0)
+    og_exit_wait: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    og_exit_wait_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=45.0)
     # Executed volume entry check (flow_exit.py): the order's own side did flow_entry_pct % of the shares traded over the
     # last flow_entry_window minutes (0 = one exit candle's length). Per bot and per stock.
     flow_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

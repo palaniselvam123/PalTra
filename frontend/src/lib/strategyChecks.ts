@@ -48,6 +48,8 @@ export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
     !cfg.decel_exit &&
     !(cfg.pivot_target === "R1" || cfg.pivot_target === "R2") &&
     !(cfg.flow_exit && String(cfg.flow_exit_mode ?? "EXIT").toUpperCase() !== "CONFIRM") &&
+    !cfg.og_exit_exec &&
+    !cfg.og_exit_wait &&
     !cfg.slow_sma_exit
   );
 }
@@ -237,6 +239,12 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
   if (cfg.pivot_target === "R1" || cfg.pivot_target === "R2") out.push({ name: `Pivot target (${cfg.pivot_target})`, when: price, code: "PIVOT_TARGET" });
   if (cfg.flow_exit && String(cfg.flow_exit_mode ?? "EXIT").toUpperCase() !== "CONFIRM")
     out.push({ name: `Executed volume: the other side did ${cfg.flow_exit_pct ?? 60}% of the shares traded`, when: Number(cfg.flow_exit_window ?? 3) === 0 ? candle : "each closed minute", code: "FLOW_EXIT" });
+  if (cfg.og_exit_exec || cfg.og_exit_wait)
+    out.push({
+      name: `Order-flow check: own side ${[cfg.og_exit_exec ? `executed ≤ ${cfg.og_exit_exec_pct ?? 45}%` : "", cfg.og_exit_wait ? `waiting ≤ ${cfg.og_exit_wait_pct ?? 45}%` : ""].filter(Boolean).join(" and ")}`,
+      when: candle,
+      code: "ORDER_FLOW_EXIT",
+    });
   if (cfg.pressure_exit) out.push({ name: `Most active stocks: buyers / sellers fade to ${cfg.pressure_exit_pct ?? 55}%`, when: "each Most active scan", code: "PRESSURE_FADE" });
   out.push({ name: `Square-off at ${cfg.square_off_time ?? "15:15"}`, when: "time", code: "EOD_SQUARE_OFF" });
   const mode = String(cfg.entry_mode ?? "SMA").toUpperCase();

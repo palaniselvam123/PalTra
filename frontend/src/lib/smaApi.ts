@@ -344,6 +344,15 @@ export type SmaConfig = {
   flow_exit_book?: boolean;
   /** EXIT = close the trade itself; CONFIRM = only let the other signal exits close when it agrees. */
   flow_exit_mode?: "EXIT" | "CONFIRM";
+  /** Simple order-flow check (order_gate.py): executed / waiting tick boxes for the entry and the exit, typed %. */
+  og_entry_exec?: boolean;
+  og_entry_exec_pct?: number;
+  og_entry_wait?: boolean;
+  og_entry_wait_pct?: number;
+  og_exit_exec?: boolean;
+  og_exit_exec_pct?: number;
+  og_exit_wait?: boolean;
+  og_exit_wait_pct?: number;
   /** Executed volume entry check (flow_exit.py): the order's own side's % of the shares traded over the window. */
   /** Executed volume starts the trade; the waiting orders are the check (flow_exit.trigger_*). */
   flow_trigger?: boolean;
@@ -1856,6 +1865,15 @@ export type ChartFilters = {
   flow_entry?: boolean;
   flow_entry_pct?: number;
   flow_entry_window?: number;
+  /** Simple order-flow check (order_gate.py), for the chart's why line. */
+  og_entry_exec?: boolean;
+  og_entry_exec_pct?: number;
+  og_entry_wait?: boolean;
+  og_entry_wait_pct?: number;
+  og_exit_exec?: boolean;
+  og_exit_exec_pct?: number;
+  og_exit_wait?: boolean;
+  og_exit_wait_pct?: number;
   candle_minutes?: number;
   reentry_wait_candles?: number;
   max_trades_per_stock?: number;
@@ -2048,6 +2066,8 @@ export type ChartPayload = {
   flow?: { time: number; buy: number; sell: number; src: "T" | "C" }[];
   /** "Executed volume only": what the bot decided at each window end it judged (entered / not taken and why); display only. */
   flow_decisions?: { end: number; text: string; buy?: number; level?: number; src?: string; side?: string }[];
+  /** Simple order-flow check: what it read at each candle (kind "entry" at a signal, "exit" each candle in a trade). */
+  gate_notes?: { end: number; kind: "entry" | "exit"; text: string; exec?: number; wait?: number; side?: string; ok?: boolean }[];
 };
 
 export type TradeRow = {
