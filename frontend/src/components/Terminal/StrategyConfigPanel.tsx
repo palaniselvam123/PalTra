@@ -2261,6 +2261,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </InfoTip>
             </span>
           </label>
+          <FlattenExit form={form} set={set} isOwn={isOwn} />
           <PressureExit form={form} set={set} isOwn={isOwn} />
           <FlowExit form={form} set={set} isOwn={isOwn} />
           <Only s="sma">
@@ -6210,5 +6211,73 @@ function BuyersSellersMap({
         only change the form; Save applies them.
       </div>
     </details>
+  );
+}
+
+/** Owner's request (FORCEMOT 18 Nov, 15-minute short): one tick box, no numbers, for "close when the SMA 9 line
+ *  stops falling (rising) after a steep run". It is the deceleration guard (`decel_exit`, decel_guard.py) with its
+ *  tested default numbers: ticking it puts those numbers back in the form; the full controls stay further down. */
+const FLATTEN_DEFAULTS = {
+  decel_lookback: 2,
+  decel_arm_atr: 0.1,
+  decel_drop_pct: 50,
+  decel_min_atr: 0.02,
+  decel_candles: 2,
+  decel_confirm: "CLOSE",
+  decel_pierce_atr: 0,
+  decel_peak_from: "ENTRY",
+} as const;
+
+function FlattenExit({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean | number | number[]) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const fast = form.sma_fast ?? 9;
+  const on = Boolean(form.decel_exit);
+  const custom =
+    on &&
+    (Object.keys(FLATTEN_DEFAULTS) as (keyof typeof FLATTEN_DEFAULTS)[]).some(
+      (k) => String(form[k] ?? FLATTEN_DEFAULTS[k]) !== String(FLATTEN_DEFAULTS[k])
+    );
+  const toggle = (checked: boolean) => {
+    set("decel_exit", checked);
+    if (checked) {
+      for (const [k, v] of Object.entries(FLATTEN_DEFAULTS)) set(k as keyof SmaConfig, v);
+    }
+  };
+  return (
+    <label
+      id="sma-flatten-exit"
+      className={clsx(
+        "mt-2 flex items-start gap-2 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset",
+        on ? "bg-emerald-400/[0.06] ring-emerald-400/30" : "ring-white/10"
+      )}
+    >
+      <input type="checkbox" checked={on} onChange={(e) => toggle(e.target.checked)} className="mt-1 accent-[#10B981]" />
+      <span>
+        {isOwn("decel_exit") && <OwnTag />}
+        <b className="text-slate-100">Close when the SMA {fast} line flattens after a steep run</b> <NewTag id="set-flatten-exit" />{" "}
+        <InfoTip label="About closing when the SMA line flattens">
+          One tick, no numbers. While the SMA {fast} line falls steeply under a sell (or climbs steeply under a buy), the
+          trade is left alone. When the line clearly loses its angle (about half its steepest since the entry, still
+          flattening for two candles) and a candle closes back through the line against the trade, the trade closes at the
+          next candle (exit reason SMA9_DECEL), before the line turns and before the SMA cross. Example: FORCEMOT on
+          18 Nov, 15-minute candles, short at 12:15: the line fell steeply to 13:30, flattened, and this closes on the
+          14:00 candle near 19,600, an hour before the jump to 20,067. The slope is measured against the stock&apos;s ATR,
+          so the same tick fits any price. It is the &quot;Deceleration guard&quot; (Reversals style, further down), set to
+          its tested numbers; in a trend with pauses it can also close on a pause, so try it on a Replay first.
+        </InfoTip>
+        <span className="mt-0.5 block text-xs text-slate-400">
+          {custom
+            ? "On, with your own numbers from the Deceleration guard below. Untick and tick again to go back to the standard ones."
+            : "Exits before the line turns against the trade. Nothing to type."}
+        </span>
+      </span>
+    </label>
   );
 }
