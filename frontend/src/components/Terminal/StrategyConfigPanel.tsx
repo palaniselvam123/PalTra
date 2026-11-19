@@ -507,6 +507,14 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     flow_entry: Boolean(form.flow_entry),
     flow_entry_pct: Math.min(95, Math.max(50, Number(form.flow_entry_pct ?? 55) || 55)),
     flow_entry_window: flowWindow(form.flow_entry_window),
+    og_entry_exec: Boolean(form.og_entry_exec),
+    og_entry_exec_pct: gatePct(form.og_entry_exec_pct, 60),
+    og_entry_wait: Boolean(form.og_entry_wait),
+    og_entry_wait_pct: gatePct(form.og_entry_wait_pct, 60),
+    og_exit_exec: Boolean(form.og_exit_exec),
+    og_exit_exec_pct: gatePct(form.og_exit_exec_pct, 45),
+    og_exit_wait: Boolean(form.og_exit_wait),
+    og_exit_wait_pct: gatePct(form.og_exit_wait_pct, 45),
     stop_plan: Boolean(form.stop_plan),
     decel_exit: Boolean(form.decel_exit),
     decel_lookback: Math.min(10, Math.max(1, Math.round(Number(form.decel_lookback ?? 2) || 2))),
@@ -1274,6 +1282,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
         </div>
         <div className="min-w-0">
+          <OrderFlowCheck form={form} set={set} isOwn={isOwn} />
           <BuyersSellersMap form={form} set={set} />
           <PressureEntry form={form} set={set} isOwn={isOwn} />
           <FlowTrigger form={form} set={set} isOwn={isOwn} />
@@ -3789,6 +3798,20 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (f.flow_entry && flowOnly)
     add({ group: "check", key: "flow_entry", text: "Executed volume entry check — not used: in Executed volume only mode the entry's own % and window decide (a duplicate, turn it off)", off: { flow_entry: false }, warn: true });
   else check("flow_entry", f.flow_entry, `Executed volume: the order's own side did ${f.flow_entry_pct ?? 55}% of the shares traded ${Number(f.flow_entry_window ?? 3) === 0 ? "in the last exit candle" : `in the last ${f.flow_entry_window ?? 3} min`} (estimated)`);
+  if (f.og_entry_exec || f.og_entry_wait)
+    add({
+      group: "check",
+      key: "og_entry",
+      text: `Order-flow check: the order's side ${[f.og_entry_exec ? `executed ≥ ${f.og_entry_exec_pct ?? 60}% in the last candle` : "", f.og_entry_wait ? `waiting ≥ ${f.og_entry_wait_pct ?? 60}%` : ""].filter(Boolean).join(" and ")}`,
+      off: { og_entry_exec: false, og_entry_wait: false },
+    });
+  if (f.og_exit_exec || f.og_exit_wait)
+    add({
+      group: "exit",
+      key: "og_exit",
+      text: `Order-flow check: close when the trade's side is ${[f.og_exit_exec ? `executed ≤ ${f.og_exit_exec_pct ?? 45}%` : "", f.og_exit_wait ? `waiting ≤ ${f.og_exit_wait_pct ?? 45}%` : ""].filter(Boolean).join(" and ")} in a closed candle`,
+      off: { og_exit_exec: false, og_exit_wait: false },
+    });
   check(
     "use_high52",
     f.use_high52,
@@ -5389,6 +5412,107 @@ function FlowEntry({
           (a duplicate).
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/** A typed order-flow % as the API takes it: 1-99, else the default. */
+function gatePct(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.min(99, Math.max(1, n)) : fallback;
+}
+
+/** Simple order-flow check (order_gate.py; owner's request: the waiting / executed settings were hard to set up
+ * together). Four tick boxes, each with a typed %: what is ticked is read, what is not ticked is not. */
+function OrderFlowCheck({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const own = (["og_entry_exec", "og_entry_exec_pct", "og_entry_wait", "og_entry_wait_pct", "og_exit_exec", "og_exit_exec_pct", "og_exit_wait", "og_exit_wait_pct"] as const).some(isOwn);
+  const row = (tick: keyof SmaConfig, pctKey: keyof SmaConfig, fallback: number, word: string, rule: string, label: string) => {
+    const on = Boolean(form[tick]);
+    const raw = form[pctKey];
+    return (
+      <label className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
+        <input type="checkbox" className="accent-[#10B981]" checked={on} onChange={(e) => set(tick, e.target.checked)} />
+        <span className="min-w-[5.5rem] font-medium text-slate-200">{word}</span>
+        <span className={clsx(!on && "opacity-50")}>{rule}</span>
+        <input
+          type="number"
+          min={1}
+          max={99}
+          step={1}
+          disabled={!on}
+          value={raw == null || raw === "" ? fallback : String(raw)}
+          onChange={(e) => set(pctKey, e.target.value)}
+          aria-label={label}
+          className="min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9"
+        />
+        <span className={clsx(!on && "opacity-50")}>%</span>
+      </label>
+    );
+  };
+  const eExec = Number(form.og_entry_exec_pct ?? 60);
+  const eWait = Number(form.og_entry_wait_pct ?? 60);
+  const xExec = Number(form.og_exit_exec_pct ?? 45);
+  const xWait = Number(form.og_exit_wait_pct ?? 45);
+  const entryTicks = [form.og_entry_exec ? `executed ≥ ${eExec}%` : "", form.og_entry_wait ? `waiting ≥ ${eWait}%` : ""].filter(Boolean);
+  const exitTicks = [form.og_exit_exec ? `executed ≤ ${xExec}%` : "", form.og_exit_wait ? `waiting ≤ ${xWait}%` : ""].filter(Boolean);
+  return (
+    <div id="sma-order-flow" className="mb-4 scroll-mt-24 rounded-lg border border-emerald-400/25 bg-emerald-400/[0.04] p-3">
+      <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-100">
+        {own && <OwnTag />}
+        Simple order-flow check (executed / waiting) <NewTag id="order-flow-check" />
+        <InfoTip label="About the simple order-flow check">
+          Separate from the buyers / sellers settings below, which stay as they are. Two numbers are read, always for the
+          side the order really goes (buyers for a buy, sellers for a sell; a flipped stock is judged on the real order).
+          Executed: that side&apos;s share of the shares traded in the last closed candle the bot exits on (its own candle, or
+          the colour / pattern candle), estimated from the recorded seconds, else the candle&apos;s shape. Waiting: that
+          side&apos;s share of the orders waiting, from the latest Most active scan read of the stock (at most 20 min old). A
+          stock the Most active scan does not read has no waiting number: a ticked waiting box then refuses every entry and
+          never closes on its own. Any stock, PAPER and LIVE, backtests too. Force, news and hand-off orders do not read
+          it.
+        </InfoTip>
+      </div>
+      <div className="mt-3 grid gap-4 md:grid-cols-2">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Entry: allowed only when</div>
+          <div className="mt-2 space-y-2">
+            {row("og_entry_exec", "og_entry_exec_pct", 60, "Executed", "the order's side did at least", "Entry: the order's side's executed share must be at least, %")}
+            {row("og_entry_wait", "og_entry_wait_pct", 60, "Waiting", "the order's side holds at least", "Entry: the order's side's waiting share must be at least, %")}
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            {entryTicks.length
+              ? `A buy (or sell) signal goes in only when ${entryTicks.join(" and ")} for its side. Else the entry waits and the bot asks again on its next signal.`
+              : "Nothing ticked: entries are not checked here."}
+          </p>
+        </div>
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Exit: close the trade when</div>
+          <div className="mt-2 space-y-2">
+            {row("og_exit_exec", "og_exit_exec_pct", 45, "Executed", "the trade's side did at most", "Exit: close when the trade's side's executed share is at most, %")}
+            {row("og_exit_wait", "og_exit_wait_pct", 45, "Waiting", "the trade's side holds at most", "Exit: close when the trade's side's waiting share is at most, %")}
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            {exitTicks.length
+              ? `Each candle that closes in the trade: it closes when ${exitTicks.join(" and ")} for its side; above that it continues. Then it waits for the next signal that passes the entry.`
+              : "Nothing ticked: trades are not closed by this check."}
+          </p>
+        </div>
+      </div>
+      {(entryTicks.length > 0 || exitTicks.length > 0) && (
+        <p className="mt-2 text-xs text-slate-400">
+          Example{form.og_entry_exec && form.og_entry_wait ? "" : " (both boxes ticked)"}: a buy with buyers executed{" "}
+          {Math.min(99, Math.max(eExec, 70))}% and waiting {Math.min(99, Math.max(eWait, 75))}% goes in. In the trade, a
+          candle with buyers executed {Math.min(99, Math.max(xExec + 15, 60))}% and waiting {Math.min(99, Math.max(xWait + 35, 80))}% continues; buyers
+          executed {Math.max(1, Math.min(xExec - 5, 40))}% and waiting {Math.max(1, Math.min(xWait - 10, 20))}% closes it. Hover a candle on the chart to see what it read.
+        </p>
+      )}
     </div>
   );
 }

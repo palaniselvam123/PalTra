@@ -296,6 +296,22 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   *closed* exit candle from 09:15 (the candle the chart draws at that size), no longer one candle's length back from the
   order; each executed volume card has a "Read the same candle as the chart" tick (`StrategyConfigPanel.SameCandle`, sets
   the window to 0).
+- `backend/order_gate.py` – **Simple order-flow check** (owner's request: the waiting / executed settings were hard to set
+  up together; a separate plain card, the old settings untouched; `og_entry_exec` / `og_entry_exec_pct` 60, `og_entry_wait` /
+  `og_entry_wait_pct` 60, `og_exit_exec` / `og_exit_exec_pct` 45, `og_exit_wait` / `og_exit_wait_pct` 45, all off, % 1-99;
+  per bot and per stock, PAPER and LIVE, replays too; any stock; Settings → 1. When to enter, top,
+  `StrategyConfigPanel.OrderFlowCheck`, anchor `#sma-order-flow`). Two numbers for the real order's side: **executed** = its
+  share of the shares traded in the last closed exit candle (`candle_span` = `flow_exit.entry_span(..., 0, _exit_minutes)`,
+  `trade_flow.minutes`; too little volume = unknown) and **waiting** = its share in a Most active read at most
+  `pressure_exit.MAX_AGE_SEC` old (`pressure_exit.fresh_read`; none = unknown). **Entry** (`apply_signal`, joins
+  `entry_block`, so it waits and late entry can retry): every ticked number at least its %, unknown refuses
+  (`entry_verdict`). **Exit** (`StrategyEngine._watch_order_gate`, held-stock loop after the executed volume exit): once per
+  closed exit candle that began at or after the entry's first minute (`_og_seen`), closes (`ORDER_FLOW_EXIT` via `_exit_now`,
+  LIVE stop cancelled first; a LIVE position restored without its stop id is left to that stop) when every ticked number is
+  known and at or under its % (`exit_verdict`); else held. Each reading is kept per stock (`_og_note` → `_og_log`, memory,
+  last `OG_LOG_KEEP` 400) and sent as the chart payload's `gate_notes`; the chart's why line (`StrategyChart.gateWhy`, any
+  candle type, Heikin Ashi too) says why an entry was refused and, in a trade, why each candle did not close it. Counts as an
+  exit for `strategyChecks.noExitOn`. Direct orders (Force, news, hand-offs) never read it.
 - **Buyers & sellers overview** (`StrategyConfigPanel.BuyersSellersMap`, Settings → 1. When to enter, anchor
   `#sma-buyers-sellers`; display only, its buttons only change the form; owner's request: the waiting-orders and executed
   settings looked alike): every setting that reads the split, waiting orders (Most active: `pressure_entry`,

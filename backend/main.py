@@ -34,6 +34,7 @@ import pnl_alerts
 import pivots
 import pressure_exit as pressure_exit_mod
 import flow_exit as flow_exit_mod
+import order_gate as order_gate_mod
 import auto_start
 import scalp_alerts
 import auto_arm
@@ -890,6 +891,15 @@ class ConfigUpdate(BaseModel):
     flow_exit_book: bool | None = None
     # EXIT = close the trade itself; CONFIRM = only let the other signal exits close when it agrees (flow_exit.py).
     flow_exit_mode: Literal["EXIT", "CONFIRM"] | None = None
+    # Simple order-flow check (order_gate.py): executed / waiting tick boxes for the entry and the exit, typed %.
+    og_entry_exec: bool | None = None
+    og_entry_exec_pct: float | None = Field(default=None, ge=order_gate_mod.MIN_PCT, le=order_gate_mod.MAX_PCT)
+    og_entry_wait: bool | None = None
+    og_entry_wait_pct: float | None = Field(default=None, ge=order_gate_mod.MIN_PCT, le=order_gate_mod.MAX_PCT)
+    og_exit_exec: bool | None = None
+    og_exit_exec_pct: float | None = Field(default=None, ge=order_gate_mod.MIN_PCT, le=order_gate_mod.MAX_PCT)
+    og_exit_wait: bool | None = None
+    og_exit_wait_pct: float | None = Field(default=None, ge=order_gate_mod.MIN_PCT, le=order_gate_mod.MAX_PCT)
     # Enter only when the order's own side did this % of the shares traded over the window (flow_exit.py).
     flow_entry: bool | None = None
     flow_entry_pct: float | None = Field(default=None, ge=flow_exit_mod.MIN_PCT, le=flow_exit_mod.MAX_PCT)
@@ -1976,6 +1986,14 @@ def _gap_dict(row) -> dict:
         "flow_exit_streak": flow_exit_mod.streak(row),
         "flow_exit_book": flow_exit_mod.book_agree(row),
         "flow_exit_mode": flow_exit_mod.mode(row),
+        "og_entry_exec": order_gate_mod.entry_exec(row),
+        "og_entry_exec_pct": order_gate_mod.entry_exec_pct(row),
+        "og_entry_wait": order_gate_mod.entry_wait(row),
+        "og_entry_wait_pct": order_gate_mod.entry_wait_pct(row),
+        "og_exit_exec": order_gate_mod.exit_exec(row),
+        "og_exit_exec_pct": order_gate_mod.exit_exec_pct(row),
+        "og_exit_wait": order_gate_mod.exit_wait(row),
+        "og_exit_wait_pct": order_gate_mod.exit_wait_pct(row),
         "flow_entry": flow_exit_mod.entry_on(row),
         "flow_entry_pct": flow_exit_mod.entry_pct(row),
         "flow_entry_window": flow_exit_mod.entry_window(row),

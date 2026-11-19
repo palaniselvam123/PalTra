@@ -109,6 +109,7 @@ import pivots
 import pressure_exit
 import trade_flow
 import flow_exit
+import order_gate
 import breakout
 import review
 import paper_wallet
@@ -423,6 +424,8 @@ SNAPSHOT_FIELDS = (
     "pressure_entry", "pressure_entry_pct",
     "pressure_flip", "pressure_flip_pct", "pressure_flip_flow",
     "flow_exit", "flow_exit_pct", "flow_exit_window", "flow_exit_loss", "flow_exit_streak", "flow_exit_book", "flow_exit_mode",
+    "og_entry_exec", "og_entry_exec_pct", "og_entry_wait", "og_entry_wait_pct",
+    "og_exit_exec", "og_exit_exec_pct", "og_exit_wait", "og_exit_wait_pct",
     "flow_entry", "flow_entry_pct", "flow_entry_window",
     "flow_trigger", "flow_trigger_pct", "flow_trigger_window", "flow_trigger_book",
     "stop_handoff", "stop_handoff_loss",
@@ -1098,6 +1101,15 @@ def chart_filters(cfg) -> dict:
         "flow_trigger_book": flow_exit.trigger_book(cfg),
         "flow_entry": flow_exit.entry_on(cfg) and not flow_exit.only_mode(cfg),  # not read in executed-only mode
         "flow_entry_pct": flow_exit.entry_pct(cfg),
+        # Simple order-flow check (order_gate.py): the chart's why line says what it needs.
+        "og_entry_exec": order_gate.entry_exec(cfg),
+        "og_entry_exec_pct": order_gate.entry_exec_pct(cfg),
+        "og_entry_wait": order_gate.entry_wait(cfg),
+        "og_entry_wait_pct": order_gate.entry_wait_pct(cfg),
+        "og_exit_exec": order_gate.exit_exec(cfg),
+        "og_exit_exec_pct": order_gate.exit_exec_pct(cfg),
+        "og_exit_wait": order_gate.exit_wait(cfg),
+        "og_exit_wait_pct": order_gate.exit_wait_pct(cfg),
         "flow_entry_window": flow_exit.entry_window(cfg),
         "candle_minutes": int(getattr(cfg, "candle_minutes", 1) or 1),
         "reentry_wait_candles": int(getattr(cfg, "reentry_wait_candles", 0) or 0),
@@ -1405,6 +1417,10 @@ class StrategyEngine:
         # Executed volume entry: what the bot decided at each window end, per stock (display only; the chart's why line).
         self._ft_log: dict[str, list[dict]] = {}
         self._flow_note: dict[str, str] = {}
+        # Simple order-flow check (order_gate.py): the last exit candle judged per stock (entry ts, candle end) and
+        # what it read at each candle, per stock (display only; the chart's why line).
+        self._og_seen: dict[str, tuple] = {}
+        self._og_log: dict[str, list[dict]] = {}
         # Most active entry at once (pressure_exit.entry_mode AT_ARM): symbol -> the IST day it was entered / refused.
         self._pe_done: dict[str, dt.date] = {}
         self._pe_note: dict[str, str] = {}
@@ -2057,6 +2073,7 @@ class StrategyEngine:
         await self._watch_pivot_target(symbol_cfg)
         await self._watch_pressure_fade(symbol_cfg)
         await self._watch_flow_exit(symbol_cfg)
+        await self._watch_order_gate(symbol_cfg)
 
     def _held_error(self, symbol: str, exc: Exception) -> None:
         text = f"{symbol}: {exc}"
@@ -2353,6 +2370,19 @@ class StrategyEngine:
         log.append(entry)
         if len(log) > self.FT_LOG_KEEP:
             del log[: len(log) - self.FT_LOG_KEEP]
+
+    OG_LOG_KEEP = 400  # order-flow check readings kept per stock
+
+    def _og_note(self, symbol: str, end: int, kind: str, text: str, **read) -> None:
+        """Keep what the simple order-flow check read for the candle ending at `end` (display only): the chart quotes it."""
+        log = self._og_log.setdefault(symbol, [])
+        if log and log[-1].get("end") == end and log[-1].get("kind") == kind:
+            log.pop()  # the same candle judged again (a later signal): the newest reading wins
+        entry = {"end": int(end), "kind": kind, "text": text}
+        entry.update({k: v for k, v in read.items() if v is not None})
+        log.append(entry)
+        if len(log) > self.OG_LOG_KEEP:
+            del log[: len(log) - self.OG_LOG_KEEP]
 
     async def _always_in_pass(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> None:
         """Always in a trade (always_in.py): a flat armed stock is entered on the side the SMAs point to now.
@@ -3284,6 +3314,25 @@ class StrategyEngine:
             flow = flow_exit.entry_refusal(points, side, flow_exit.entry_pct(cfg), (end - start) // 60)
             if flow:
                 entry_block = f"{entry_block}; {flow}" if entry_block else flow
+        if order_gate.entry_on(cfg):
+            # Simple order-flow check (order_gate.py): the real order's side, executed in the last closed exit candle
+            # and / or waiting in a fresh Most active read, each at least its typed %.
+            side = "LONG" if signal == "BULLISH" else "SHORT"
+            if getattr(cfg, "flip_orders", False):
+                side = "SHORT" if side == "LONG" else "LONG"
+            symbol = (self._focus or "").upper()
+            reading = order_gate.read(
+                symbol, side, self._tapes.get(self._focus), self._now().timestamp(), self._exit_minutes(self._focus, cfg)
+            )
+            allowed, note = order_gate.entry_verdict(cfg, reading)
+            self._og_note(
+                symbol, reading.end, "entry",
+                f"{'BUY' if side == 'LONG' else 'SELL'} {'allowed' if allowed else 'refused, waits'} — {note}",
+                exec=reading.exec_pct, wait=reading.wait_pct, side=side, ok=allowed,
+            )
+            if not allowed:
+                gate = f"order-flow check: {note}"
+                entry_block = f"{entry_block}; {gate}" if entry_block else gate
         # Waiting orders are never read in "Executed volume only" mode (as its label says).
         if not only_flow and pressure_exit.entry_mode(cfg) != "OFF" and pressure_exit.from_most_active(
             trade_sources(cfg).get((self._focus or "").upper())
@@ -6116,6 +6165,41 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} executed volume exit — {note}"
         await self._exit_now(cfg, self.ltp, flow_exit.EXIT_REASON)
 
+    async def _watch_order_gate(self, cfg: BotConfig) -> None:
+        """Simple order-flow check, exit side (order_gate.py): once per closed exit candle after the entry, close when
+        every ticked number (executed / waiting, the trade's own side) is at or below its typed %."""
+        pos = self.position
+        if pos is None or not order_gate.exit_on(cfg) or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other exits).
+            return
+        tape = self._tapes.get(symbol)
+        if tape is None or len(tape) == 0 or "ts" not in tape.columns:
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        now_ts = self._now().timestamp()
+        start, end = order_gate.candle_span(now_ts, self._exit_minutes(symbol, cfg))
+        if start < flow_exit.first_minute(opened.timestamp()):
+            return  # that candle began before the trade: the first one judged is the next whole candle
+        if float(tape["ts"].iloc[-1]) < end - 60:
+            return  # the candle's last minute is not in the tape yet: judged once it is
+        key = (opened.timestamp(), end)
+        if self._og_seen.get(symbol) == key:
+            return
+        self._og_seen[symbol] = key
+        reading = order_gate.read(symbol, pos.direction, tape, now_ts, 0, span=(start, end))
+        close, note = order_gate.exit_verdict(cfg, reading)
+        self._og_note(
+            symbol, end, "exit", f"{'closed' if close else 'held'} {pos.direction} — {note}",
+            exec=reading.exec_pct, wait=reading.wait_pct, side=pos.direction, ok=not close,
+        )
+        if not close:
+            return
+        self._signals[symbol] = f"{symbol} order-flow exit — {note}"
+        await self._exit_now(cfg, self.ltp, order_gate.EXIT_REASON)
+
     async def _watch_supertrend_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit when the Supertrend flips against the trade (supertrend.py)."""
         pos = self.position
@@ -7668,7 +7752,15 @@ class StrategyEngine:
             "flow": self._flow_points(view, candles),
             # What the executed volume entry decided at each window end (display only; the chart's why line).
             "flow_decisions": self._flow_decisions(view, candles),
+            # What the simple order-flow check read at each candle (order_gate.py; display only, the chart's why line).
+            "gate_notes": self._gate_notes(view, candles),
         }
+
+    def _gate_notes(self, symbol: str, candles: list[dict]) -> list[dict]:
+        if not symbol or not candles:
+            return []
+        start = float(candles[0]["time"])
+        return [d for d in self._og_log.get(symbol, []) if d.get("end", 0) > start]
 
     def _flow_decisions(self, symbol: str, candles: list[dict]) -> list[dict]:
         if not symbol or not candles:

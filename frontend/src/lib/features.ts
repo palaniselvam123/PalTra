@@ -349,6 +349,10 @@ export const FEATURES: Feature[] = [
     purpose: "The buyers / sellers fade exit can close a trade whose side was never above the % (e.g. a short opened with sellers at 63% closes once sellers are 70% or below), with the executed volume check still as an AND." },
   { id: "pressure-exit-all", area: "settings", added: "2026-11-18", pr: 477, href: S("sma-pressure-exit"), where: "Settings → Strategy → 3. When to exit → Exit when buyers / sellers fade → Use it on every armed stock", title: "Fade exit on every armed stock",
     purpose: "The buyers / sellers fade exit can close trades on any armed stock (armed by hand, Trend quality, Scan & arm), not only those armed from Most active." },
+  { id: "order-flow-check", area: "settings", added: "2026-11-19", pr: 479, href: S("sma-order-flow"), where: "Settings → Strategy → 1. When to enter → Simple order-flow check (executed / waiting), at the top", title: "Simple order-flow check: tick executed and / or waiting",
+    purpose: "One plain card next to the old buyers / sellers settings: tick Executed and / or Waiting for the entry and for the exit and type the %. An entry goes in only when every ticked number is at least its %; in a trade, each closed candle closes it once every ticked number is at or under its % (else it continues)." },
+  { id: "chart-order-flow-why", area: "terminal", added: "2026-11-19", pr: 479, href: TERM, where: "Terminal → chart → the \"why\" line under the chart (normal and Heikin Ashi candles)", title: "The chart says why the order-flow check refused or held",
+    purpose: "Hover a candle: with the simple order-flow check on, the line under the chart quotes what it read there — why an entry was refused (executed / waiting % against your numbers) and, while in a trade, why that candle did not close it." },
   { id: "flow-exit-streak", area: "settings", added: "2026-11-18", pr: 478, href: S("sma-flow-exit"), where: "Settings → Strategy → 3. When to exit → Executed volume exit → Close only after N readings in a row", title: "Executed volume exit: readings in a row",
     purpose: "The executed volume exit can wait until the other side did the % on 2-5 readings one after another (e.g. two closed candles), so one candle's swing does not close the trade." },
   { id: "chart-flow-smooth", area: "terminal", added: "2026-11-18", pr: 478, href: "/terminal/", where: "Terminal chart → Indicators → Executed lines: average over N candles", title: "Chart: executed lines averaged over N candles",
@@ -663,7 +667,7 @@ export function featureById(id: string): Feature | undefined {
 const ANCHOR_GROUP: Record<string, string> = {
   "sma-candle-interval": "enter", "sma-day-extreme": "enter", "sma-colour-exit": "enter", "sma-colour-force": "enter",
   "sma-fresh": "check", "sma-exit-candle": "exit", "sma-slope-candle": "exit", "sma-small-colour": "exit",
-  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced",
+  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced", "sma-order-flow": "enter",
 };
 
 /** The strategy form's group (enter, check, exit, gap, stop, risk, advanced) a Settings link opens, or null. */
