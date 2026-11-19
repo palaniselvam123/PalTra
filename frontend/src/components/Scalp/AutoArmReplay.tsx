@@ -5,7 +5,8 @@ import { DAY_CLOSE, PICK_TIMES, fitUntil, untilAfter } from "@/lib/pickWindow";
 import { Bot, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from "@/components/Scalp/ScanLists";
-import { replayActive, smaApi, type ScalpAlerts } from "@/lib/smaApi";
+import { replayActive, smaApi, type AutoArmBody, type ScalpAlerts } from "@/lib/smaApi";
+import { BacktestQueuePanel } from "@/components/Scalp/BacktestQueue";
 import { lastClosedWeekdays, todayInSession } from "@/lib/tradingDays";
 import { ResumePickRuns } from "@/components/Scalp/ResumePickRuns";
 
@@ -61,56 +62,49 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
   const [from, setFrom] = useState(() => lastClosedWeekdays(5)[0]);
   const [to, setTo] = useState(() => todayInSession() ?? lastClosedWeekdays(1)[0]);
   const latest = today ?? lastClosedWeekdays(1)[0];
-  const run = async () => {
+  /** The form as an auto-arm start body (without the bot); throws with a plain message when something is missing. */
+  const form = async (): Promise<Omit<AutoArmBody, "bot">> => {
     const todayNow = todayInSession();
-    if (days === 0 && !todayNow) {
-      setNote({ ok: false, text: "Today's session is not on now: pick Last 1 trading day (after 15:30 it is today)." });
-      return;
-    }
+    if (days === 0 && !todayNow) throw new Error("Today's session is not on now: pick Last 1 trading day (after 15:30 it is today).");
     if (days === -1) {
       const span = (Date.parse(to) - Date.parse(from)) / 86_400_000;
-      if (!from || !to || !(span >= 0)) {
-        setNote({ ok: false, text: "Pick a From date on or before the To date." });
-        return;
-      }
-      if (span > MAX_SPAN) {
-        setNote({ ok: false, text: `At most ${MAX_SPAN} calendar days (about 30 trading days) in one run.` });
-        return;
-      }
-      if (to > (todayNow ?? lastClosedWeekdays(1)[0])) {
-        setNote({ ok: false, text: "The To date cannot be after the last day with candles (today only while the market is open, from 09:20)." });
-        return;
-      }
+      if (!from || !to || !(span >= 0)) throw new Error("Pick a From date on or before the To date.");
+      if (span > MAX_SPAN) throw new Error(`At most ${MAX_SPAN} calendar days (about 30 trading days) in one run.`);
+      if (to > (todayNow ?? lastClosedWeekdays(1)[0]))
+        throw new Error("The To date cannot be after the last day with candles (today only while the market is open, from 09:20).");
     }
     const range = days === -1 ? [from, to] : days === 0 ? [todayNow as string] : lastClosedWeekdays(days);
+    const universe = source === "ACTIVE" ? [] : await resolveScanSymbols(lists, armed.keys());
+    if (source !== "ACTIVE" && !universe.length) throw new Error("No stocks in the picked lists.");
+    return {
+      date: range[0],
+      end_date: range[range.length - 1],
+      universe: universe.slice(0, 250),
+      source,
+      first,
+      last,
+      every_min: every,
+      minutes,
+      candles,
+      until: fitUntil(until, last),
+      play_handoffs: handoffs,
+    };
+  };
+
+  const run = async () => {
     setBusy(true);
     setNote(null);
     try {
-      const universe = source === "ACTIVE" ? [] : await resolveScanSymbols(lists, armed.keys());
-      if (source !== "ACTIVE" && !universe.length) throw new Error("No stocks in the picked lists.");
+      const body = await form();
       const current = (await smaApi.replayAll().catch(() => null))?.[String(bot)] ?? null;
       if (current && replayActive(current) && current.status !== "FINISHED") {
         if (!window.confirm(`Bot ${bot}'s replay is already running. Stop it and start this one instead?`)) return;
       }
-      const info = await smaApi.replayAutoArm({
-        date: range[0],
-        end_date: range[range.length - 1],
-        universe: universe.slice(0, 250),
-        source,
-        first,
-        last,
-        every_min: every,
-        minutes,
-        candles,
-        until: fitUntil(until, last),
-        bot,
-        speed,
-        play_handoffs: handoffs,
-      });
+      const info = await smaApi.replayAutoArm({ ...body, bot, speed });
       const extra = info.notes?.length ? ` Note: ${info.notes.join(" ")}` : "";
       setNote({
         ok: true,
-        text: `Started on Bot ${bot}: ${range[0]} → ${range[range.length - 1]}. Each day plays from ${first}; a stock is armed at the minute the auto-arm would have armed it and traded from then on. Follow it on the terminal (Bot ${bot}'s replay bar and chart); the trades and each day's armed stocks land in the Backtests tab.${extra}`,
+        text: `Started on Bot ${bot}: ${body.date} → ${body.end_date}. Each day plays from ${first}; a stock is armed at the minute the auto-arm would have armed it and traded from then on. Follow it on the terminal (Bot ${bot}'s replay bar and chart); the trades and each day's armed stocks land in the Backtests tab.${extra}`,
       });
     } catch (e: unknown) {
       setNote({ ok: false, text: e instanceof Error ? e.message : "Could not start the replay" });
@@ -306,6 +300,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
         from the desk). The bot must be in PAPER.
       </p>
       {note ? <p className={note.ok ? "text-xs text-emerald-300" : "text-xs font-semibold text-amber-300"}>{note.text}</p> : null}
+      <BacktestQueuePanel form={form} bot={bot} />
     </section>
   );
 }

@@ -54,6 +54,7 @@ import second_candle
 import strategy_lab
 import morning_study
 import trend_picks
+import backtest_queue
 import active_picks
 import trend_compare
 import stock_rank
@@ -416,6 +417,8 @@ def boot_engine() -> asyncio.Task | None:
     chop_autos.start_loop(_chop_auto_start)
     scan_arm_runner.start_loop(_scan_arm_scheduled, _scan_arm_can_scan)
     _start_trend_picks_loop()
+    if not server_role.is_scanner():
+        _start_backtest_queue()
     open_pnl_recorder.start(_open_pnl_desks)
     ensure_research_config()
     research_engine.restore_open_books()
@@ -485,6 +488,7 @@ def _boot_backtest_server() -> asyncio.Task:
     backtest_server.add_busy_check(lambda: morning_study.study().running)
     backtest_server.add_busy_check(lambda: trend_compare.comparer().running)
     backtest_server.add_busy_check(lambda: stock_rank.jobs().running)
+    backtest_server.add_busy_check(backtest_queue.runner.busy)
     # The Trend quality auto re-scan runs here too, and keeps the machine awake while it is on in market hours,
     # so it does not stop itself between two passes.
     chop_autos.reload()
@@ -492,6 +496,7 @@ def _boot_backtest_server() -> asyncio.Task:
     backtest_server.add_busy_check(_auto_scans_due)
     scan_arm_runner.start_loop(_scan_arm_scheduled, _scan_arm_can_scan)
     _start_trend_picks_loop()
+    _start_backtest_queue()
     _task = asyncio.create_task(backtest_server.run(import_bot_settings, lambda: replays))
     if backtest_server.auto_resume_on() and replay_mod.cut_short_at_boot:
         global _auto_resume_task
@@ -2963,6 +2968,146 @@ async def replay_auto_arm(body: AutoArmStart):
         play_handoffs=body.play_handoffs, rule=rule,
     )
     return {**info, "notes": notes[:10]}
+
+
+# ---- Backtest queue and schedule (backtest_queue.py): auto-arm backtests one after another, practice money ----
+
+_backtest_queue_task: asyncio.Task | None = None
+_backtest_wake_task: asyncio.Task | None = None
+
+
+async def _queue_start(body: dict) -> None:
+    """Start one queued auto-arm backtest through the ordinary route (every refusal applies)."""
+    await replay_auto_arm(AutoArmStart(**{**body, "speed": max(SPEEDS)}))
+
+
+def _queue_run_status(run_id: int) -> str | None:
+    from models import ReplayRun
+
+    with session_factory()() as db:
+        run = db.get(ReplayRun, int(run_id))
+        return None if run is None else str(run.status)
+
+
+def _start_backtest_queue() -> None:
+    """The queue's loop (one per process, desk and backtest server); on the desk also the backtest server's wake-up."""
+    global _backtest_queue_task, _backtest_wake_task
+    if _backtest_queue_task is None or _backtest_queue_task.done():
+        _backtest_queue_task = asyncio.create_task(
+            backtest_queue.runner.run(_queue_start, lambda b: replays[b], _queue_run_status)
+        )
+    if server_role.is_desk() and server_role.backtest_url() and server_role.backtest_link_token():
+        if _backtest_wake_task is None or _backtest_wake_task.done():
+            _backtest_wake_task = asyncio.create_task(backtest_queue.wake_loop(scan_sync.http_fetch))
+
+
+class QueueAdd(AutoArmStart):
+    pass
+
+
+class QueueSchedule(BaseModel):
+    on: bool | None = None
+    at: str | None = None
+    bots: list[int] | None = Field(default=None, max_length=4)
+    #: The auto-arm form's choices (AutoArmStart without the days and the bot); checked like a start.
+    template: dict | None = None
+
+
+class QueuePause(BaseModel):
+    paused: bool
+
+
+@app.get("/api/backtest-queue")
+async def backtest_queue_get():
+    """The backtest queue and its daily schedule (backtest_queue.py). Practice money; nothing is ordered."""
+    return await asyncio.to_thread(backtest_queue.view)
+
+
+@app.post("/api/backtest-queue")
+async def backtest_queue_add(body: QueueAdd):
+    """Add one auto-arm backtest to the queue; it plays when no other replay is playing."""
+    if server_role.is_scanner():
+        raise HTTPException(409, "Backtests run on the main desk or the backtest server, not on the scanner.")
+    try:
+        parse_replay_range(body.date, body.end_date, allow_today=True)
+        parse_start(body.first)
+        parse_start(body.last)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    state = await asyncio.to_thread(backtest_queue.load)
+    try:
+        item = backtest_queue.add(state, body.model_dump(exclude={"speed"}))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    await asyncio.to_thread(backtest_queue.save, state)
+    return {"added": item.id, **backtest_queue.view(state)}
+
+
+@app.delete("/api/backtest-queue/{item_id}")
+async def backtest_queue_remove(item_id: str):
+    """Take a waiting backtest off the queue, or a finished one off the list. A playing one is stopped on its replay
+    bar."""
+    state = await asyncio.to_thread(backtest_queue.load)
+    item = next((i for i in state.items if i.id == item_id), None)
+    if item is None:
+        raise HTTPException(404, "Not in the queue.")
+    if item.status == "PLAYING":
+        raise HTTPException(409, "It is playing: stop it on that bot's replay bar.")
+    state.items = [i for i in state.items if i.id != item_id]
+    await asyncio.to_thread(backtest_queue.save, state)
+    return backtest_queue.view(state)
+
+
+@app.post("/api/backtest-queue/clear")
+async def backtest_queue_clear():
+    """Remove the finished, failed and stopped items from the list (waiting and playing ones stay)."""
+    state = await asyncio.to_thread(backtest_queue.load)
+    state.items = [i for i in state.items if i.status in ("QUEUED", "PLAYING")]
+    await asyncio.to_thread(backtest_queue.save, state)
+    return backtest_queue.view(state)
+
+
+@app.put("/api/backtest-queue/pause")
+async def backtest_queue_pause(body: QueuePause):
+    """Pause / resume the queue: a paused queue starts nothing new (a playing backtest carries on)."""
+    state = await asyncio.to_thread(backtest_queue.load)
+    state.paused = bool(body.paused)
+    await asyncio.to_thread(backtest_queue.save, state)
+    return backtest_queue.view(state)
+
+
+@app.put("/api/backtest-queue/schedule")
+async def backtest_queue_schedule(body: QueueSchedule):
+    """The daily schedule: weekdays after `at` (15:31-23:59 IST), today's auto-arm backtest on each ticked bot."""
+    state = await asyncio.to_thread(backtest_queue.load)
+    s = state.schedule
+    if body.at is not None:
+        at = backtest_queue.hhmm(body.at)
+        if at is None:
+            raise HTTPException(422, "The daily run must be after the close: HH:MM between 15:31 and 23:59 IST.")
+        s.at = at
+    if body.bots is not None:
+        bots = backtest_queue._bots(body.bots)
+        if not bots:
+            raise HTTPException(422, "Tick at least one bot (1-4).")
+        s.bots = bots
+    if body.template is not None:
+        template = {k: v for k, v in body.template.items() if k not in backtest_queue.TEMPLATE_SKIP}
+        try:
+            checked = AutoArmStart(date=dt.date.today().isoformat(), **template)
+            parse_start(checked.first)
+            parse_start(checked.last)
+        except (ValidationError, ValueError, TypeError) as exc:
+            raise HTTPException(422, f"Those backtest settings are not valid: {exc}") from exc
+        if checked.source in ("TREND", "BOTH") and not checked.universe:
+            raise HTTPException(422, "Pick the stocks the Trend quality rule should read (the scan lists).")
+        s.template = checked.model_dump(exclude={"date", "end_date", "bot", "speed"})
+    if body.on is not None:
+        if body.on and not s.template:
+            raise HTTPException(422, "Save the backtest settings for the schedule first.")
+        s.on = bool(body.on)
+    await asyncio.to_thread(backtest_queue.save, state)
+    return backtest_queue.view(state)
 
 
 class ActivePickStart(BaseModel):
