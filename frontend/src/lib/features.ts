@@ -637,7 +637,7 @@ export const FEATURES: Feature[] = [
     purpose: "After any exit, a stock waits N candles before its next entry, so a sideways stock is not reversed on every candle." },
   { id: "set-fade-unarm", area: "settings", added: "2026-11-14", pr: 426, href: S("sma-fade-unarm"), where: "Settings → 7. Advanced → Un-arm a stock once its trend fades", title: "Un-arm a stock once its trend fades",
     purpose: "A stock that reads choppy for N minutes in a row comes off the bot's Trade list (once the bot is flat on it), so an armed trend that died is not traded all day." },
-  { id: "set-flatten-exit", area: "settings", added: "2026-11-19", href: S("sma-flatten-exit"), where: "Settings → 3. When to exit → Close when the SMA 9 line flattens after a steep run", title: "One tick: close when the SMA 9 line flattens",
+  { id: "set-flatten-exit", area: "settings", added: "2026-11-19", pr: 481, href: S("sma-flatten-exit"), where: "Settings → 3. When to exit → Close when the SMA 9 line flattens after a steep run", title: "One tick: close when the SMA 9 line flattens",
     purpose: "Close a trade when the SMA 9 line stops falling (or rising) after a steep run, before it turns and before the SMA cross. One tick box, no slope numbers to type." },
 ];
 
