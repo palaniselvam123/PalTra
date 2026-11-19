@@ -637,6 +637,8 @@ export const FEATURES: Feature[] = [
     purpose: "After any exit, a stock waits N candles before its next entry, so a sideways stock is not reversed on every candle." },
   { id: "set-fade-unarm", area: "settings", added: "2026-11-14", pr: 426, href: S("sma-fade-unarm"), where: "Settings → 7. Advanced → Un-arm a stock once its trend fades", title: "Un-arm a stock once its trend fades",
     purpose: "A stock that reads choppy for N minutes in a row comes off the bot's Trade list (once the bot is flat on it), so an armed trend that died is not traded all day." },
+  { id: "set-flatten-exit", area: "settings", added: "2026-11-19", pr: 481, href: S("sma-flatten-exit"), where: "Settings → 3. When to exit → Close when the SMA 9 line flattens after a steep run", title: "One tick: close when the SMA 9 line flattens",
+    purpose: "Close a trade when the SMA 9 line stops falling (or rising) after a steep run, before it turns and before the SMA cross. One tick box, no slope numbers to type." },
 ];
 
 /** Today in IST, YYYY-MM-DD. */
@@ -667,7 +669,7 @@ export function featureById(id: string): Feature | undefined {
 const ANCHOR_GROUP: Record<string, string> = {
   "sma-candle-interval": "enter", "sma-day-extreme": "enter", "sma-colour-exit": "enter", "sma-colour-force": "enter",
   "sma-fresh": "check", "sma-exit-candle": "exit", "sma-slope-candle": "exit", "sma-small-colour": "exit",
-  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced", "sma-order-flow": "enter",
+  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced", "sma-order-flow": "enter", "sma-flatten-exit": "exit",
 };
 
 /** The strategy form's group (enter, check, exit, gap, stop, risk, advanced) a Settings link opens, or null. */
