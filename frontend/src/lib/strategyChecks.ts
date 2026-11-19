@@ -50,7 +50,8 @@ export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
     !(cfg.flow_exit && String(cfg.flow_exit_mode ?? "EXIT").toUpperCase() !== "CONFIRM") &&
     !cfg.og_exit_exec &&
     !cfg.og_exit_wait &&
-    !cfg.slow_sma_exit
+    !cfg.slow_sma_exit &&
+    !cfg.tq_exit
   );
 }
 
@@ -244,6 +245,12 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
       name: `Order-flow check: own side ${[cfg.og_exit_exec ? `executed ≤ ${cfg.og_exit_exec_pct ?? 45}%` : "", cfg.og_exit_wait ? `waiting ≤ ${cfg.og_exit_wait_pct ?? 45}%` : ""].filter(Boolean).join(" and ")}`,
       when: candle,
       code: "ORDER_FLOW_EXIT",
+    });
+  if (cfg.tq_exit)
+    out.push({
+      name: `Trend quality: ${cfg.tq_exit_phase === false ? "" : "phase turns or "}trend score under ${cfg.tq_exit_score ?? 40}`,
+      when: "each closed candle",
+      code: "TREND_FADE",
     });
   if (cfg.pressure_exit) out.push({ name: `Most active stocks: buyers / sellers fade to ${cfg.pressure_exit_pct ?? 55}%`, when: "each Most active scan", code: "PRESSURE_FADE" });
   out.push({ name: `Square-off at ${cfg.square_off_time ?? "15:15"}`, when: "time", code: "EOD_SQUARE_OFF" });

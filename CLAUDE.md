@@ -1278,6 +1278,24 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   the arm log records it; a replay's override only drops it from `replay_symbols` for the rest of that day). Signal line and
   trade-channel alert ("un-armed — trend faded …"). Arming only, no order. Settings → 7. Advanced, under "Several bots"
   (`#sma-fade-unarm`). The stock research baseline keeps it off.
+- `backend/trend_trade.py` – **Trade on the trend score / phase** (owner's request: Trend quality auto-armed stocks entered
+  and closed on the trend reading, not an SMA cross; `tq_entry` / `tq_exit` off by default; per bot and per stock, PAPER and
+  LIVE, replays too; Settings → 1. When to enter, `StrategyConfigPanel.TrendTrade`, anchor `#sma-trend-trade`). The reading is
+  the Trend quality card's on the candles the bot trades (`_exit_minutes`) from `_tapes` (`StrategyEngine._trend_read` →
+  `stock_regime.cached`, which now also carries `trend_side` / `trend_score` / `trend` from `trend_strength.read`): the phase
+  now (BULL / BEAR / CHOP) and the 0-100 trend score (share of the 7 checks passed for the SMAs' side). **Entry**
+  (`tq_entry_score` 70, `tq_entry_phase` on): `StrategyEngine._trend_entry_pass` (armed loop, after `_pressure_entry_pass`),
+  once per closed candle counted from 09:15 (`_tq_tried`), enters a flat stock on the trend's side when the score is at least
+  the level and (ticked) the phase agrees (`entry_call`; `phase_early` waits) through `apply_signal(..., why="TREND_QUALITY")`
+  (every entry check, stop, flip, cut-off, caps, wait after an exit, one LIVE bot per stock). **Only the trend opens trades**
+  (`tq_only`, on): `_trend_only_hit` in `_apply_locked` refuses the bot's own signals on these stocks (`blocks`; a cross
+  still closes, it does not reverse; Force, news, hand-offs, manual reverse pass). **Exit** (`tq_exit_score` 40,
+  `tq_exit_phase` on): `_watch_trend_exit` (held-stock loop, after the fade exit), once per candle closed after the entry
+  (`_tq_judged`), closes (`TREND_FADE` via `_exit_now`, LIVE stop cancelled first; a LIVE position restored without its stop
+  id is left to that stop) when the phase is CHOP or the other way, or the score for the trade's side is under the level
+  (SMAs the other way = 0) (`exit_call`). **Which stocks** (`tq_all`, off): the source chip "Auto-arm: Trend quality" (the
+  auto-arm backtest's Trend quality picks carry it via `replay.pick_sources`), or every armed stock. Counts as an exit for
+  `strategyChecks.noExitOn`. Normal candles (not Heikin Ashi). The stock research baseline keeps it off.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

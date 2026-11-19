@@ -100,6 +100,7 @@ import stop_plan as stop_plan_mod
 import decel_guard as decel_mod
 import recovery as recovery_mod
 import fade_unarm
+import trend_trade
 import breakout as breakout_mod
 import opening_range
 import always_in
@@ -948,6 +949,14 @@ class ConfigUpdate(BaseModel):
     fade_unarm: bool | None = None
     fade_unarm_rule: Literal["PHASE", "SCORE", "EITHER"] | None = None
     fade_unarm_min: int | None = Field(default=None, ge=5, le=240)
+    tq_entry: bool | None = None
+    tq_entry_score: int | None = Field(default=None, ge=0, le=100)
+    tq_entry_phase: bool | None = None
+    tq_only: bool | None = None
+    tq_exit: bool | None = None
+    tq_exit_score: int | None = Field(default=None, ge=0, le=100)
+    tq_exit_phase: bool | None = None
+    tq_all: bool | None = None
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -2033,6 +2042,14 @@ def _gap_dict(row) -> dict:
         "fade_unarm": fade_unarm.on(row),
         "fade_unarm_rule": fade_unarm.rule(row),
         "fade_unarm_min": fade_unarm.after_min(row),
+        "tq_entry": trend_trade.entry_on(row),
+        "tq_entry_score": trend_trade.entry_score(row),
+        "tq_entry_phase": trend_trade.entry_phase(row),
+        "tq_only": trend_trade.only_trend(row),
+        "tq_exit": trend_trade.exit_on(row),
+        "tq_exit_score": trend_trade.exit_score(row),
+        "tq_exit_phase": trend_trade.exit_phase(row),
+        "tq_all": trend_trade.every_stock(row),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),

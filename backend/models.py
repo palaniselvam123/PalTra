@@ -633,6 +633,15 @@ class BotConfig(Base):
     fade_unarm: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     fade_unarm_rule: Mapped[str | None] = mapped_column(String(8), nullable=True, default="PHASE")
     fade_unarm_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=30)
+    # Trade on the trend reading (trend_trade.py): enter on the trend score / phase, close when it fades.
+    tq_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    tq_entry_score: Mapped[int | None] = mapped_column(Integer, nullable=True, default=70)
+    tq_entry_phase: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    tq_only: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    tq_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    tq_exit_score: Mapped[int | None] = mapped_column(Integer, nullable=True, default=40)
+    tq_exit_phase: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    tq_all: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
