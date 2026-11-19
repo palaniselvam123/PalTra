@@ -638,7 +638,10 @@ export const FEATURES: Feature[] = [
   { id: "set-fade-unarm", area: "settings", added: "2026-11-14", pr: 426, href: S("sma-fade-unarm"), where: "Settings → 7. Advanced → Un-arm a stock once its trend fades", title: "Un-arm a stock once its trend fades",
     purpose: "A stock that reads choppy for N minutes in a row comes off the bot's Trade list (once the bot is flat on it), so an armed trend that died is not traded all day." },
   { id: "set-flatten-exit", area: "settings", added: "2026-11-19", pr: 481, href: S("sma-flatten-exit"), where: "Settings → 3. When to exit → Close when the SMA 9 line flattens after a steep run", title: "One tick: close when the SMA 9 line flattens",
-    purpose: "Close a trade when the SMA 9 line stops falling (or rising) after a steep run, before it turns and before the SMA cross. One tick box, no slope numbers to type." },
+    purpose: "Close a trade when the SMA 9 line stops falling (or rising) after a steep run, before it turns and before the SMA cross. One tick box, no slope numbers to type." },  { id: "bt-queue", area: "trend", added: "2026-11-19", href: "/scalp/#backtest", where: "Scalp → Backtest → Auto-arm replay → Backtest queue", title: "Backtest queue: auto-arm backtests one after another",
+    purpose: "Queue several auto-arm backtests (one or more bots, any days) and they play one after another at full speed, so the backtest server never plays two at once and stays responsive." },
+  { id: "bt-schedule", area: "trend", added: "2026-11-19", href: "/scalp/#backtest", where: "Scalp → Backtest → Auto-arm replay → Every weekday, backtest today", title: "Schedule a daily auto-arm backtest",
+    purpose: "Every weekday after a time you pick, today's auto-arm backtest is queued on the ticked bots with the settings you saved; the desk wakes the backtest server for it." },
 ];
 
 /** Today in IST, YYYY-MM-DD. */

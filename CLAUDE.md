@@ -1756,6 +1756,21 @@ spinning top), body and range) / Matched / Call columns
   days). Saved in `trend_compare.json` next to the SMA DB (`TREND_COMPARE_FILE`, last 20; a comparison playing at a restart
   becomes `INTERRUPTED`). `POST /api/trend-picks/compare`, `GET /api/trend-picks/compare[/{id}]`,
   `POST /api/trend-picks/compare/stop`, `DELETE /api/trend-picks/compare/{id}` (the runs stay in Backtests).
+- `backend/backtest_queue.py` – **Backtest queue and daily schedule** (practice money, no order path, nothing armed;
+  owner's case: two auto-arm backtests played at once froze the backtest server). Under the auto-arm replay form
+  (`components/Scalp/BacktestQueue.tsx`, `AutoArmReplay.form` builds the same body as Start). **Queue**: each item is one
+  auto-arm start body (`AutoArmStart`: bot, days, source, thresholds), added per ticked bot (`POST /api/backtest-queue`,
+  at most `MAX_QUEUED` 30 waiting); `Runner.step` (every `CHECK_SEC` 10 s, `main._start_backtest_queue`, desk and backtest
+  server, never the scanner) starts the first waiting one through `replay_auto_arm` at full speed only while no bot's
+  replay player is LOADING / PLAYING / PAUSED, follows it to DONE / FAILED / STOPPED (or INTERRUPTED after a restart once
+  `RESTART_GRACE_SEC` passed without the auto-resume), and a refused start is FAILED with the reason and the queue moves
+  on. Pause / resume (`PUT /api/backtest-queue/pause`), remove a waiting or finished item (`DELETE …/{id}`; a playing one
+  is stopped on its replay bar), `POST …/clear`. **Schedule** (`PUT /api/backtest-queue/schedule`: `on`, `at` 15:31-23:59
+  IST, `bots` 1-4, `template` = the form's settings, checked like a start): weekdays once after `at`, today's auto-arm
+  backtest per ticked bot is queued (`due`, `schedule_today`, `last_day` / `last_note`). The queue keeps the backtest server
+  awake (`runner.busy`); the desk wakes it for the schedule (`wake_loop`, BACKTEST_URL + BACKTEST_LINK_TOKEN on the desk:
+  from 15:31, then at the time `GET /api/link/backtest/queue-due` answers). Kept in `backtest_queue.json` next to the SMA DB
+  (`BACKTEST_QUEUE_FILE`). `GET /api/backtest-queue`.
 - `backend/active_picks.py` – **Most active pick backtest** (practice money, no order path, nothing armed; the Most active
   card's fourth view "Backtest", `components/Scalp/ActivePickBacktest.tsx`): the strong-trend pick backtest done the Most
   active way. For each day of a replay range, at `pick_time` every stock of the universe (scan lists, up to `MAX_UNIVERSE`

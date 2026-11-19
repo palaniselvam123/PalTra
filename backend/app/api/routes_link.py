@@ -151,7 +151,7 @@ LIVE_REFUSED = "That bot is LIVE: confirm the LIVE arm first (confirm_live)."
 def token_path(path: str) -> bool:
     """Desk paths that check a link token themselves (exempt from the Google lock)."""
     return path in (
-        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, BACKTEST_EXPORT, BACKTEST_ACTIVE,
+        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, BACKTEST_EXPORT, BACKTEST_ACTIVE, BACKTEST_QUEUE_DUE,
         NEWS_LISTS, NEWS_LISTS_ADD
     ) or path.startswith(
         (STOCK_PREFIX, BACKTEST_EXPORT + "/")
@@ -166,6 +166,9 @@ BACKTEST_SETTINGS = "/api/link/backtest/settings"
 BACKTEST_GROWW = "/api/link/backtest/groww"
 BACKTEST_SCANS = "/api/link/backtest/scan-history"
 BACKTEST_EXPORT = "/api/link/backtest/scan-export"
+# The backtest server's daily backtest schedule: when today's run is due (backtest_queue.py). Asked by the desk, which
+# also starts a stopped machine this way.
+BACKTEST_QUEUE_DUE = "/api/link/backtest/queue-due"
 # The desk's saved Most active scans of a day, cut down to the stocks an auto-arm replay would arm (auto_arm.py).
 BACKTEST_ACTIVE = "/api/link/backtest/active-scans"
 
@@ -270,6 +273,20 @@ async def backtest_scan_export(request: Request, days: int = 14):
     import scan_sync
 
     return {"runs": await asyncio.to_thread(scan_sync.export_runs, days)}
+
+
+@router.get(BACKTEST_QUEUE_DUE)
+async def backtest_queue_due(request: Request):
+    """Backtest server: when today's scheduled backtest is due ("HH:MM", or None when nothing is due today), for the
+    desk's wake-up (backtest_queue.wake_loop). Read-only; the request itself keeps the machine up."""
+    _backtest_export_authorized(request)
+    import asyncio
+    import datetime as dt
+
+    import backtest_queue
+
+    state = await asyncio.to_thread(backtest_queue.load)
+    return {"due_at": backtest_queue.due_at(dt.datetime.now(backtest_queue.IST), state.schedule)}
 
 
 @router.get(BACKTEST_EXPORT + "/{run_id}")

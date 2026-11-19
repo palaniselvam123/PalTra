@@ -2926,7 +2926,65 @@ function presetDesk(): string {
   return bot == null ? "research" : String(bot);
 }
 
+/** One auto-arm backtest in the backtest queue (backend backtest_queue.py). */
+export type AutoArmBody = {
+  date: string;
+  end_date: string;
+  universe: string[];
+  source: "TREND" | "ACTIVE" | "BOTH";
+  first: string;
+  last: string;
+  every_min: number;
+  minutes: number;
+  candles?: "NORMAL" | "HA";
+  until?: string;
+  bot: number;
+  speed?: number;
+  play_handoffs: boolean;
+  max_day?: number;
+};
+
+export type QueueItem = {
+  id: string;
+  body: AutoArmBody;
+  label: string;
+  origin: "manual" | "schedule";
+  status: "QUEUED" | "PLAYING" | "DONE" | "FAILED" | "STOPPED" | "INTERRUPTED" | "CANCELLED";
+  added_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  run_id: number | null;
+  note: string;
+};
+
+export type BacktestQueue = {
+  items: QueueItem[];
+  paused: boolean;
+  waiting: number;
+  playing: QueueItem | null;
+  schedule: {
+    on: boolean;
+    at: string;
+    bots: number[];
+    template: Partial<AutoArmBody>;
+    last_day: string | null;
+    last_note: string;
+    due_at: string | null;
+  };
+};
+
 export const smaApi = {
+  /** Backtest queue (backend backtest_queue.py): auto-arm backtests played one after another, and a daily schedule.
+   * Practice money; nothing is armed or ordered. */
+  backtestQueue: () => request<BacktestQueue>("/api/backtest-queue"),
+  backtestQueueAdd: (body: AutoArmBody) =>
+    request<BacktestQueue & { added: string }>("/api/backtest-queue", { method: "POST", body: JSON.stringify(body) }),
+  backtestQueueRemove: (id: string) => request<BacktestQueue>(`/api/backtest-queue/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  backtestQueueClear: () => request<BacktestQueue>("/api/backtest-queue/clear", { method: "POST" }),
+  backtestQueuePause: (paused: boolean) =>
+    request<BacktestQueue>("/api/backtest-queue/pause", { method: "PUT", body: JSON.stringify({ paused }) }),
+  backtestQueueSchedule: (body: { on?: boolean; at?: string; bots?: number[]; template?: Partial<AutoArmBody> }) =>
+    request<BacktestQueue>("/api/backtest-queue/schedule", { method: "PUT", body: JSON.stringify(body) }),
   backtestStatus: () => request<BacktestServerStatus>("/api/backtest/status", undefined, 12000, false),
   backtestSync: () => request<BacktestServerStatus>("/api/backtest/sync", { method: "POST" }, 30000, false),
   backtestIdle: (minutes: number) =>
