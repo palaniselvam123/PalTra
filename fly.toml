@@ -18,6 +18,14 @@ kill_timeout = '15s'
   min_machines_running = 1
   processes = ['app']
 
+# Fly's default limit is 25 requests at once per machine; the pages poll many endpoints
+# (state, chart, replay, scans) and a few open tabs passed it, so Fly's proxy queued or
+# refused requests ("Can't reach the trading engine"). One uvicorn process serves them all.
+[http_service.concurrency]
+  type = 'requests'
+  soft_limit = 200
+  hard_limit = 250
+
 [[mounts]]
   source = 'data'
   destination = '/data'

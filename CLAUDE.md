@@ -2822,7 +2822,8 @@ No credentials are needed. The desk starts on the simulated feed.
 - `fly.toml`: app `paltra`, region `sin`, `internal_port = 3000`, HTTPS
   forced, one machine always running (`auto_stop_machines = 'off'`,
   `min_machines_running = 1`), two dedicated performance CPUs (`performance`,
-  2 CPUs, 4 GB; never throttled in market hours), and a volume `data` mounted at `/data`. Change the machine size in
+  2 CPUs, 4 GB; never throttled in market hours), a volume `data` mounted at `/data`, and `[http_service.concurrency]` requests 200 soft / 250 hard (Fly's default 25 was
+  passed by a few open pages; the same block is in `fly.backtest.toml` and `fly.scanner.toml`). Change the machine size in
   `[[vm]]`: every deploy applies it and undoes a resize made in the Fly
   dashboard.
 - `Dockerfile` (`python:3.13-slim-bookworm`): installs
