@@ -655,6 +655,8 @@ export const FEATURES: Feature[] = [
     purpose: "The auto-arm backtest now reads the same candle size (and Normal / Heikin Ashi) as your Trend quality scan, and warns when you pick another: a stock that was 7/7 on 15-minute candles can read weaker on 5-minute ones and never be armed."},
   { id: "autoarm-why", area: "trend", added: "2026-11-20", pr: 491, href: "/terminal/", where: "Terminal → Backtests → a run → Armed log → Why", title: "Why each stock was armed in an auto-arm backtest",
     purpose: "The armed log now shows why each stock was armed: the checks passed, the candle size and rules they were read on (e.g. 15-min candles, morning rules before 10:00) and the checks it missed, so you can set it against the Trend quality History."},
+  { id: "chart-colour-body", area: "terminal", added: "2026-11-20", pr: 493, href: "/terminal/", where: "Terminal → chart → the readings line, in candle colour mode", title: "Candle body against the bot's colour exit and entry floors",
+    purpose: "In candle colour mode the chart now shows the body the bot reads (the Heikin Ashi body when HA colours are on) in ₹, % and ATRs, next to what the exit rule and the entry rule need, with ✓ or ✗ too small, so you can see why a candle of the other colour did or did not close the trade. The candle's size (high to low) is not what these rules read."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */
