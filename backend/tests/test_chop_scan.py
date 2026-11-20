@@ -426,3 +426,29 @@ def test_a_heikin_ashi_scan_reads_the_candles_not_the_smas_and_says_which_candle
     assert row["trend_mode"] == "HEIKIN_ASHI" and row["score"] == chop_scan.CHOPPY
     assert row["crosses_today"] >= 5  # colour flips today, not SMA crosses
     assert row["ltp"] == normal["rows"][0]["ltp"] == round(last, 2)
+
+
+def test_candle_kind_and_read_flags():
+    assert chop_scan.candle_kind("colour") == chop_scan.COLOUR and chop_scan.candle_kind("x") == chop_scan.NORMAL
+    assert chop_scan.read_flags("NORMAL") == (False, False)
+    assert chop_scan.read_flags("COLOUR") == (False, True)
+    assert chop_scan.read_flags("HA") == (True, True)
+    assert chop_scan.read_flags(True) == (True, True) and chop_scan.read_flags(False) == (False, False)
+
+
+def test_colour_mode_reads_the_real_candles_by_colour():
+    # Five-minute candles that turn colour every candle: flips pile up, and the SMA cross count stays low.
+    tape: list[float] = []
+    for i in range(300):  # 09:15 to 14:15
+        block = i // 5
+        tape.append(100 + 0.02 * (i % 5) * (1 if block % 2 == 0 else -1) + (0.1 if block % 2 == 0 else 0.0))
+    frame = _minutes(tape)
+    now = _at(14, 20)
+    normal = chop_scan.analyze(frame, 9, 21, 5, now, symbol="X")
+    colour = chop_scan.analyze(frame, 9, 21, 5, now, symbol="X", colour=True)
+    ha = chop_scan.analyze(frame, 9, 21, 5, now, symbol="X", ha=True)
+    assert normal is not None and colour is not None and ha is not None
+    assert colour.trend_mode == chop_scan.COLOUR_MODE and ha.trend_mode == "HEIKIN_ASHI"
+    assert normal.trend_mode != chop_scan.COLOUR_MODE
+    assert colour.crosses_today >= 5 and colour.score == chop_scan.CHOPPY  # colour flips, not SMA crosses
+    assert colour.crosses_by_minutes[5] == colour.crosses_today

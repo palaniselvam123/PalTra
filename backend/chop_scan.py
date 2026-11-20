@@ -271,7 +271,24 @@ def _crosses(closed: pd.DataFrame, today: int) -> list[dict]:
 
 NORMAL = "NORMAL"
 HEIKIN_ASHI = "HA"
-CANDLE_KINDS = (NORMAL, HEIKIN_ASHI)
+# Real candles read the Heikin Ashi way (owner's request): colour runs and flips of the real candles, no SMA cross.
+COLOUR = "COLOUR"
+CANDLE_KINDS = (NORMAL, COLOUR, HEIKIN_ASHI)
+COLOUR_MODE = "COLOUR"  # trend_mode of a colour read on real candles (ha_trend.HA_MODE on Heikin Ashi ones)
+
+
+def candle_kind(value) -> str:
+    """NORMAL / COLOUR / HA from a request or saved meta (anything else, and a missing one, is NORMAL)."""
+    text = str(value or "").upper()
+    return text if text in CANDLE_KINDS else NORMAL
+
+
+def read_flags(candles) -> tuple[bool, bool]:
+    """(Heikin Ashi candles, read by colour) for a candle kind; True / False stand for HA / NORMAL (older callers)."""
+    if candles is True:
+        return True, True
+    kind = candle_kind(candles) if candles not in (None, False) else NORMAL
+    return kind == HEIKIN_ASHI, kind != NORMAL
 
 
 def ha_bars(bars: pd.DataFrame) -> pd.DataFrame:
@@ -290,8 +307,10 @@ def ha_bars(bars: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT, ha: bool = False) -> ChopRow | None:
-    """One stock's chop/trend read. None when the tape isn't long enough yet. `ha`: read Heikin Ashi candles."""
+def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT, ha: bool = False, colour: bool = False) -> ChopRow | None:
+    """One stock's chop/trend read. None when the tape isn't long enough yet. `ha`: read Heikin Ashi candles.
+    `colour`: read the real candles by colour (runs and flips, ha_trend.py) instead of the SMA cross; Heikin Ashi
+    candles are always read by colour."""
     if frame_1m is None or getattr(frame_1m, "empty", True):
         return None
     bars = closed_bars(frame_1m, minutes, now)
@@ -302,8 +321,9 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         bars = ha_bars(bars)
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
     today = _ist_day(int(now.timestamp()))
+    by_colour = bool(ha or colour)
     # Heikin Ashi: the trend is read from the candles (colour runs, flips, wicks; ha_trend.py), never the SMA cross.
-    hits = ha_trend.flips(enriched, today) if ha else _crosses(enriched, today)
+    hits = ha_trend.flips(enriched, today) if by_colour else _crosses(enriched, today)
     ltp = float(frame_1m["close"].iloc[-1]) if len(frame_1m) else None
     minutes_since: float | None = None
     avg_gap: float | None = None
@@ -322,7 +342,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
             ]
             avg_gap = sum(gaps) / len(gaps) if gaps else None
             avg_move = sum(moves) / len(moves) if moves else None
-    score = ha_trend.score(hits, minutes_since, avg_gap, minutes) if ha else score_for(len(hits), minutes_since, avg_gap)
+    score = ha_trend.score(hits, minutes_since, avg_gap, minutes) if by_colour else score_for(len(hits), minutes_since, avg_gap)
     quiet = bool(hits) and minutes_since is not None and minutes_since >= max(1, int(quiet_min or 0))
     base = ChopRow(
         symbol=symbol,
@@ -339,16 +359,18 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
     )
     vwap = _vwap_today(frame_1m, now)
     today_start = today * 86_400 - 19_800 + SESSION_OPEN_SEC
-    if ha:
+    if by_colour:
         trend = ha_trend.checks(enriched, vwap, real_close)
+        if not ha:
+            trend = {**trend, "trend_mode": COLOUR_MODE}
         fresh = ha_trend.fresh(enriched, vwap, now, frame_1m, real_close)
         phase = ha_trend.summary(ha_trend.phases(enriched, today_start))
     else:
         trend = trend_strength.read(enriched, vwap, now=now, tape=frame_1m)
         fresh = trend_strength.fresh(enriched, vwap, now, frame_1m, price=real_close)
         phase = trend_phases.summary(trend_phases.phases(enriched, today_start))
-    by_size = {m: (*_cross_read(hits, enriched, ha), trend["trend"]) if m == minutes
-               else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today, vwap, ha)
+    by_size = {m: (*_cross_read(hits, enriched, by_colour), trend["trend"]) if m == minutes
+               else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today, vwap, ha, by_colour)
                for m in CANDLE_MINUTES}
     return replace(
         base,
@@ -375,16 +397,16 @@ def _side(enriched: pd.DataFrame) -> str | None:
 
 
 def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast: int, sma_slow: int, today: int,
-                vwap: float | None = None, ha: bool = False):
+                vwap: float | None = None, ha: bool = False, colour: bool = False):
     """(crosses today, side, last cross ts, last cross side, run since ts, run candles, gap %, widest gap %,
-    strong trend) on `minutes`-long candles; Nones when too short."""
+    strong trend) on `minutes`-long candles; Nones when too short. `colour`: read by colour (Heikin Ashi always is)."""
     bars = closed_bars(frame_1m, minutes, now)
     if len(bars) < max(int(sma_slow), 2) + 1:
         return (None,) * 9
     if ha:
         bars = ha_bars(bars)
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
-    if ha:
+    if ha or colour:
         price = float(frame_1m["close"].iloc[-1]) if len(frame_1m) else None
         strong = ha_trend.checks(enriched, vwap, price)["trend"]
         return (*_cross_read(ha_trend.flips(enriched, today), enriched, True), strong)
@@ -467,7 +489,7 @@ class Status:
     sma_fast: int = 9
     sma_slow: int = 21
     quiet_min: int = QUIET_MIN_DEFAULT
-    candles: str = NORMAL  # NORMAL | HA (Heikin Ashi)
+    candles: str = NORMAL  # NORMAL | COLOUR (real candles read by colour) | HA (Heikin Ashi)
     as_of: str | None = None
     finished_at: str | None = None  # wall-clock time (IST) the last pass ended
     market_open: bool = False
@@ -536,7 +558,7 @@ class ChopScanner:
         candles: str = NORMAL,
     ) -> dict:
         if candles not in CANDLE_KINDS:
-            raise ValueError("Candles must be NORMAL or HA (Heikin Ashi)")
+            raise ValueError("Candles must be NORMAL, COLOUR (real candles read by colour) or HA (Heikin Ashi)")
         if minutes not in CANDLE_MINUTES:
             raise ValueError(f"Candle size must be one of {', '.join(str(m) for m in CANDLE_MINUTES)} minutes")
         names = clean_symbols(symbols)
@@ -566,7 +588,7 @@ class ChopScanner:
             self._run(
                 names, fetch, key, minutes, sma_fast, sma_slow, now,
                 alert_on_quiet=alert_on_quiet, alert_cb=alert_cb, job=job,
-                price_min=price_min, price_max=price_max, ha=candles == HEIKIN_ASHI,
+                price_min=price_min, price_max=price_max, ha=candles == HEIKIN_ASHI, colour=candles == COLOUR,
             )
         )
         return self.snapshot()
@@ -587,6 +609,7 @@ class ChopScanner:
         price_min: float = 0.0,
         price_max: float = 0.0,
         ha: bool = False,
+        colour: bool = False,
     ) -> None:
         start = (now - dt.timedelta(days=WARMUP_DAYS)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         end = now.replace(tzinfo=None)
@@ -609,7 +632,7 @@ class ChopScanner:
                         row = await job(symbol, start, end)
                     else:
                         frame = await fetch(symbol, start, end)
-                        row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min, ha=ha)
+                        row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min, ha=ha, colour=colour)
                     ok += 1
                     if row is not None:
                         rows.append(row)

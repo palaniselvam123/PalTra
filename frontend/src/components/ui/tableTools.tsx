@@ -200,12 +200,14 @@ export function SelectFilter<T extends string | number>({
   onChange,
   options,
   className = "w-40",
+  title,
 }: {
   label: string;
   value: T;
   onChange: (next: T) => void;
   options: { value: T; label: string }[];
   className?: string;
+  title?: string;
 }) {
   const id = useId();
   return (
@@ -215,6 +217,7 @@ export function SelectFilter<T extends string | number>({
       </label>
       <select
         id={id}
+        title={title}
         value={value as string | number}
         onChange={(e) => {
           const raw = e.target.value;
