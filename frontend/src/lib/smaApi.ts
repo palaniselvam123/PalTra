@@ -7,6 +7,7 @@ routes are mounted at `/sma` on this host, so the browser must not call
 
 import { runBeforeCharges, tradeBeforeCharges } from "./pnlBasis";
 import { onSignedOut } from "./session";
+import type { TrendRead } from "./trendReads";
 
 function resolveSmaApi(): string {
   const fromEnv = process.env.NEXT_PUBLIC_SMA_API_URL;
@@ -2090,6 +2091,17 @@ export type ChartPayload = {
   flow_decisions?: { end: number; text: string; buy?: number; level?: number; src?: string; side?: string }[];
   /** Simple order-flow check: what it read at each candle (kind "entry" at a signal, "exit" each candle in a trade). */
   gate_notes?: { end: number; kind: "entry" | "exit"; text: string; exec?: number; wait?: number; side?: string; ok?: boolean }[];
+  /** The trend reading of a Trend quality stock at each candle close and what the bot did (trend_log.py; display only). */
+  trend_reads?: TrendRead[];
+};
+
+export type TrendReadsResult = {
+  run_id: number;
+  /** saved = kept while the backtest played; after = worked out now from the candles; none = nothing saved. */
+  source: "saved" | "after" | "none";
+  rows: TrendRead[];
+  stocks: { day: string; symbol: string; count: number }[];
+  days: string[];
 };
 
 export type TradeRow = {
@@ -3653,6 +3665,13 @@ export const smaApi = {
     request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
   /** Each trade's latest saved Most active read before its entry (by trade id); trades without one are left out. */
   replayRunMarketReads: (id: number) => request<Record<string, MarketRead>>(`/api/replay/runs/${id}/market-reads`),
+  replayRunTrendReads: (id: number, opts: { symbol?: string; day?: string; workOut?: boolean } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.symbol) q.set("symbol", opts.symbol);
+    if (opts.day) q.set("day", opts.day);
+    if (opts.workOut) q.set("work_out", "true");
+    return request<TrendReadsResult>(`/api/replay/runs/${id}/trend-reads${q.toString() ? `?${q}` : ""}`);
+  },
   /** Put the strategy a backtest run played with onto a bot (Trade list, mode and name stay). No order is placed. */
   applyRunStrategy: (id: number, toDesk: "1" | "2" | "3" | "4" | "5" | "research", reset: boolean, withStocks: boolean, confirmLive = false) =>
     request<{ desk: string; changed: string[]; notes: string[]; run_id: number }>(

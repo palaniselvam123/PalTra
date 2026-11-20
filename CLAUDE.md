@@ -1296,6 +1296,20 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   (SMAs the other way = 0) (`exit_call`). **Which stocks** (`tq_all`, off): the source chip "Auto-arm: Trend quality" (the
   auto-arm backtest's Trend quality picks carry it via `replay.pick_sources`), or every armed stock. Counts as an exit for
   `strategyChecks.noExitOn`. Normal candles (not Heikin Ashi). The stock research baseline keeps it off.
+- `backend/trend_log.py` – **Trend readings of a backtest** (display only; owner's request: the auto-arm backtest works the
+  Trend quality reading out by itself and kept none of it, so 10:45's score 86 could not be set against the trade at 12:00):
+  `StrategyEngine._record_trend` (after `_trend_entry_pass` in the armed loop and `_watch_trend_exit` in the held loop),
+  once per closed candle of `_exit_minutes`, for stocks `trend_trade.applies` (Trend quality source or `tq_all`): price,
+  side, trend score, the checks (`stock_regime.read` now carries `trend_checks` / `trend_mode`), score label, crosses, phase
+  and since when, and the bot's decision (the entry / exit pass's note, `_tq_exit_at` for a trend exit, else why it was not
+  asked). Kept in memory per stock (`_tq_log`, `TQ_LOG_KEEP` 400; chart payload `trend_reads`, the why line's "Trend reading
+  at HH:MM: …", `lib/trendReads.ts`) and, in a replay (`engine.trend_rows`, set by `ReplaySession`, saved in batches by
+  `_flush_trend`), in `trend_reads.db` next to the SMA DB (`TREND_READS_FILE`); a run's rows go with `delete_run`, an
+  unfinished day's with `_drop_unfinished_days`. `GET /api/replay/runs/{id}/trend-reads?symbol=&day=&work_out=` (one stock
+  at a time; without a stock only the picker); `work_out` reads a run saved before again from the cached candles with the
+  run's SMA periods, candle size and `tq_*` settings (`trend_log.work_out`, no positions: "would enter …", `source`
+  "after"). UI: the run detail's "Trend readings" (`components/Terminal/TrendReadings.tsx`: day / stock, Only when it
+  changed, What changed, CSV, Work it out now). Nothing in the strategy reads it; no order path.
 - `backend/review.py` – 1-minute human review (`review_on`, off by default, per
   bot and per stock, PAPER and LIVE, replay and research too). The bot's own
   candle stays the strategy; nothing here trades. Once per newly closed candle

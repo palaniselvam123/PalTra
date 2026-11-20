@@ -52,6 +52,7 @@ import fast_bot
 import handoff_chain
 import handoff_log
 import open_pnl_log
+import trend_log
 import recovery
 import server_role
 import strategy_lab
@@ -909,6 +910,7 @@ def _drop_unfinished_days(run_id: int, days: list[str]) -> int:
             ).delete(synchronize_session=False)
         db.commit()
     handoff_log.delete_run(run_id, days)
+    trend_log.delete_run(run_id, days)
     return int(n)
 
 
@@ -1221,6 +1223,7 @@ def delete_run(run_id: int) -> bool:
     handoff_log.delete_run(run_id)
     _RUN_CACHE.pop(run_id, None)
     open_pnl_log.delete_replay(run_id)
+    trend_log.delete_run(run_id)
     return True
 
 
@@ -1647,6 +1650,8 @@ class ReplaySession:
                 # would have been live. Play again without answering = no answer.
                 engine.on_review = lambda _item: self.control("pause")
                 engine.load_config()
+                # The trend reading at each candle close of Trend quality stocks, saved with the run (trend_log.py).
+                engine.trend_rows = [] if self.run_id is not None else None
                 await engine.tick(clock)
                 engine.hold_for_next_cross(symbols)
                 engine.status = "PAUSED" if bot_paused else "RUNNING"
@@ -1815,15 +1820,41 @@ class ReplaySession:
             sample = played / spent if spent > 0 else 0.0
             self.effective_speed = sample if self.effective_speed == 0 else 0.7 * self.effective_speed + 0.3 * sample
 
+    TREND_BATCH = 300  # trend readings saved together
+
     def _note_pnl(self, eng) -> None:
         log_ = getattr(self, "_pnl_log", None)
         if log_ is not None:
             log_.note(eng, eng.feed.clock)
+        rows = getattr(eng, "trend_rows", None)
+        if rows is not None and len(rows) >= self.TREND_BATCH:
+            self._flush_trend(eng)
 
     def _flush_pnl(self) -> None:
         log_ = getattr(self, "_pnl_log", None)
         if log_ is not None:
             log_.flush()
+        if self.engine is not None:
+            self._flush_trend(self.engine)
+
+    def _flush_trend(self, eng) -> None:
+        """Save the engine's trend readings (trend_log.py) off the event loop."""
+        rows = getattr(eng, "trend_rows", None)
+        if not rows or self.run_id is None:
+            return
+        eng.trend_rows = []
+        run_id, bot = self.run_id, self.bot
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            trend_log.save(run_id, bot, rows)
+            return
+        tasks = getattr(self, "_trend_tasks", None)
+        if tasks is None:
+            tasks = self._trend_tasks = set()
+        task = loop.create_task(asyncio.to_thread(trend_log.save, run_id, bot, rows))
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
 
     def _day_end(self) -> dt.datetime:
         assert self.day is not None

@@ -56,6 +56,8 @@ def read(frame_1m: pd.DataFrame | None, sma_fast: int, sma_slow: int, minutes: i
         "trend_side": strong.get("trend_side"),
         "trend_score": strong.get("trend_score"),
         "trend": strong.get("trend"),
+        "trend_checks": strong.get("trend_checks") or {},
+        "trend_mode": strong.get("trend_mode"),
         "minutes": int(minutes),
         "score": chop_scan.score_for(len(hits), minutes_since, avg_gap),
         "crosses": len(hits),

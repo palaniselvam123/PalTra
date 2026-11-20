@@ -1,6 +1,7 @@
 "use client";
 
 import { ByTrend, HandoffTable } from "./HandoffTrail";
+import { TrendReadings } from "./TrendReadings";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
 import clsx from "clsx";
@@ -1303,6 +1304,7 @@ function RunDetailBody({
       ) : null}
       {(run.stocks ?? []).length > 1 ? <ByStock stocks={run.stocks ?? []} settings={run.settings} /> : null}
       {(run.by_regime ?? []).length ? <ByTrend groups={run.by_regime ?? []} /> : null}
+      <TrendReadings runId={run.id} symbols={run.symbols ?? []} />
       {(run.handoff_trail ?? []).length ? (
         <div className="mb-4">
           <div className="mb-1 px-2 text-xs uppercase tracking-wider text-slate-400">

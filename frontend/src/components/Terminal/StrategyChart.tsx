@@ -28,6 +28,7 @@ import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { NewTag } from "@/components/ui/NewTag";
 import { type ColourBodyRead, bodyText, colourBodyRead, colourBodyTip } from "@/lib/colourBody";
+import { trendReadText, type TrendRead } from "@/lib/trendReads";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { usePinned } from "@/lib/usePinned";
 import { StockNewsPanel } from "./StockNewsPanel";
@@ -642,7 +643,19 @@ function gateWhy(p: { c: Candle; bar: number; notes: GateNote[] | null; filters?
   return entryNote ? say(entryNote) : "";
 }
 
-function whyNoTrade(p: Parameters<typeof baseWhy>[0] & { gateNotes?: GateNote[] | null }): string {
+function whyNoTrade(p: Parameters<typeof baseWhy>[0] & { gateNotes?: GateNote[] | null; trendReads?: TrendRead[] | null }): string {
+  const withTrend = (text: string) => {
+    // The trend reading the bot made when this candle closed (trend_log.py): score, phase and what it did.
+    const c0 = p.rows[p.i];
+    if (!c0 || p.forming || !p.trendReads?.length) return text;
+    const end0 = c0.time + p.bar * 60;
+    const r = p.trendReads.filter((x) => x.ts > c0.time && x.ts <= end0).sort((a, b) => b.ts - a.ts)[0];
+    return r ? `${text ? `${text} ` : ""}${trendReadText(r)}` : text;
+  };
+  return withTrend(whyNoTradeBase(p));
+}
+
+function whyNoTradeBase(p: Parameters<typeof baseWhy>[0] & { gateNotes?: GateNote[] | null }): string {
   const base = baseWhy(p);
   const c = p.rows[p.i];
   if (!c || p.forming) return base;
@@ -2450,6 +2463,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           flow: view?.flow ?? null,
           flowDecisions: view?.flow_decisions ?? null,
           gateNotes: view?.gate_notes ?? null,
+          trendReads: view?.trend_reads ?? null,
         })
       : "";
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
