@@ -272,6 +272,8 @@ export const SETTING_LABELS: Record<string, string> = {
   tq_entry: "enter on the trend score / phase (Trend quality)",
   tq_entry_score: "trend score to enter at least",
   tq_entry_phase: "entry needs the phase to agree",
+  tq_skip_doji: "trend entry skips a doji",
+  tq_doji_pct: "doji: body under % of the range",
   tq_only: "only the trend opens trades on these stocks",
   tq_exit: "close when the trend fades (Trend quality)",
   tq_exit_score: "close when the trend score falls under",

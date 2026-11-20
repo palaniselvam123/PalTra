@@ -409,6 +409,8 @@ export type SmaConfig = {
   tq_entry?: boolean;
   tq_entry_score?: number;
   tq_entry_phase?: boolean;
+  tq_skip_doji?: boolean;
+  tq_doji_pct?: number;
   tq_only?: boolean;
   tq_exit?: boolean;
   tq_exit_score?: number;

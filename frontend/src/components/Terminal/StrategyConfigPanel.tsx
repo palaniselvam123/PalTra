@@ -570,6 +570,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     tq_entry: Boolean(form.tq_entry),
     tq_entry_score: Math.min(100, Math.max(0, Math.round(Number(form.tq_entry_score ?? 70)))) || 0,
     tq_entry_phase: form.tq_entry_phase !== false,
+    tq_skip_doji: Boolean(form.tq_skip_doji),
+    tq_doji_pct: Math.min(90, Math.max(1, Math.round(Number(form.tq_doji_pct ?? 10)) || 10)),
     tq_only: form.tq_only !== false,
     tq_exit: Boolean(form.tq_exit),
     tq_exit_score: Math.min(100, Math.max(0, Math.round(Number(form.tq_exit_score ?? 40)))) || 0,
@@ -3973,7 +3975,7 @@ export function activeRules(f: SmaConfig): Rule[] {
       key: "tq_entry",
       text: `${f.tq_all ? "Every armed stock" : "Trend quality auto-armed stocks"}: entered on the trend once its score is ${
         f.tq_entry_score ?? 70
-      } or more${f.tq_entry_phase === false ? "" : " and the phase agrees"}${f.tq_only === false ? "" : " (only the trend opens them)"}`,
+      } or more${f.tq_entry_phase === false ? "" : " and the phase agrees"}${f.tq_skip_doji ? `, not on a doji (body under ${f.tq_doji_pct ?? 10}% of its range)` : ""}${f.tq_only === false ? "" : " (only the trend opens them)"}`,
       off: { tq_entry: false },
     });
   if (f.tq_exit)
@@ -6320,7 +6322,7 @@ function TrendTrade({
   set: (key: keyof SmaConfig, value: string | boolean) => void;
   isOwn: (key: keyof SmaConfig) => boolean;
 }) {
-  const own = (["tq_entry", "tq_entry_score", "tq_entry_phase", "tq_only", "tq_exit", "tq_exit_score", "tq_exit_phase", "tq_all"] as const).some(
+  const own = (["tq_entry", "tq_entry_score", "tq_entry_phase", "tq_skip_doji", "tq_doji_pct", "tq_only", "tq_exit", "tq_exit_score", "tq_exit_phase", "tq_all"] as const).some(
     (k) => isOwn(k),
   );
   const box = "min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9";
@@ -6358,6 +6360,20 @@ function TrendTrade({
         <label className="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" disabled={!entry} checked={form.tq_entry_phase !== false} onChange={(e) => set("tq_entry_phase", e.target.checked)} />
           and the phase points the same way (up to buy, down to sell)
+        </label>
+        <label className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" disabled={!entry} checked={Boolean(form.tq_skip_doji)} onChange={(e) => set("tq_skip_doji", e.target.checked)} />
+          and skip a doji: wait while the newest closed candle&apos;s body is under
+          <input type="number" min={1} max={90} step={1} disabled={!entry || !form.tq_skip_doji} value={Number(form.tq_doji_pct ?? 10)}
+            onChange={(e) => set("tq_doji_pct", e.target.value)} className={box} aria-label="Doji: body under this % of the candle's range" />
+          % of its high-low range <NewTag id="set-trend-doji" link={false} />
+          <InfoTip label="About skipping a doji">
+            The trend score only asks which side of the lines the close is on, so a candle that went nowhere (open ≈ close) can
+            still give a high score. With this ticked, the entry waits while the newest closed candle the score was read on (normal
+            candles, the bot&apos;s candle size) has a body smaller than this share of its high-to-low range, and asks again on the
+            next candle. 10% is the usual doji line. Example: GLENMARK on 18 Nov scored 86 at 10:25 on a doji (open and close both
+            2,663.2) and was bought; with this ticked it would have waited. Entries only; exits are unchanged.
+          </InfoTip>
         </label>
         <label className="flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" disabled={!entry} checked={form.tq_only !== false} onChange={(e) => set("tq_only", e.target.checked)} />

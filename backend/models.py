@@ -642,6 +642,8 @@ class BotConfig(Base):
     tq_exit_score: Mapped[int | None] = mapped_column(Integer, nullable=True, default=40)
     tq_exit_phase: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     tq_all: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    tq_skip_doji: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    tq_doji_pct: Mapped[int | None] = mapped_column(Integer, nullable=True, default=10)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
