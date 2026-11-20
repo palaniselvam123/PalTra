@@ -250,6 +250,11 @@ def test_the_reads_stop_once_the_days_picks_are_full_and_report_progress():
     after = (dt.datetime.combine(DAY, dt.time(*map(int, got[0]["at"].split(":")))) + dt.timedelta(minutes=15)).strftime("%H:%M")
     assert seen[0] == "10:00" and seen[-1] == after < "14:00"
     assert "on_step" not in rule.as_dict()
+    # Each pick is reported as it is found (the replay bar names them while the reads run).
+    found: list[tuple] = []
+    auto_arm.picks_for_day(frames, DAY, auto_arm.AutoArmRule(**base, max_day=1, on_found=lambda *a: found.append(a)))
+    assert found == [(got[0]["at"], got[0]["symbol"], got[0]["side"])]
+    assert "on_found" not in rule.as_dict()
 
 
 @pytest.mark.asyncio

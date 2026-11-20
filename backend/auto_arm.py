@@ -239,6 +239,8 @@ class AutoArmRule:
     kind: str = KIND
     #: Called with "HH:MM" as the Trend quality reads reach each minute (the replay bar's progress). Not saved.
     on_step: object = field(default=None, repr=False, compare=False)
+    #: Called with (HH:MM, symbol, LONG / SHORT) as each Trend quality pick is found (the replay bar). Not saved.
+    on_found: object = field(default=None, repr=False, compare=False)
 
     @property
     def pick_time(self) -> dt.time:
@@ -350,6 +352,11 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: AutoArmRu
                 if side:
                     passed = sum(1 for ok in (read.get("trend_checks") or {}).values() if ok)
                     found[symbol] = {"at": at}
+                    if callable(rule.on_found):
+                        try:
+                            rule.on_found(at, symbol, "LONG" if side == "UP" else "SHORT")
+                        except Exception:  # noqa: BLE001 - progress only
+                            pass
                     events.append((at, symbol, {"source": "Trend quality", "side": "LONG" if side == "UP" else "SHORT",
                                                 "why": f"strong {side.lower()}, {passed} of 7 checks"}))
     out: list[dict] = []
