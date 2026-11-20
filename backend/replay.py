@@ -1577,7 +1577,25 @@ class ReplaySession:
                 if getattr(self.rule, "kind", None) == auto_arm.KIND:
                     # The replay bar shows how far the arm-minute reads have got (auto_arm.picks_for_day).
                     label = f"day {index + 1} of {len(days)} ({day.isoformat()})"
-                    self.rule.on_step = lambda at, label=label: setattr(self, "finding", f"{label}: reading {at}")
+                    # Stocks found so far (Trend quality as the reads reach them; Most active from the saved scans):
+                    # the day plays only once every arm minute is known, so the bar names them while it reads.
+                    got: list[str] = []
+                    if getattr(self.rule, "source", "") in ("ACTIVE", "BOTH"):
+                        hits = sorted(self.rule.active_hits.get(day.isoformat(), []))
+                        got = [f"{sym} {at_} {'↑' if s_ == 'BUY' else '↓'} (Most active)" for at_, sym, s_, _p in hits
+                               if sym in frames]
+
+                    def step(at, label=label, got=got):
+                        seen = [g for g in got if g.split(" ")[1] <= at]
+                        tail = f" · found so far ({len(seen)}): {', '.join(seen[:6])}{' …' if len(seen) > 6 else ''}" if seen else " · none found yet"
+                        self.finding = f"{label}: reading {at}{tail}"
+
+                    def found(at, symbol, side, got=got):
+                        got.append(f"{symbol} {at} {'↑' if side == 'LONG' else '↓'}")
+                        got.sort(key=lambda g: g.split(" ")[1])
+
+                    self.rule.on_step = step
+                    self.rule.on_found = found
                     self.finding = f"{label}: starting"
                 try:
                     picked = await asyncio.to_thread(picks_for_day, frames, day, self.rule)

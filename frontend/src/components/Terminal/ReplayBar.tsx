@@ -537,7 +537,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName,
             {info.pick_rule?.kind !== "AUTOARM"
               ? `Loading Groww candles… ${info.loaded}/${info.total} stocks`
               : info.finding
-                ? `Finding the minute each stock would have been armed — ${info.finding} (stops once the day's picks are full) — none is armed yet`
+                ? `Finding the minute each stock would have been armed — ${info.finding} (stops once the day's picks are full). Trading starts once every arm minute is found; each stock then trades from its own minute`
                 : `Downloading the candles of ${info.loaded}/${info.total} stocks to find the minute each one would have been armed — none is armed yet`}
           </span>
         ) : (
