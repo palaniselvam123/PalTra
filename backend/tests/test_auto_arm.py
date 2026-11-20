@@ -396,3 +396,60 @@ def test_saved_scans_arm_at_each_stocks_own_read_and_skip_one_sided_books():
         ]},
     ]
     assert auto_arm.active_hits(scans, 75, "BOTH", 0) == [("09:32", "EARLY", "SELL", 80.0), ("09:45", "LATE", "BUY", 80.0)]
+
+
+def _tape(days: list[dt.date], seed: int = 7, loud_from: int | None = None) -> pd.DataFrame:
+    """1-minute candles (running volume total) for `days`; sessions from index `loud_from` on trade 4× the volume."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    rows, px = [], 1000.0
+    for i, d in enumerate(days):
+        total, drift = 0, rng.normal(0, 0.0005)
+        mult = 4 if loud_from is not None and i >= loud_from else 1
+        for m in range(375):
+            t = dt.datetime.combine(d, dt.time(9, 15), tzinfo=IST) + dt.timedelta(minutes=m)
+            o = px
+            px *= 1 + drift + rng.normal(0, 0.0012)
+            total += int(rng.integers(500, 5000)) * mult
+            rows.append({"ts": int(t.timestamp()), "open": o, "high": max(o, px) * 1.0005, "low": min(o, px) * 0.9995,
+                         "close": px, "volume": total})
+    return pd.DataFrame(rows)
+
+
+def _weekdays(start: dt.date, n: int) -> list[dt.date]:
+    out, d = [], start
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d)
+        d += dt.timedelta(days=1)
+    return out
+
+
+@pytest.mark.parametrize("ha", [False, True])
+def test_backtest_read_matches_the_trend_quality_scan(ha):
+    """The backtest's read of a minute equals the live scan's row at that minute (what History saved), though a
+    multi-day run's tape carries every earlier day: the live scan downloads only WARMUP_DAYS calendar days."""
+    import chop_scan
+
+    days = _weekdays(dt.date(2026, 10, 19), 12)
+    # Quiet early sessions, loud recent ones: the morning volume check flips if the backtest averages more sessions.
+    tape = _tape(days, loud_from=8)
+    keys = ("trend", "trend_score", "trend_checks", "trend_side", "trend_mode", "rvol", "trend_days")
+    for day in days[9:]:
+        for at in (dt.time(9, 50), dt.time(11, 0), dt.time(14, 10)):
+            for minutes in (5, 15):
+                now = dt.datetime.combine(day, at, tzinfo=IST)
+                start = (now - dt.timedelta(days=chop_scan.WARMUP_DAYS)).replace(hour=0, minute=0)
+                live = tape[(tape["ts"] >= int(start.timestamp())) & (tape["ts"] < int(now.timestamp()))]
+                row = chop_scan.analyze(live.reset_index(drop=True), 9, 21, minutes, now, ha=ha).as_dict()
+                read = auto_arm.strong_read(tape, day, at, minutes, 9, 21, ha=ha)
+                assert {k: read.get(k) for k in keys if k in read} == {k: row.get(k) for k in keys if k in read}, (day, at, minutes)
+
+
+def test_resumed_run_keeps_its_candles_and_sma_periods():
+    import scalp_picks
+
+    saved = auto_arm.AutoArmRule(candles="HA", min_rvol=2.0, sma_fast=5, sma_slow=13).as_dict()
+    rule = scalp_picks.rule_from_dict(saved, 9, 21)
+    assert (rule.candles, rule.min_rvol, rule.sma_fast, rule.sma_slow) == ("HA", 2.0, 5, 13)
