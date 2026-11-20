@@ -396,3 +396,13 @@ def test_saved_scans_arm_at_each_stocks_own_read_and_skip_one_sided_books():
         ]},
     ]
     assert auto_arm.active_hits(scans, 75, "BOTH", 0) == [("09:32", "EARLY", "SELL", 80.0), ("09:45", "LATE", "BUY", 80.0)]
+
+
+def test_the_why_names_the_candle_and_rules_read():
+    rule = auto_arm.AutoArmRule(minutes=15)
+    read = {"trend_mode": "MORNING", "trend_checks": {"stack": True, "vwap": True, "slope": True, "fan": True,
+                                                      "hold": True, "run": False, "volume": False}}
+    assert auto_arm.strong_why(read, "DOWN", rule) == (
+        "strong down, 5 of 7 checks on 15-min candles (morning rules, before 10:00); missed: run, volume")
+    ha = auto_arm.AutoArmRule(minutes=5, candles="HA")
+    assert auto_arm.strong_why({"trend_checks": {"a": True}}, "UP", ha) == "strong up, 1 of 1 checks on 5-min Heikin Ashi candles"

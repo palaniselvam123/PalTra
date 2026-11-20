@@ -1719,13 +1719,16 @@ function PickList({ pick, stocks }: { pick: ScalpPickInfo; stocks: ReplayStockRo
                     <p className="px-8 pb-2 text-slate-500">No stock that day matches “Show”.</p>
                   ) : (
                     <div className="overflow-x-auto px-2 pb-2">
-                      <table className="w-full min-w-[520px] text-left">
+                      <table className="w-full min-w-[760px] text-left">
                         <thead className="text-[11px] uppercase tracking-wider text-slate-500">
                           <tr>
                             <th className="px-2 py-1 font-medium">Armed at</th>
                             <th className="px-2 py-1 font-medium">Stock</th>
                             <th className="px-2 py-1 font-medium">Side</th>
                             <th className="px-2 py-1 font-medium">Found by</th>
+                            <th className="px-2 py-1 font-medium">
+                              Why <NewTag id="autoarm-why" />
+                            </th>
                             <th className="px-2 py-1 text-right font-medium">Trades</th>
                             <th className="px-2 py-1 text-right font-medium">Won / lost</th>
                             <th className="px-2 py-1 text-right font-medium">P&amp;L</th>
@@ -1740,6 +1743,7 @@ function PickList({ pick, stocks }: { pick: ScalpPickInfo; stocks: ReplayStockRo
                                 {r.side || "—"}
                               </td>
                               <td className="px-2 py-1 text-slate-400">{r.p.source ?? pickKindLabel(pick)}</td>
+                              <td className="max-w-md px-2 py-1 text-xs text-slate-400">{r.p.why || "—"}</td>
                               <td className="px-2 py-1 text-right font-mono text-slate-300">{r.day ? r.day.trades : 0}</td>
                               <td className="px-2 py-1 text-right font-mono text-slate-400">{r.day ? `${r.day.wins} / ${r.day.losses}` : "—"}</td>
                               <td className={clsx("px-2 py-1 text-right font-mono font-semibold", r.day ? pnlTone(r.day.net) : "text-slate-500")}>
