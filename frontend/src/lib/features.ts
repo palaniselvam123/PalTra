@@ -653,7 +653,7 @@ export const FEATURES: Feature[] = [
     purpose: "Across saved scans, keep only the reads with a trend score of at least N, at least N of the 7 strong-trend checks passed (e.g. all 7), and the phase you want (strong up, strong down, either, or choppy)." },
   { id: "autoarm-scan-candle", area: "trend", added: "2026-11-20", pr: 488, href: "/scalp/#backtest", where: "Scalp → Backtest → Auto-arm replay → on candles of", title: "Auto-arm backtest starts on the Trend quality scan's candle",
     purpose: "The auto-arm backtest now reads the same candle size (and Normal / Heikin Ashi) as your Trend quality scan, and warns when you pick another: a stock that was 7/7 on 15-minute candles can read weaker on 5-minute ones and never be armed."},
-  { id: "autoarm-why", area: "trend", added: "2026-11-20", pr: 490, href: "/terminal/", where: "Terminal → Backtests → a run → Armed log → Why", title: "Why each stock was armed in an auto-arm backtest",
+  { id: "autoarm-why", area: "trend", added: "2026-11-20", pr: 491, href: "/terminal/", where: "Terminal → Backtests → a run → Armed log → Why", title: "Why each stock was armed in an auto-arm backtest",
     purpose: "The armed log now shows why each stock was armed: the checks passed, the candle size and rules they were read on (e.g. 15-min candles, morning rules before 10:00) and the checks it missed, so you can set it against the Trend quality History."},
 ];
 
