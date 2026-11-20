@@ -120,6 +120,14 @@ export default function TerminalPage() {
     () => (replay?.pick_rule?.kind === "AUTOARM" ? Object.fromEntries((state?.books ?? []).map((b) => [b.symbol, b.note ?? ""])) : undefined),
     [replay?.pick_rule?.kind, state?.books],
   );
+  // Auto-arm replay: each stock's P&L on the day being played (closed + open, before charges) and its open part.
+  const replayPnl = useMemo(
+    () =>
+      replay?.pick_rule?.kind === "AUTOARM"
+        ? Object.fromEntries((state?.books ?? []).map((b) => [b.symbol, { day: b.day_gross ?? 0, open: b.open_gross ?? 0 }]))
+        : undefined,
+    [replay?.pick_rule?.kind, state?.books],
+  );
   // The day, run and stock the replay was last showing, so the chart can stay
   // on that day after the replay ends instead of jumping to today.
   const lastPlayed = useRef<{ date: string; runId: number | null; symbol: string | null } | null>(null);
@@ -573,6 +581,7 @@ export default function TerminalPage() {
               bot={botNo}
               botName={config?.bot_name ?? `Bot ${botNo}`}
               notes={replayNotes}
+              pnl={replayPnl}
             />
             {replay?.follows ? <FastFollow source={replay.follows} log={state?.fast_log ?? []} /> : null}
           </>
@@ -591,6 +600,7 @@ export default function TerminalPage() {
             bot={1}
             botName={config?.bot_name ?? "Bot 1"}
             notes={replayNotes}
+            pnl={replayPnl}
           />
         )}
         </div>

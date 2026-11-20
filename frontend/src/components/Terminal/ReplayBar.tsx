@@ -3,6 +3,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ChevronsLeft, ChevronsRight, History, Loader2, Pause, Play, RotateCcw, Square } from "lucide-react";
 import clsx from "clsx";
+import { money } from "@/lib/format";
+import { NewTag } from "@/components/ui/NewTag";
 import { smaApi, replayActive, type ReplayInfo, type ResumableRun } from "@/lib/smaApi";
 
 const HIDE_KEY = "replay.resumeHidden";
@@ -237,14 +239,56 @@ type Props = {
   botName?: string;
   /** The replayed engine's per-stock lines (state.books[].note): why an armed stock has no order yet. */
   notes?: Record<string, string>;
+  /** Auto-arm replay: each stock's P&L on the day being played (closed + open, before charges) and its open part. */
+  pnl?: Record<string, StockPnl>;
 };
+
+type StockPnl = { day: number; open: number };
+
+/** A signed rupee amount, green when up and red when down. */
+function Pnl({ value }: { value: number }) {
+  const cls = value > 0 ? "text-emerald-300" : value < 0 ? "text-rose-300" : "text-violet-200/70";
+  return <span className={clsx("font-mono", cls)}>{money(value, true)}</span>;
+}
+
+/**
+ * The run's closed P&L per stock (every day played so far, before charges), from the run detail. Re-read every 15 s
+ * while the replay plays, once more when it pauses or ends.
+ */
+function useRunClosed(info: ReplayInfo | null): Record<string, number> | null {
+  const [closed, setClosed] = useState<Record<string, number> | null>(null);
+  const runId = info?.run_id ?? null;
+  const playing = info?.status === "PLAYING";
+  useEffect(() => {
+    if (runId == null) {
+      setClosed(null);
+      return;
+    }
+    let gone = false;
+    const load = () =>
+      smaApi
+        .replayRun(runId)
+        .then((run) => {
+          if (!gone) setClosed(Object.fromEntries((run.stocks ?? []).map((s) => [s.symbol, s.totals.gross])));
+        })
+        .catch(() => undefined);
+    void load();
+    const timer = playing ? window.setInterval(load, 15_000) : undefined;
+    return () => {
+      gone = true;
+      if (timer) window.clearInterval(timer);
+    };
+  }, [runId, playing, info?.date]);
+  return closed;
+}
 
 /** Practise on a past day's real Groww candles. Never sends an order. */
 /**
  * Auto-arm replay (backend auto_arm.py): a stock is armed only at the minute the auto-arm would have armed it, so the
  * bar lists the stocks armed by the replay clock (with that minute and why) and counts the ones still to come.
  */
-function AutoArmLine({ info, notes }: { info: ReplayInfo | null; notes?: Record<string, string> }) {
+function AutoArmLine({ info, notes, pnl }: { info: ReplayInfo | null; notes?: Record<string, string>; pnl?: Record<string, StockPnl> }) {
+  const runClosed = useRunClosed(info);
   if (!info || info.status === "LOADING") {
     return <span>Stocks are armed one by one at their own minute as the day plays · practice only — no orders reach Groww</span>;
   }
@@ -259,6 +303,12 @@ function AutoArmLine({ info, notes }: { info: ReplayInfo | null; notes?: Record<
   };
   const armed = picks.filter((p) => minute(p.at) <= now);
   const waiting = picks.filter((p) => minute(p.at) > now).sort((a, b) => minute(a.at) - minute(b.at));
+  // Run so far = closed trades of every day played (run detail, includes today's closed) + today's open trade.
+  const runOf = (symbol: string) => (runClosed?.[symbol] ?? 0) + (pnl?.[symbol]?.open ?? 0);
+  const dayTotal = armed.reduce((sum, p) => sum + (pnl?.[p.symbol]?.day ?? 0), 0);
+  const openTotal = Object.values(pnl ?? {}).reduce((sum, p) => sum + (p.open ?? 0), 0);
+  const runTotal = runClosed ? Object.values(runClosed).reduce((sum, v) => sum + v, 0) + openTotal : null;
+  const multi = (info.days?.length ?? 0) > 1;
   return (
     <div className="w-full">
       <p>
@@ -266,11 +316,39 @@ function AutoArmLine({ info, notes }: { info: ReplayInfo | null; notes?: Record<
         {waiting.length ? ` · ${waiting.length} more later today (next ${waiting[0].symbol} at ${waiting[0].at})` : picks.length ? "" : " · no stock met the rule this day"}
         {" · "}practice only — no orders reach Groww
       </p>
+      {pnl || runTotal != null ? (
+        <p className="mt-0.5 font-semibold text-violet-50" title="Before charges, like the rest of the screens. Day = closed + open trades on the day being played; run = every day played so far.">
+          {pnl ? (
+            <>
+              <NewTag id="autoarm-pnl" /> P&amp;L this day: <Pnl value={dayTotal} />
+            </>
+          ) : null}
+          {runTotal != null && multi ? (
+            <>
+              {pnl ? " · " : ""}whole run so far: <Pnl value={runTotal} />
+            </>
+          ) : null}
+          <span className="font-normal text-violet-200/70"> · before charges</span>
+        </p>
+      ) : null}
       {armed.length ? (
         <ul className="mt-0.5 max-h-28 space-y-0.5 overflow-y-auto">
           {armed.map((p) => (
             <li key={p.symbol} className="truncate" title={notes?.[p.symbol] ?? ""}>
-              <b className="text-violet-50">{p.symbol}</b> armed {p.at}
+              <b className="text-violet-50">{p.symbol}</b>
+              {pnl?.[p.symbol] ? (
+                <>
+                  {" "}
+                  <Pnl value={pnl[p.symbol].day} />
+                </>
+              ) : null}
+              {multi && runClosed ? (
+                <span className="text-violet-200/70">
+                  {" "}
+                  (run <Pnl value={runOf(p.symbol)} />)
+                </span>
+              ) : null}{" "}
+              armed {p.at}
               {p.why ? ` (${p.why})` : ""}
               {notes?.[p.symbol] ? <span className="text-violet-200/70"> · {notes[p.symbol]}</span> : null}
             </li>
@@ -281,7 +359,7 @@ function AutoArmLine({ info, notes }: { info: ReplayInfo | null; notes?: Record<
   );
 }
 
-export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName, notes }: Props) {
+export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName, notes, pnl }: Props) {
   const [day, setDay] = useState(lastTradingDay);
   const [endDay, setEndDay] = useState(lastTradingDay);
   const [start, setStart] = useState("09:15");
@@ -611,7 +689,7 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName,
       ) : null}
       <div className={clsx("mt-1 flex-wrap justify-between gap-x-3 text-xs text-violet-200/80", compact && !autoArm ? "hidden" : "flex")}>
         {autoArm ? (
-          <AutoArmLine info={info} notes={notes} />
+          <AutoArmLine info={info} notes={notes} pnl={pnl} />
         ) : (
           <span>
             {info?.symbols.length ? `${info.symbols.join(", ")} · ` : ""}practice only — no orders reach Groww

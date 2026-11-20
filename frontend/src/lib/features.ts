@@ -321,6 +321,8 @@ export const FEATURES: Feature[] = [
     purpose: "On the backtest server a backtest cut short by a restart (a deploy or a crash) now resumes by itself from the day it had reached, and the bar says why the server last started." },
   { id: "autoarm-dates", area: "trend", added: "2026-11-17", pr: 455, href: "/scalp/#backtest", where: "Scalp → Backtest → Auto-arm replay → Last → Custom dates…", title: "Auto-arm replay on dates you pick",
     purpose: "Pick a From and To date for the auto-arm replay instead of the last N trading days (up to 45 calendar days; weekends and holidays are skipped). Today counts while the market is open." },
+  { id: "autoarm-pnl", area: "terminal", added: "2026-11-19", pr: 480, href: TERM, where: "Terminal → replay bar (auto-arm replay) → Armed so far", title: "Auto-arm replay: P&L of each armed stock",
+    purpose: "While an auto-arm replay plays, each armed stock shows its P&L on the day being played and, on a run of several days, its total for the whole run so far, with the day's and the run's totals on top. Before charges, like the other screens." },
   { id: "autoarm-today", area: "trend", added: "2026-11-17", pr: 455, href: "/scalp/#backtest", where: "Scalp → Backtest → Auto-arm replay → Last → Today so far", title: "Auto-arm replay of today, during the market",
     purpose: "While the market is open, the auto-arm replay can play today up to the last minute that has closed (positions are squared off there), so you can test today's picks without waiting for 15:30." },
   { id: "chart-executed-flow", area: "terminal", added: "2026-11-17", pr: 454, href: TERM, where: "Terminal → chart → buyers / sellers strip (dashed line) and the reading line", title: "Executed buy / sell % on the chart (estimated)",
