@@ -1278,7 +1278,7 @@ function RunDetailBody({
         </h3>
         <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>P&amp;L {signed(t.net)}</span>
       </div>
-      {scalpPickOf(run.settings) ? <PickList pick={scalpPickOf(run.settings)!} /> : null}
+      {scalpPickOf(run.settings) ? <PickList pick={scalpPickOf(run.settings)!} stocks={stocks} /> : null}
       {run.fast_move ? (
         <p className="mb-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-100">
           <span className="font-semibold">Fast movers → Bot 5:</span> {run.fast_move.cut} trade
@@ -1594,57 +1594,164 @@ dd: <td className={clsx("px-2 py-1 text-right", pnlTone(d.cumulative))} title="R
 /** A pick run: which stocks each day picked at the pick time, and why. Each kind of pick backtest records its own
  * fields (scalp score / strong-trend score / volume vs usual), so every number is read by kind and a missing one shows
  * as a dash: an older run or another kind's rows must never break the Backtests tab. */
-function PickList({ pick }: { pick: ScalpPickInfo }) {
+function PickList({ pick, stocks }: { pick: ScalpPickInfo; stocks: ReplayStockRow[] }) {
   const days = Object.keys(pick.picks ?? {}).sort();
   const kind = pick.kind;
+  const [show, setShow] = useState<"all" | "traded" | "won" | "lost" | "idle">("all");
+  const [open, setOpen] = useState<Set<string>>(() => new Set(days.slice(0, 1)));
   const rule =
     kind === "TREND"
       ? ` · ${pick.direction === "BULLISH" ? "bullish" : pick.direction === "BEARISH" ? "bearish" : "bullish or bearish"} on ${pick.minutes ?? 5}-min candles`
       : kind === "ACTIVE"
         ? ` · by ${ACTIVE_RANK_LABEL[String(pick.rank)] ?? String(pick.rank ?? "volume vs usual")} · ≥ ₹${pick.min_value_cr ?? 0} cr · bias ${String(pick.bias ?? "BOTH").toLowerCase()}`
-        : ` · ATR ≥ ${pick.min_atr_pct ?? 0}%/min · ≥ ₹${pick.min_value_cr ?? 0} cr${pick.require_bias ? " · with a bias" : ""} · spread not checked`;
+        : kind === "AUTOARM"
+          ? ""
+          : ` · ATR ≥ ${pick.min_atr_pct ?? 0}%/min · ≥ ₹${pick.min_value_cr ?? 0} cr${pick.require_bias ? " · with a bias" : ""} · spread not checked`;
   const sideOf = (p: ScalpPick): string => {
     const side = p.side ?? p.bias ?? null;
     return side === "LONG" || side === "SHORT" ? side : "";
   };
-  const scoreOf = (p: ScalpPick): string =>
-    kind === "TREND" ? numOr(p.trend_score, 0) : kind === "ACTIVE" ? `${numOr(p.rvol, 1, "×")}` : numOr(p.score, 0);
-  const titleOf = (p: ScalpPick): string =>
-    kind === "TREND"
-      ? `Trend score ${numOr(p.trend_score, 0)} · day move ${numOr(p.day_move_pct, 2, "%")} · ₹${numOr(p.ltp, 2)}`
-      : kind === "ACTIVE"
-        ? `Volume vs usual ${numOr(p.rvol, 2, "×")} · day move ${numOr(p.change_pct, 2, "%")} · ₹${numOr(p.value_cr, 1)} cr · ₹${numOr(p.ltp, 2)}`
-        : `ATR ${numOr(p.atr_pct, 4, "%/min")} · ₹${numOr(p.value_cr, 2)} cr · 5m ${numOr(p.move_5m_pct, 3, "%")}`;
+  // Each stock's own result on each day of the run (run.stocks), so every armed stock carries its P&L.
+  const result = useMemo(() => {
+    const m = new Map<string, ReplayDayRow>();
+    for (const st of stocks) for (const d of st.days) m.set(`${d.date}|${st.symbol}`, d);
+    return m;
+  }, [stocks]);
+  type Row = { p: ScalpPick; side: string; at: string; day: ReplayDayRow | null };
+  const perDay = days.map((d) => {
+    const rows: Row[] = (pick.picks?.[d] ?? [])
+      .map((p) => {
+        const day = result.get(`${d}|${p.symbol}`) ?? null;
+        return { p, side: sideOf(p), at: p.at ?? pick.pick_time ?? "", day: day && day.trades > 0 ? day : null };
+      })
+      .sort((a, b) => a.at.localeCompare(b.at) || a.p.symbol.localeCompare(b.p.symbol));
+    const traded = rows.filter((r) => r.day);
+    return {
+      date: d,
+      rows,
+      traded: traded.length,
+      won: traded.filter((r) => r.day!.net > 0).length,
+      lost: traded.filter((r) => r.day!.net < 0).length,
+      pnl: traded.reduce((a, r) => a + r.day!.net, 0),
+    };
+  });
+  const keep = (r: Row) =>
+    show === "all" || (show === "traded" && r.day) || (show === "idle" && !r.day) || (show === "won" && r.day && r.day.net > 0) || (show === "lost" && r.day && r.day.net < 0);
+  const armedTotal = perDay.reduce((a, d) => a + d.rows.length, 0);
+  const tradedTotal = perDay.reduce((a, d) => a + d.traded, 0);
+  const pnlTotal = perDay.reduce((a, d) => a + d.pnl, 0);
+  const toggle = (d: string) =>
+    setOpen((cur) => {
+      const next = new Set(cur);
+      if (next.has(d)) next.delete(d);
+      else next.add(d);
+      return next;
+    });
   return (
     <div className="mb-4 px-2">
-      <div className="mb-1 text-xs uppercase tracking-wider text-slate-400">
-        {pick.kind === "AUTOARM" ? pickHeadline(pick) : `${pickKindLabel(pick)} picks · top ${pick.top_n} at ${pick.pick_time}`}
-        {pick.universe ? ` from ${pick.universe} stocks` : ""}
-        {rule}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs uppercase tracking-wider text-slate-400">
+          Armed log <NewTag id="bt-armed-log" /> ·{" "}
+          {pick.kind === "AUTOARM" ? pickHeadline(pick) : `${pickKindLabel(pick)} picks · top ${pick.top_n} at ${pick.pick_time}`}
+          {pick.universe ? ` from ${pick.universe} stocks` : ""}
+          {rule}
+        </div>
+        {days.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-slate-400">
+              {armedTotal} armed · {tradedTotal} traded ·{" "}
+              <span className={clsx("font-mono font-semibold", pnlTone(pnlTotal))}>{signed(pnlTotal)}</span>
+            </span>
+            <label className="flex items-center gap-1 text-slate-400">
+              Show
+              <select
+                value={show}
+                onChange={(e) => setShow(e.target.value as typeof show)}
+                className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-slate-200"
+              >
+                <option value="all">every armed stock</option>
+                <option value="traded">traded only</option>
+                <option value="won">in profit</option>
+                <option value="lost">at a loss</option>
+                <option value="idle">armed, not traded</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => setOpen(open.size === days.length ? new Set() : new Set(days))}
+              className="rounded border border-white/10 px-2 py-0.5 text-slate-300 hover:bg-white/5"
+            >
+              {open.size === days.length ? "Close all days" : "Open all days"}
+            </button>
+          </div>
+        ) : null}
       </div>
       {days.length === 0 ? (
         <p className="text-xs text-slate-400">No day has been picked yet.</p>
       ) : (
-        <div className="space-y-0.5 text-xs">
-          {days.map((d) => {
-            const list = pick.picks?.[d] ?? [];
+        <div className="space-y-1 text-xs">
+          {perDay.map((d) => {
+            const isOpen = open.has(d.date);
+            const rows = d.rows.filter(keep);
             return (
-              <div key={d} className="flex flex-wrap items-baseline gap-x-3 border-b border-white/5 py-1">
-                <span className="w-28 shrink-0 text-slate-400">{dayLabel(d)}</span>
-                {list.length === 0 ? (
-                  <span className="text-slate-500">nothing ready at {pick.pick_time} — no trades</span>
-                ) : (
-                  list.map((p) => {
-                    const side = sideOf(p);
-                    return (
-                      <span key={p.symbol} className="font-mono" title={titleOf(p)}>
-                        <span className="font-semibold text-amber-300">{p.symbol}</span>{" "}
-                        <span className="text-slate-400">{scoreOf(p)}</span>{" "}
-                        <span className={side === "LONG" ? "text-sky-300" : side === "SHORT" ? "text-violet-300" : "text-slate-500"}>{side}</span>
+              <div key={d.date} className="rounded-md border border-white/5">
+                <button
+                  type="button"
+                  aria-expanded={isOpen}
+                  onClick={() => toggle(d.date)}
+                  className="flex w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-2 py-1.5 text-left hover:bg-white/5"
+                >
+                  {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
+                  <span className="w-28 shrink-0 text-slate-300">{dayLabel(d.date)}</span>
+                  {d.rows.length === 0 ? (
+                    <span className="text-slate-500">nothing armed — no trades</span>
+                  ) : (
+                    <>
+                      <span className="text-slate-400">
+                        {d.rows.length} armed · {d.traded} traded · {d.won} won · {d.lost} lost
                       </span>
-                    );
-                  })
-                )}
+                      <span className={clsx("ml-auto font-mono font-semibold", pnlTone(d.pnl))}>{signed(d.pnl)}</span>
+                    </>
+                  )}
+                </button>
+                {isOpen && d.rows.length > 0 ? (
+                  rows.length === 0 ? (
+                    <p className="px-8 pb-2 text-slate-500">No stock that day matches “Show”.</p>
+                  ) : (
+                    <div className="overflow-x-auto px-2 pb-2">
+                      <table className="w-full min-w-[520px] text-left">
+                        <thead className="text-[11px] uppercase tracking-wider text-slate-500">
+                          <tr>
+                            <th className="px-2 py-1 font-medium">Armed at</th>
+                            <th className="px-2 py-1 font-medium">Stock</th>
+                            <th className="px-2 py-1 font-medium">Side</th>
+                            <th className="px-2 py-1 font-medium">Found by</th>
+                            <th className="px-2 py-1 text-right font-medium">Trades</th>
+                            <th className="px-2 py-1 text-right font-medium">Won / lost</th>
+                            <th className="px-2 py-1 text-right font-medium">P&amp;L</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((r) => (
+                            <tr key={r.p.symbol} className="border-t border-white/5" title={r.p.why ?? undefined}>
+                              <td className="px-2 py-1 font-mono text-slate-400">{r.at || "—"}</td>
+                              <td className="px-2 py-1 font-mono font-semibold text-amber-300">{r.p.symbol}</td>
+                              <td className={clsx("px-2 py-1 font-mono", r.side === "LONG" ? "text-sky-300" : r.side === "SHORT" ? "text-violet-300" : "text-slate-500")}>
+                                {r.side || "—"}
+                              </td>
+                              <td className="px-2 py-1 text-slate-400">{r.p.source ?? pickKindLabel(pick)}</td>
+                              <td className="px-2 py-1 text-right font-mono text-slate-300">{r.day ? r.day.trades : 0}</td>
+                              <td className="px-2 py-1 text-right font-mono text-slate-400">{r.day ? `${r.day.wins} / ${r.day.losses}` : "—"}</td>
+                              <td className={clsx("px-2 py-1 text-right font-mono font-semibold", r.day ? pnlTone(r.day.net) : "text-slate-500")}>
+                                {r.day ? signed(r.day.net) : "not traded"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                ) : null}
               </div>
             );
           })}
