@@ -1295,7 +1295,7 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   id is left to that stop) when the phase is CHOP or the other way, or the score for the trade's side is under the level
   (SMAs the other way = 0) (`exit_call`). **Which stocks** (`tq_all`, off): the source chip "Auto-arm: Trend quality" (the
   auto-arm backtest's Trend quality picks carry it via `replay.pick_sources`), or every armed stock. Counts as an exit for
-  `strategyChecks.noExitOn`. Normal candles (not Heikin Ashi). The stock research baseline keeps it off.
+  `strategyChecks.noExitOn`. Normal candles (not Heikin Ashi). **Skip a doji** (`tq_skip_doji`, off; `tq_doji_pct` 10, 1-90; per bot and per stock, PAPER and LIVE, replays too; owner's GLENMARK case: bought at 10:25 on a doji 1.6 rupees above SMA 9): `entry_call` waits while the newest closed candle the score read (`stock_regime.read`'s `last_bar`, real candles) has a body under that % of its high-low range (`doji_note`); asked again next candle. Entries only. The stock research baseline keeps it off.
 - `backend/trend_log.py` – **Trend readings of a backtest** (display only; owner's request: the auto-arm backtest works the
   Trend quality reading out by itself and kept none of it, so 10:45's score 86 could not be set against the trade at 12:00):
   `StrategyEngine._record_trend` (after `_trend_entry_pass` in the armed loop and `_watch_trend_exit` in the held loop),

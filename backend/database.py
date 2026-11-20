@@ -323,6 +323,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "tq_exit_score": "INTEGER DEFAULT 40",
             "tq_exit_phase": "BOOLEAN DEFAULT 1",
             "tq_all": "BOOLEAN DEFAULT 0",
+            "tq_skip_doji": "BOOLEAN DEFAULT 0",
+            "tq_doji_pct": "INTEGER DEFAULT 10",
             "use_or_volume": "BOOLEAN DEFAULT 0",
             "use_or_vwap": "BOOLEAN DEFAULT 0",
             "use_or_spread": "BOOLEAN DEFAULT 0",

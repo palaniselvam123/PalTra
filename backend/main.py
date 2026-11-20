@@ -959,6 +959,8 @@ class ConfigUpdate(BaseModel):
     tq_exit_score: int | None = Field(default=None, ge=0, le=100)
     tq_exit_phase: bool | None = None
     tq_all: bool | None = None
+    tq_skip_doji: bool | None = None
+    tq_doji_pct: int | None = Field(default=None, ge=1, le=90)
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -2052,6 +2054,8 @@ def _gap_dict(row) -> dict:
         "tq_exit_score": trend_trade.exit_score(row),
         "tq_exit_phase": trend_trade.exit_phase(row),
         "tq_all": trend_trade.every_stock(row),
+        "tq_skip_doji": trend_trade.skip_doji(row),
+        "tq_doji_pct": trend_trade.doji_pct(row),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),
