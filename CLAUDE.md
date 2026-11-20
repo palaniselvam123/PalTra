@@ -1486,7 +1486,7 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   kind `AUTOARM`, dispatched by `scalp_picks.picks_for_day`; `POST /api/replay/auto-arm`, the Scalp Backtest tab's
   `components/Scalp/AutoArmReplay.tsx`; practice money, works after hours): `picks_for_day` gives each stock the minute it
   would have been armed: Trend quality every `every_min` minutes from `first` to `last` (`strong_read`: the same
-  `trend_strength.read` on the candles closed before that minute as the card's Trend column, about 16 ms a read) and Most
+  `trend_strength.read` on the candles closed before that minute as the card's Trend column, about 16 ms a read; the tape is cut to the scan's own `WARMUP_DAYS` window so the morning volume check and ATR match History, on the main desk's SMA periods like the scan whichever bot replays, and Heikin Ashi compares VWAP with the last closed candle's real close) and Most
   active from that day's saved scans (`active_hits`, the minute after each stock's own read, `read_at`, not the pass's
   start, which armed stocks read late in a pass minutes early; older rows without `read_at` use the start; `saved_scans` on this server, else on the
   backtest server desk `GET /api/link/backtest/active-scans?day=&pct=&side=&min_value_cr=` behind `BACKTEST_LINK_TOKEN`,

@@ -2947,10 +2947,12 @@ async def replay_auto_arm(body: AutoArmStart):
     eng = engine if body.bot == 1 else bot_engines.get(body.bot)
     if eng is None:
         raise HTTPException(404, f"No bot {body.bot}")
-    cfg = eng.load_config()
+    # The Trend quality scan (and so its History and the live auto-arm) reads the main desk's SMA periods whichever
+    # bot it arms: read the same ones here, not the replayed bot's (a bot 2-5 on other periods read other trends).
+    scan_cfg = engine.load_config()
     rule = auto_arm.AutoArmRule(
         source=body.source, first=first, last=last, every_min=body.every_min, minutes=body.minutes, until=until,
-        sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow), candles=body.candles,
+        sma_fast=int(scan_cfg.sma_fast), sma_slow=int(scan_cfg.sma_slow), candles=body.candles,
         min_checks=body.min_checks or alerts.strong_min_checks, side=body.side or alerts.strong_side,
         pct=body.pct or alerts.pressure_pct, pressure_side=body.pressure_side or alerts.pressure_side,
         min_value_cr=alerts.pressure_min_value_cr if body.min_value_cr is None else body.min_value_cr,
