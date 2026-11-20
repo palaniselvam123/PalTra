@@ -8,6 +8,7 @@ import {
   CANDLE_CHOICES,
   CROSS_RULES,
   NO_FILTER,
+  PHASE_OPTIONS,
   SCORE_OPTIONS,
   TREND_DIRS,
   TREND_KINDS,
@@ -15,6 +16,7 @@ import {
   isCrossRule,
   type ChopFilter,
   type CrossRule,
+  type PhaseFilter,
   type ScoreFilter,
 } from "@/lib/chopFilter";
 import type { TrendDir, TrendKind } from "@/lib/trendRank";
@@ -497,6 +499,30 @@ export function ChopAcrossDays({
         <FilterGroup title="View">
           <SelectFilter label="Show" value={f.score} onChange={(v) => set("score", v as ScoreFilter)} options={SCORE_OPTIONS} className="w-44" />
           <TextFilter value={query} onChange={setQuery} />
+          <NumberFilter
+            label="Trend score at least"
+            value={f.minTrendScore ?? 0}
+            onChange={(v) => set("minTrendScore", Math.min(100, Math.max(0, Math.round(v))))}
+            min={0}
+            max={100}
+            step={5}
+            className="w-36"
+          />
+          <SelectFilter
+            label="Checks at least"
+            value={f.minChecks ?? 0}
+            onChange={(v) => set("minChecks", Number(v))}
+            options={[{ value: 0, label: "Any" }, ...[3, 4, 5, 6, 7].map((n) => ({ value: n, label: n === 7 ? "All 7" : `${n} of 7` }))]}
+            className="w-28"
+          />
+          <SelectFilter
+            label="Phase now"
+            value={f.phase ?? "ANY"}
+            onChange={(v) => set("phase", v as PhaseFilter)}
+            options={PHASE_OPTIONS}
+            className="w-36"
+          />
+          <NewTag id="tq-history-score-filters" />
           <NumberFilter
             label="Fast movers: |speed| ≥"
             value={f.minSpeed}

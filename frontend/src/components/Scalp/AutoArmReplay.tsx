@@ -44,10 +44,23 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
   const [speed, setSpeed] = useState(300);
   const [handoffs, setHandoffs] = useState(true);
   const [th, setTh] = useState<Rules | null>(null);
+  // The Trend quality scan's own candle (size and kind): the live auto-arm reads that scan, so the backtest starts on it.
+  const [scanCandle, setScanCandle] = useState<{ minutes: number; candles: "NORMAL" | "HA" } | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
+    smaApi
+      .chopScan()
+      .then((c) => {
+        const m = Number(c.auto?.minutes ?? 0);
+        if (!SIZES.includes(m)) return;
+        const kind = c.auto?.candles === "HA" ? "HA" : "NORMAL";
+        setScanCandle({ minutes: m, candles: kind });
+        setMinutes(m);
+        setCandles(kind);
+      })
+      .catch(() => undefined);
     smaApi
       .scalpAlerts()
       .then((a) => {
@@ -255,6 +268,24 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
               </select>
             </label>
           </>
+        ) : null}
+        {source !== "ACTIVE" && scanCandle && (scanCandle.minutes !== minutes || scanCandle.candles !== candles) ? (
+          <p className="w-full rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-300 ring-1 ring-inset ring-amber-500/30">
+            Your Trend quality scan reads {scanCandle.minutes}-minute {scanCandle.candles === "HA" ? "Heikin Ashi " : ""}candles, but this
+            backtest will read {minutes}-minute {candles === "HA" ? "Heikin Ashi " : ""}candles. A stock that was 7/7 in the scan's History can
+            read weaker here and not be armed.{" "}
+            <button
+              type="button"
+              onClick={() => {
+                setMinutes(scanCandle.minutes);
+                setCandles(scanCandle.candles);
+              }}
+              className="font-semibold underline underline-offset-2"
+            >
+              Use {scanCandle.minutes} min {scanCandle.candles === "HA" ? "Heikin Ashi" : "normal"}
+            </button>{" "}
+            <NewTag id="autoarm-scan-candle" />
+          </p>
         ) : null}
         {th ? (
           <RulesBox

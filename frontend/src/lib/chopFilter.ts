@@ -103,7 +103,29 @@ export type ChopFilter = {
   maxAge: number;
   minGap: number;
   hideFading: boolean;
+  /** Trend score (0-100) at least; 0 = any. */
+  minTrendScore?: number;
+  /** Strong-trend checks passed at least (of 7); 0 = any. */
+  minChecks?: number;
+  /** Phase now: ANY, BULL, BEAR, STRONG (either), CHOP. */
+  phase?: PhaseFilter;
 };
+
+export type PhaseFilter = "ANY" | "BULL" | "BEAR" | "STRONG" | "CHOP";
+export const PHASE_OPTIONS: { value: PhaseFilter; label: string }[] = [
+  { value: "ANY", label: "Any" },
+  { value: "BULL", label: "Strong up ↑" },
+  { value: "BEAR", label: "Strong down ↓" },
+  { value: "STRONG", label: "Strong (either)" },
+  { value: "CHOP", label: "Choppy" },
+];
+
+/** Strong-trend checks passed (true values of `trend_checks`), or null when the row has none. */
+export function checksPassed(r: Pick<ChopScanRow, "trend_checks">): number | null {
+  const c = r.trend_checks;
+  if (!c) return null;
+  return Object.values(c).filter((v) => v === true).length;
+}
 
 export const NO_FILTER: ChopFilter = {
   score: "ALL",
@@ -118,6 +140,9 @@ export const NO_FILTER: ChopFilter = {
   maxAge: 0,
   minGap: 0,
   hideFading: false,
+  minTrendScore: 0,
+  minChecks: 0,
+  phase: "ANY",
 };
 
 /** Every filter of the card but the stock search: whether this row is "in the list". */
@@ -133,6 +158,13 @@ export function chopPasses(r: ChopScanRow, f: ChopFilter): boolean {
   if (score === "PHASE_BULL" && r.phase !== "BULL") return false;
   if (score === "PHASE_BEAR" && r.phase !== "BEAR") return false;
   if (score === "PHASE_CHOP" && (r.phase !== "CHOP" || r.phase_early)) return false;
+  if ((f.minTrendScore ?? 0) > 0 && (r.trend_score ?? -1) < (f.minTrendScore ?? 0)) return false;
+  if ((f.minChecks ?? 0) > 0 && (checksPassed(r) ?? -1) < (f.minChecks ?? 0)) return false;
+  const ph = f.phase ?? "ANY";
+  if (ph === "BULL" && r.phase !== "BULL") return false;
+  if (ph === "BEAR" && r.phase !== "BEAR") return false;
+  if (ph === "STRONG" && r.phase !== "BULL" && r.phase !== "BEAR") return false;
+  if (ph === "CHOP" && (r.phase !== "CHOP" || r.phase_early)) return false;
   if (f.minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < f.minSpeed) return false;
   if (!inPriceRange(r.ltp, f.priceMin, f.priceMax)) return false;
   if (
