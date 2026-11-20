@@ -644,7 +644,8 @@ export const FEATURES: Feature[] = [
     purpose: "Queue several auto-arm backtests (one or more bots, any days) and they play one after another at full speed, so the backtest server never plays two at once and stays responsive." },
   { id: "bt-schedule", area: "trend", added: "2026-11-19", pr: 482, href: "/scalp/#backtest", where: "Scalp → Backtest → Auto-arm replay → Every weekday, backtest today", title: "Schedule a daily auto-arm backtest",
     purpose: "Every weekday after a time you pick, today's auto-arm backtest is queued on the ticked bots with the settings you saved; the desk wakes the backtest server for it." },  { id: "set-trend-trade", area: "settings", added: "2026-11-20", pr: 484, href: S("sma-trend-trade"), where: "Settings → 1. When to enter → Trade on the trend score / phase", title: "Trade Trend quality stocks on the trend score / phase",
-    purpose: "Trend quality auto-armed stocks (or every armed stock) are entered when the trend score and phase agree, and closed when the phase turns or the score drops, instead of on an SMA cross." },
+    purpose: "Trend quality auto-armed stocks (or every armed stock) are entered when the trend score and phase agree, and closed when the phase turns or the score drops, instead of on an SMA cross." },  { id: "autoarm-rules", area: "trend", added: "2026-11-20", pr: 486, href: "/scalp/#backtest", where: "Scalp → Backtest → Auto-arm replay → Picking rules for this backtest", title: "Auto-arm backtest: picking rules on the form",
+    purpose: "The strong-trend checks (e.g. all 7), direction, Most active %, side, money, volume, daily limit and price range are set on the backtest form and sent with the run, so a backtest never uses another server's Alerts tab by mistake." },
 ];
 
 /** Today in IST, YYYY-MM-DD. */

@@ -43,6 +43,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
   const [bot, setBot] = useState(1);
   const [speed, setSpeed] = useState(300);
   const [handoffs, setHandoffs] = useState(true);
+  const [th, setTh] = useState<Rules | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -51,6 +52,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
       .scalpAlerts()
       .then((a) => {
         setAlerts(a);
+        setTh((now) => now ?? rulesFrom(a));
         setBot(a.arm_strong_on ? a.arm_strong_bot : a.arm_pressure_on ? a.arm_pressure_bot : 1);
       })
       .catch(() => undefined);
@@ -74,6 +76,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
         throw new Error("The To date cannot be after the last day with candles (today only while the market is open, from 09:20).");
     }
     const range = days === -1 ? [from, to] : days === 0 ? [todayNow as string] : lastClosedWeekdays(days);
+    if (!th) throw new Error("The picking rules are still loading; try again in a moment.");
     const universe = source === "ACTIVE" ? [] : await resolveScanSymbols(lists, armed.keys());
     if (source !== "ACTIVE" && !universe.length) throw new Error("No stocks in the picked lists.");
     return {
@@ -88,6 +91,17 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
       candles,
       until: fitUntil(until, last),
       play_handoffs: handoffs,
+      min_checks: th.min_checks,
+      side: th.side,
+      pct: th.pct,
+      pressure_side: th.pressure_side,
+      min_value_cr: th.min_value_cr,
+      min_rvol: th.min_rvol,
+      basis: th.basis,
+      flow_pct: th.flow_pct,
+      max_day: th.max_day,
+      price_min: th.price_min,
+      price_max: th.price_max,
     };
   };
 
@@ -114,25 +128,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
   };
 
   const select = "rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200";
-  const rule = alerts
-    ? [
-        source !== "ACTIVE" ? `strong ${alerts.strong_side === "BOTH" ? "up or down" : alerts.strong_side.toLowerCase()} trend, ${alerts.strong_min_checks} of 7 checks or more` : null,
-        source !== "TREND"
-          ? `${alerts.pressure_side === "BOTH" ? "buyers or sellers" : alerts.pressure_side === "BUY" ? "buyers" : "sellers"} at ${
-              alerts.pressure_basis === "EXECUTED"
-                ? `${alerts.pressure_flow_pct ?? 60}% or more of the shares traded (executed; scans saved from now on carry it)`
-                : alerts.pressure_basis === "BOTH"
-                  ? `${alerts.pressure_pct}% or more waiting and ${alerts.pressure_flow_pct ?? 60}% or more executed`
-                  : `${alerts.pressure_pct}% or more`
-            }${alerts.pressure_min_value_cr ? `, ₹${alerts.pressure_min_value_cr} cr traded` : ""}${alerts.pressure_min_rvol ? `, volume ${alerts.pressure_min_rvol}× usual` : ""}`
-          : null,
-        alerts.arm_price_min || alerts.arm_price_max
-          ? `priced ${alerts.arm_price_min ? `₹${alerts.arm_price_min}` : "any"} to ${alerts.arm_price_max ? `₹${alerts.arm_price_max}` : "any"}`
-          : null,
-      ]
-        .filter(Boolean)
-        .join("; ")
-    : "";
+  const rule = th ? ruleText(th, source) : "";
   return (
     <section className="space-y-3 rounded-xl border border-slate-800 bg-card p-4">
       <ResumePickRuns kinds={["AUTOARM"]} label="Auto-arm replay" />
@@ -144,8 +140,8 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
           Works after the market too: past days are played back from Groww&apos;s 1-minute candles on the replay&apos;s own clock, like
           live ticks. Every few minutes each stock is read the way the Trend quality scan reads it (only the candles closed by
           then), and the day&apos;s saved Most active scans give when buyers or sellers took over. A stock is armed at that minute and
-          the bot trades it from then on, waiting for its own next signal as it would live. The thresholds are the ones on the
-          Alerts tab{rule ? ` (${rule})` : ""}. Practice money only: nothing is armed for real and no order is sent.
+          the bot trades it from then on, waiting for its own next signal as it would live. The picking rules below start from the
+          Alerts tab and are sent with the run{rule ? ` (${rule})` : ""}. Practice money only: nothing is armed for real and no order is sent.
         </p>
       </div>
       <div className="flex flex-wrap items-end gap-3 text-xs text-slate-400">
@@ -260,6 +256,15 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
             </label>
           </>
         ) : null}
+        {th ? (
+          <RulesBox
+            th={th}
+            source={source}
+            onChange={setTh}
+            onReset={alerts ? () => setTh(rulesFrom(alerts)) : undefined}
+            select={select}
+          />
+        ) : null}
         <label className="flex flex-col gap-1">
           Bot
           <select value={bot} onChange={(e) => setBot(Number(e.target.value))} className={select}>
@@ -302,5 +307,164 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
       {note ? <p className={note.ok ? "text-xs text-emerald-300" : "text-xs font-semibold text-amber-300"}>{note.text}</p> : null}
       <BacktestQueuePanel form={form} bot={bot} />
     </section>
+  );
+}
+
+/** The picking rules a run is sent with (backend AutoArmStart / auto_arm.AutoArmRule). */
+type Rules = {
+  min_checks: number;
+  side: "BOTH" | "UP" | "DOWN";
+  pct: number;
+  pressure_side: "BOTH" | "BUY" | "SELL";
+  min_value_cr: number;
+  min_rvol: number;
+  basis: "WAITING" | "EXECUTED" | "BOTH";
+  flow_pct: number;
+  max_day: number;
+  price_min: number;
+  price_max: number;
+};
+
+function rulesFrom(a: ScalpAlerts): Rules {
+  return {
+    min_checks: Math.min(7, Math.max(5, Number(a.strong_min_checks) || 6)),
+    side: a.strong_side ?? "BOTH",
+    pct: Number(a.pressure_pct) || 70,
+    pressure_side: a.pressure_side ?? "BOTH",
+    min_value_cr: Number(a.pressure_min_value_cr) || 0,
+    min_rvol: Number(a.pressure_min_rvol) || 0,
+    basis: a.pressure_basis ?? "WAITING",
+    flow_pct: Number(a.pressure_flow_pct) || 60,
+    max_day: Number(a.arm_max_day) || 10,
+    price_min: Number(a.arm_price_min) || 0,
+    price_max: Number(a.arm_price_max) || 0,
+  };
+}
+
+function ruleText(t: Rules, source: "TREND" | "ACTIVE" | "BOTH"): string {
+  return [
+    source !== "ACTIVE"
+      ? `strong ${t.side === "BOTH" ? "up or down" : t.side.toLowerCase()} trend, ${t.min_checks === 7 ? "all 7 checks" : `${t.min_checks} of 7 checks or more`}`
+      : null,
+    source !== "TREND"
+      ? `${t.pressure_side === "BOTH" ? "buyers or sellers" : t.pressure_side === "BUY" ? "buyers" : "sellers"} at ${
+          t.basis === "EXECUTED"
+            ? `${t.flow_pct}% or more of the shares traded`
+            : t.basis === "BOTH"
+              ? `${t.pct}% or more waiting and ${t.flow_pct}% or more executed`
+              : `${t.pct}% or more of the waiting orders`
+        }${t.min_value_cr ? `, ₹${t.min_value_cr} cr traded` : ""}${t.min_rvol ? `, volume ${t.min_rvol}× usual` : ""}`
+      : null,
+    `at most ${t.max_day} a day`,
+    t.price_min || t.price_max ? `priced ${t.price_min ? `₹${t.price_min}` : "any"} to ${t.price_max ? `₹${t.price_max}` : "any"}` : null,
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
+
+/** The picking rules on the form itself (owner's case: a backtest on another server used that server's Alerts tab, 6 of 7,
+ *  while the owner had set All 7: stocks that were never 7/7 were armed). */
+function RulesBox({
+  th,
+  source,
+  onChange,
+  onReset,
+  select,
+}: {
+  th: Rules;
+  source: "TREND" | "ACTIVE" | "BOTH";
+  onChange: (t: Rules) => void;
+  onReset?: () => void;
+  select: string;
+}) {
+  const set = <K extends keyof Rules>(k: K, v: Rules[K]) => onChange({ ...th, [k]: v });
+  const num = (v: string, lo: number, hi: number) => Math.min(hi, Math.max(lo, Number(v) || 0));
+  const box = `${select} w-20`;
+  return (
+    <div className="basis-full space-y-2 rounded-md p-2 ring-1 ring-inset ring-white/10">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
+        <b className="text-slate-100">Picking rules for this backtest</b> <NewTag id="autoarm-rules" />
+        <span className="text-slate-400">filled from the Alerts tab; change them here for this run only</span>
+        {onReset ? (
+          <button type="button" onClick={onReset} className="min-h-8 rounded-md px-2 text-slate-400 ring-1 ring-inset ring-white/15">
+            Reset to the Alerts tab
+          </button>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        {source !== "ACTIVE" ? (
+          <>
+            <label className="flex flex-col gap-1">
+              Strong trend: checks that must pass
+              <select value={th.min_checks} onChange={(e) => set("min_checks", Number(e.target.value))} className={select}>
+                <option value={5}>5 of 7 or more</option>
+                <option value={6}>6 of 7 or more</option>
+                <option value={7}>All 7 only</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              Direction
+              <select value={th.side} onChange={(e) => set("side", e.target.value as Rules["side"])} className={select}>
+                <option value="BOTH">Up and down</option>
+                <option value="UP">Up only</option>
+                <option value="DOWN">Down only</option>
+              </select>
+            </label>
+          </>
+        ) : null}
+        {source !== "TREND" ? (
+          <>
+            <label className="flex flex-col gap-1">
+              Most active: judge by
+              <select value={th.basis} onChange={(e) => set("basis", e.target.value as Rules["basis"])} className={select}>
+                <option value="WAITING">Waiting orders</option>
+                <option value="EXECUTED">Executed volume</option>
+                <option value="BOTH">Both</option>
+              </select>
+            </label>
+            {th.basis !== "EXECUTED" ? (
+              <label className="flex flex-col gap-1">
+                waiting at least %
+                <input type="number" min={50} max={99} value={th.pct} onChange={(e) => set("pct", num(e.target.value, 50, 99))} className={box} />
+              </label>
+            ) : null}
+            {th.basis !== "WAITING" ? (
+              <label className="flex flex-col gap-1">
+                executed at least %
+                <input type="number" min={50} max={95} value={th.flow_pct} onChange={(e) => set("flow_pct", num(e.target.value, 50, 95))} className={box} />
+              </label>
+            ) : null}
+            <label className="flex flex-col gap-1">
+              Side
+              <select value={th.pressure_side} onChange={(e) => set("pressure_side", e.target.value as Rules["pressure_side"])} className={select}>
+                <option value="BOTH">Buyers or sellers</option>
+                <option value="BUY">Buyers only</option>
+                <option value="SELL">Sellers only</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              ₹ cr traded at least
+              <input type="number" min={0} step={1} value={th.min_value_cr} onChange={(e) => set("min_value_cr", num(e.target.value, 0, 100000))} className={box} />
+            </label>
+            <label className="flex flex-col gap-1">
+              Vol vs usual at least ×
+              <input type="number" min={0} step={0.1} value={th.min_rvol} onChange={(e) => set("min_rvol", num(e.target.value, 0, 100))} className={box} />
+            </label>
+          </>
+        ) : null}
+        <label className="flex flex-col gap-1">
+          At most a day
+          <input type="number" min={1} max={50} value={th.max_day} onChange={(e) => set("max_day", num(e.target.value, 1, 50) || 1)} className={box} />
+        </label>
+        <label className="flex flex-col gap-1">
+          Price from ₹
+          <input type="number" min={0} value={th.price_min} onChange={(e) => set("price_min", num(e.target.value, 0, 1000000))} className={box} />
+        </label>
+        <label className="flex flex-col gap-1">
+          to ₹ (0 = any)
+          <input type="number" min={0} value={th.price_max} onChange={(e) => set("price_max", num(e.target.value, 0, 1000000))} className={box} />
+        </label>
+      </div>
+    </div>
   );
 }

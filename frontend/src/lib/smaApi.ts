@@ -2951,6 +2951,17 @@ export type AutoArmBody = {
   speed?: number;
   play_handoffs: boolean;
   max_day?: number;
+  /** The picking rules (backend AutoArmStart): sent with every run so it never falls back to the server's Alerts tab. */
+  min_checks?: number;
+  side?: "BOTH" | "UP" | "DOWN";
+  pct?: number;
+  pressure_side?: "BOTH" | "BUY" | "SELL";
+  min_value_cr?: number;
+  min_rvol?: number;
+  basis?: "WAITING" | "EXECUTED" | "BOTH";
+  flow_pct?: number;
+  price_min?: number;
+  price_max?: number;
 };
 
 export type QueueItem = {
@@ -3509,22 +3520,7 @@ export const smaApi = {
   }) => request<ReplayInfo>("/api/replay/trend-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
   /** Auto-arm replay (backend auto_arm.py): past days played like live ones, each stock armed at the minute the Scalp
    * auto-arm would have armed it, traded by `bot` from then on. Practice money; nothing is armed for real. */
-  replayAutoArm: (body: {
-    date: string;
-    end_date: string;
-    universe: string[];
-    source: "TREND" | "ACTIVE" | "BOTH";
-    first: string;
-    last: string;
-    every_min: number;
-    minutes: number;
-    candles?: "NORMAL" | "HA";
-    until?: string;
-    bot: number;
-    speed: number;
-    play_handoffs: boolean;
-    max_day?: number;
-  }) => request<ReplayInfo & { notes?: string[] }>("/api/replay/auto-arm", { method: "POST", body: JSON.stringify(body) }, 60000),
+  replayAutoArm: (body: AutoArmBody & { speed: number }) => request<ReplayInfo & { notes?: string[] }>("/api/replay/auto-arm", { method: "POST", body: JSON.stringify(body) }, 60000),
   /** Backtest the Most active picks (backend active_picks.py): each day, the top N by the chosen column at the pick
    * time, traded by `bot` from that minute. Practice money; nothing is armed. */
   replayActivePicks: (body: {
