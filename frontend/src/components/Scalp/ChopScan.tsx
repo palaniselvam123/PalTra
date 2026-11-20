@@ -17,7 +17,7 @@ import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { ageText, rankTrends, trendRead, type RankedTrend, type TrendRead } from "@/lib/trendRank";
-import { CROSS_RULES, SCORE_OPTIONS, TREND_DIRS, TREND_KINDS, chopPasses, inPriceRange, isCrossRule, isStrong, type CrossRule, type ScoreFilter } from "@/lib/chopFilter";
+import { CANDLE_KIND_OPTIONS, SCORE_OPTIONS, TREND_DIRS, TREND_KINDS, asCandleKind, candleWords, chopPasses, colourRead, crossRulesFor, modeWords, trendKindsFor, inPriceRange, isCrossRule, isStrong, type CrossRule, type ScoreFilter } from "@/lib/chopFilter";
 import { GuideBar } from "./GuideBar";
 import { NewTag } from "@/components/ui/NewTag";
 import { api, type ActiveStock } from "@/lib/api";
@@ -96,10 +96,14 @@ const HA_TEXT: Partial<Record<ChopTrendCheck, string>> = {
 const MIDDAY_ORDER = Object.keys(MIDDAY_TEXT) as ChopTrendCheck[];
 const MORNING_ORDER = Object.keys(MORNING_TEXT) as ChopTrendCheck[];
 const HA_ORDER = Object.keys(HA_TEXT) as ChopTrendCheck[];
+// The same colour checks read on the real candles ("Normal (colours)").
+const COLOUR_TEXT: Partial<Record<ChopTrendCheck, string>> = Object.fromEntries(
+  Object.entries(HA_TEXT).map(([k, v]) => [k, (v ?? "").replace("Heikin Ashi candles", "candles")])
+) as Partial<Record<ChopTrendCheck, string>>;
 const orderFor = (r: ChopScanRow) =>
-  r.trend_mode === "HEIKIN_ASHI" ? HA_ORDER : r.trend_mode === "MORNING" ? MORNING_ORDER : MIDDAY_ORDER;
+  r.trend_mode === "HEIKIN_ASHI" || r.trend_mode === "COLOUR" ? HA_ORDER : r.trend_mode === "MORNING" ? MORNING_ORDER : MIDDAY_ORDER;
 const textsFor = (r: ChopScanRow) =>
-  r.trend_mode === "HEIKIN_ASHI" ? HA_TEXT : r.trend_mode === "MORNING" ? MORNING_TEXT : MIDDAY_TEXT;
+  r.trend_mode === "HEIKIN_ASHI" ? HA_TEXT : r.trend_mode === "COLOUR" ? COLOUR_TEXT : r.trend_mode === "MORNING" ? MORNING_TEXT : MIDDAY_TEXT;
 
 
 const clock = (iso: string) =>
@@ -340,7 +344,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
     if (!saved) return;
     setData(saved);
     setMinutes(saved.minutes);
-    setCandles(saved.candles === "HA" ? "HA" : "NORMAL");
+    setCandles(asCandleKind(saved.candles));
   }, [saved]);
 
   useEffect(() => {
@@ -354,7 +358,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         if (d.auto) {
           setAuto(d.auto);
           setMinutes(d.auto.minutes);
-          setCandles(d.auto.candles === "HA" ? "HA" : "NORMAL");
+          setCandles(asCandleKind(d.auto.candles));
         }
       })
       .catch(() => {
@@ -379,8 +383,11 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   }, [data?.running]);
 
   const scannedThisCandle = data?.minutes === minutes && (data?.candles ?? "NORMAL") === candles;
-  // The rows on screen were read on Heikin Ashi candles: the trend comes from the candles (ha_trend), not the SMAs.
-  const haRead = (data?.candles ?? "NORMAL") === "HA";
+  // The rows on screen were read by colour (Heikin Ashi, or the real candles' colours): the trend comes from the
+  // candles (ha_trend), not the SMAs. The filters follow the Candles menu, the columns the rows on screen.
+  const haRead = colourRead(asCandleKind(data?.candles));
+  const rowWords = modeWords(asCandleKind(data?.candles));
+  const words = modeWords(candles);
   // Every filter but the stock search: what decides whether a stock is "in the list".
   const passes = useCallback(
     (r: ChopScanRow) =>
@@ -477,8 +484,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         <h2 className="flex items-center gap-2 text-sm font-semibold">
           <Activity size={15} className="text-accentSky" />{" "}
           {saved
-            ? `Trend quality — saved scan${savedTitle ? ` · ${savedTitle}` : ""} · ${minutes}-minute ${candles === "HA" ? "Heikin Ashi " : ""}candle`
-            : `Trend quality — how choppy each stock has looked today on the ${minutes}-minute ${candles === "HA" ? "Heikin Ashi " : ""}candle`}
+            ? `Trend quality — saved scan${savedTitle ? ` · ${savedTitle}` : ""} · ${minutes}-minute ${candleWords(candles)}candle`
+            : `Trend quality — how choppy each stock has looked today on the ${minutes}-minute ${candleWords(candles)}candle`}
         </h2>
         {!saved && (
         <>
@@ -502,9 +509,13 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
       <GuideBar lesson="scalp-trend-quality" terms={["cross", "chop", "trend", "strong_trend", "fresh_trend", "phase", "vwap", "gap_pct", "speed", "rvol", "arm", "handoff"]} className="mb-2" />
       <Explain
         className="mb-3"
-        lead={`How choppy or how trending each stock has been today: how many times its two average lines (${label}) crossed, how long since the last cross, and how far it moved between crosses. Few crosses and a long run = trending; many crosses = choppy. Watch only — nothing here places an order.`}
+        lead={
+          colourRead(candles)
+            ? `How choppy or how trending each stock has been today, read from the ${candles === "HA" ? "Heikin Ashi " : ""}candles' colours: how many times they changed colour (dojis skipped), how long the current colour run has lasted, and how far it moved. Few flips and a long run = trending; 5+ flips or flips under 3 candles apart = choppy. Watch only — nothing here places an order.`
+            : `How choppy or how trending each stock has been today: how many times its two average lines (${label}) crossed, how long since the last cross, and how far it moved between crosses. Few crosses and a long run = trending; many crosses = choppy. Watch only — nothing here places an order.`
+        }
       >
-        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Use <b>Scan</b> to pick the stocks: armed stocks, every F&O stock, Nifty 50, Nifty 100 or Nifty Bank (tick several to join them). <b>Price from / to</b> (₹, 0 = any) keeps only stocks priced in that range, in the table, the quiet pop-up and the Telegram alert. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. <b>Fresh trend</b> (the Fresh ↑ / ↓ chip, and Show → Fresh trend) marks a trend that has only just started: the averages crossed within the last 3 candles, price and the fast average are beyond VWAP, the gap is still widening and volume is at least 1.5× the usual. Strong trend confirms a move that is already old; Fresh trend is the early one. <b>Candles</b>: Normal reads the real candles with the SMA rules above. <b>Heikin Ashi</b> reads the trend from the Heikin Ashi candles themselves and uses no SMA: a stock's side is the colour of its current run, Score counts today's <i>colour flips</i> (Trending = 0-2 flips with a long run since, Choppy = 5+ flips or runs under 3 candles), Strong trend is 6 of 7 candle checks (at least 3 candles of one colour, no wick against the trend, bodies not shrinking, higher lows / lower highs, real price beyond VWAP, a move of at least 1 ATR, no doji lately; the first two and VWAP are required), a phase is 5+ candles of one colour, Trend age is the run's length and the gap column becomes the run's move %. Prices in the table stay real. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
+        <b>Trending</b> is a stock with 0 or 1 crosses so far and a long run since the last one (more than an hour). <b>Choppy</b> is 4+ crosses, or crosses coming on average less than 15 minutes apart. <b>Mixed</b> is everything else. <b>Strong trend</b> (bearish ↓ / bullish ↑) is the clean one-way move: price, the fast SMA, the slow SMA and VWAP stacked one way, both SMAs sloping and fanned apart, at least 75% of the last 12 closes on the trend side of the fast SMA (a bounce that fails at the fast SMA still counts), lower highs and lows (higher for bullish) and no cross in the last 12 candles. The first three are required and 6 of the 7 must pass; hover the chip to see which. Add <b>Fast movers</b> to keep only the ones moving quickly right now. Use <b>Scan</b> to pick the stocks: armed stocks, every F&O stock, Nifty 50, Nifty 100 or Nifty Bank (tick several to join them). <b>Price from / to</b> (₹, 0 = any) keeps only stocks priced in that range, in the table, the quiet pop-up and the Telegram alert. <b>Crosses today</b> keeps only the stocks whose SMAs crossed <i>none</i> or <i>exactly 1</i> time today on every candle size you tick (1m, 5m, 15m…): a one-way day, or one turn since the morning and a one-way run after it (the cross time shows as @HH:MM). All sizes are read from the same download. Past crosses do not predict the next cross; the label describes the session so far. <b>Fresh trend</b> (the Fresh ↑ / ↓ chip, and Show → Fresh trend) marks a trend that has only just started: the averages crossed within the last 3 candles, price and the fast average are beyond VWAP, the gap is still widening and volume is at least 1.5× the usual. Strong trend confirms a move that is already old; Fresh trend is the early one. <b>Candles</b>: Normal reads the real candles with the SMA rules above. <b>Heikin Ashi</b> reads the trend from the Heikin Ashi candles themselves and uses no SMA: a stock's side is the colour of its current run, Score counts today's <i>colour flips</i> (Trending = 0-2 flips with a long run since, Choppy = 5+ flips or runs under 3 candles), Strong trend is 6 of 7 candle checks (at least 3 candles of one colour, no wick against the trend, bodies not shrinking, higher lows / lower highs, real price beyond VWAP, a move of at least 1 ATR, no doji lately; the first two and VWAP are required), a phase is 5+ candles of one colour, Trend age is the run's length and the gap column becomes the run's move %. Prices in the table stay real. <b>Normal (colours)</b> reads the real candles the same colour way as Heikin Ashi (colour flips, runs, the same 7 candle checks and phases, no SMA); the filters then count colour flips instead of crosses, Trend on reads the candle colour instead of the SMA side, and the gap filter becomes the run's move. A scan starts only when Scan now is pressed and reads the stocks one at a time (hundreds of downloads).
       </Explain>
 
       <FilterRow
@@ -532,17 +543,14 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             <SelectFilter
               label="Candles"
               value={candles}
-              onChange={(v) => setCandles(v === "HA" ? "HA" : "NORMAL")}
-              options={[
-                { value: "NORMAL", label: "Normal" },
-                { value: "HA", label: "Heikin Ashi" },
-              ]}
-              className="w-32"
+              onChange={(v) => setCandles(asCandleKind(v))}
+              options={CANDLE_KIND_OPTIONS}
+              className="w-44"
             />
           )}
-          {!saved && candles === "HA" ? (
-            <span className="self-end pb-2" title="With Heikin Ashi the trend is read from the candles themselves, not the SMA cross">
-              <NewTag id="tq-ha-native" />
+          {!saved ? (
+            <span className="self-end pb-2" title="Normal (colours): the real candles read by colour, like Heikin Ashi (colour flips and runs, no SMA cross); the filters below change with the choice">
+              <NewTag id={candles === "HA" ? "tq-ha-native" : "tq-colour-mode"} />
             </span>
           ) : null}
           <SelectFilter
@@ -551,6 +559,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             onChange={(v) => setScore(v as ScoreFilter)}
             options={SCORE_OPTIONS}
             className="w-44"
+            title={words.score}
           />
           <TextFilter value={query} onChange={setQuery} />
           <NumberFilter
@@ -563,15 +572,15 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             suffix="%/min"
             className="w-44"
           />
-          <FilterField label="Crosses today">
+          <FilterField label={words.crosses}>
             <select
               value={crossCount}
               onChange={(e) => setCrossCount(isCrossRule(e.target.value) ? e.target.value : "0")}
-              aria-label="How many SMA crosses today"
+              aria-label={`How many ${words.crossesShort} today`}
               className="min-h-9 rounded-md border border-slate-700 bg-base px-2 text-sm text-slate-100 outline-none focus:border-slate-500"
-              title="None: the SMAs have not crossed once today. Exactly 1: one turn since the morning, then a one-way run (↑ up / ↓ down: that cross's direction). At most / or more: a range. Every ticked candle size must match."
+              title={words.crossesHelp}
             >
-              {CROSS_RULES.map(([value, label]) => (
+              {crossRulesFor(candles).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
@@ -619,9 +628,9 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
               onChange={(e) => setTrendKind(e.target.value as TrendKind)}
               aria-label="How strong the trend must be"
               className="min-h-9 rounded-md border border-slate-700 bg-base px-2 text-sm text-slate-100 outline-none focus:border-slate-500"
-              title="SMA side: the fast SMA is above the slow one (bullish) or below (bearish) on the last closed candle of that size. Strong trend: the card's strong-trend read (6 of 7 checks: stack, VWAP, slope, fan, hold, structure, run) on that size. Every ticked size must agree; a size with too few candles never matches."
+              title={words.sideHelp}
             >
-              {TREND_KINDS.map(([value, label]) => (
+              {trendKindsFor(candles).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
@@ -664,7 +673,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                 className="w-40"
               />
               <NumberFilter
-                label="SMA gap at least"
+                label={`${words.gap} at least`}
                 value={minGap}
                 onChange={(v) => setMinGap(Math.min(5, Math.max(0, Math.round(v * 100) / 100)))}
                 min={0}
@@ -678,7 +687,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                   label="Hide fading trends"
                   checked={hideFading}
                   onChange={setHideFading}
-                  title="Hide a trend whose SMA gap on any ticked size has shrunk to under half its widest in this trend"
+                  title={words.gapHelp}
                 />
               </FilterField>
             </>
@@ -866,18 +875,18 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                       sort={sort}
                       onSort={onSort}
                       num
-                      title="Market minutes the SMAs have pointed this way (closed candles x size), and since when. On the Trend on sizes (the shortest), or on this scan's candle when none is ticked"
+                      title={haRead ? "Market minutes the current colour run has lasted (closed candles x size), and since when. On the Trend on sizes (the shortest), or on this scan's candle when none is ticked" : "Market minutes the SMAs have pointed this way (closed candles x size), and since when. On the Trend on sizes (the shortest), or on this scan's candle when none is ticked"}
                       drag={cols.dragProps("age")}
                     />
                   ),
                   gap: (
                     <SortTh
-                      label={haRead ? "Run move %" : "SMA gap %"}
+                      label={`${rowWords.gap} %`}
                       k="gap"
                       sort={sort}
                       onSort={onSort}
                       num
-                      title="|SMA fast − slow| / slow %, on the Trend on sizes (averaged) or on this scan's candle. ⚠ fading = on a size the gap is under half its widest in this trend"
+                      title={haRead ? "The colour run's move %, on the Trend on sizes (averaged) or on this scan's candle. ⚠ fading = on a size the run has given back more than half its widest move" : "|SMA fast − slow| / slow %, on the Trend on sizes (averaged) or on this scan's candle. ⚠ fading = on a size the gap is under half its widest in this trend"}
                       drag={cols.dragProps("gap")}
                     />
                   ),
@@ -911,19 +920,19 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                     <th
                       {...cols.dragProps("sizes")}
                       className={clsx("px-2 pb-2 text-left font-medium", cols.dragProps("sizes").className)}
-                      title="Today's SMA crosses on each candle size (— = not enough candles yet)"
+                      title={`Today's ${rowWords.crossesShort} on each candle size (— = not enough candles yet)`}
                     >
-                      Crosses by size
+                      {haRead ? "Flips by size" : "Crosses by size"}
                     </th>
                   ),
                   crosses: (
                     <SortTh
-                      label={haRead ? "Colour flips today" : "Crosses today"}
+                      label={rowWords.crosses}
                       k="crosses"
                       sort={sort}
                       onSort={onSort}
                       num
-                      title={haRead ? "Heikin Ashi colour changes today (dojis skipped): the Heikin Ashi read's crosses" : undefined}
+                      title={haRead ? `${rowWords.score}` : rowWords.score}
                       drag={cols.dragProps("crosses")}
                     />
                   ),
@@ -1200,8 +1209,8 @@ const FRESH_TEXT: Record<string, string> = {
   vwap: "Price and the fast average are on the trend's side of VWAP",
   gap: "The gap between the averages is still widening",
   volume: "Volume today is at least 1.5× the usual for this time",
-  colour: "The last Heikin Ashi candle is the trend's colour",
-  turn: "The Heikin Ashi colour turned within the last 3 candles and held",
+  colour: "The last candle is the trend's colour",
+  turn: "The candle colour turned within the last 3 candles and held",
   nowick: "The last candle has no wick against the new colour",
 };
 
@@ -1236,10 +1245,10 @@ function TrendChip({ row: r }: { row: ChopScanRow }) {
   const order = orderFor(r);
   const texts = textsFor(r);
   const passed = order.filter((k) => checks[k]).length;
-  const ha = r.trend_mode === "HEIKIN_ASHI";
+  const ha = r.trend_mode === "HEIKIN_ASHI" || r.trend_mode === "COLOUR";
   const title = [
     ha
-      ? "Heikin Ashi read: colour runs, wicks and bodies of the candles (no SMA)"
+      ? `${r.trend_mode === "COLOUR" ? "Colour read of the real candles" : "Heikin Ashi read"}: colour runs, wicks and bodies of the candles (no SMA)`
       : r.trend_mode === "MORNING" ? "Morning read (before 10:00, today's candles)" : "Midday read (10:00 on)",
     r.trend ? `Strong ${r.trend === "STRONG_BULLISH" ? "bullish" : "bearish"} trend` : `Not a strong trend (${r.trend_side?.toLowerCase() ?? "no"} side)`,
     ...order.map((k) => `${checks[k] ? "✓" : "✗"} ${r.trend_notes?.[k] ?? texts[k] ?? k}`),

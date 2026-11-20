@@ -633,7 +633,7 @@ export type ChopScanRow = {
   trend_score?: number;
   trend_checks?: Partial<Record<ChopTrendCheck, boolean>>;
   /** MORNING before 10:00 IST (today's candles), MIDDAY from 10:00. */
-  trend_mode?: "MORNING" | "MIDDAY" | "HEIKIN_ASHI";
+  trend_mode?: "MORNING" | "MIDDAY" | "HEIKIN_ASHI" | "COLOUR";
   /** The server's one-line reading of each check (names the morning / midday rule used). */
   trend_notes?: Partial<Record<ChopTrendCheck, string>>;
   /** Morning volume since 09:15 against the usual for the same minutes (x), and the earlier sessions used. */
@@ -752,7 +752,7 @@ export type ChopScan = {
   sma_fast: number;
   sma_slow: number;
   quiet_min: number;
-  /** The candles the scan read: NORMAL (real) or HA (Heikin Ashi); older servers leave it out. */
+  /** The candles the scan read: NORMAL (real, SMA cross), COLOUR (real, by colour) or HA (Heikin Ashi); older servers leave it out. */
   candles?: ChopCandles;
   as_of: string | null;
   /** When the last pass ended (IST); older servers leave it out. */
@@ -1395,7 +1395,7 @@ export type ActiveAcross = {
 
 export type ScanAcross = {
   days: string[];
-  runs: (Omit<ScanRun, "kind"> & { kind: "chop"; candles: "NORMAL" | "HA"; rows: ChopScanRow[] })[];
+  runs: (Omit<ScanRun, "kind"> & { kind: "chop"; candles: "NORMAL" | "COLOUR" | "HA"; rows: ChopScanRow[] })[];
 };
 
 export type ScanRun = {
@@ -1414,7 +1414,7 @@ export type ScanRun = {
     sma_fast?: number;
     sma_slow?: number;
     quiet_min?: number;
-    candles?: "NORMAL" | "HA";
+    candles?: "NORMAL" | "COLOUR" | "HA";
     stocks?: number;
     source?: "manual" | "auto";
     alert_on_quiet?: boolean;
@@ -1501,8 +1501,9 @@ export type ScanRunDetail = ScanRun & {
 };
 
 /** Trend quality re-scan run by the server every `every_min` minutes while NSE is open (no browser needed). */
-/** Trend quality candle kind: the real candles, or Heikin Ashi ones (prices shown stay real). */
-export type ChopCandles = "NORMAL" | "HA";
+/** Trend quality candle kind: the real candles read by the SMA cross (NORMAL), the real candles read by colour
+ * (COLOUR), or Heikin Ashi ones, read by colour (HA). Prices shown stay real. */
+export type ChopCandles = "NORMAL" | "COLOUR" | "HA";
 export type ChopAuto = {
   candles?: ChopCandles;
   on: boolean;
@@ -3318,7 +3319,7 @@ export const smaApi = {
     return request<ScanHistory>(`/api/scan-history${qs ? `?${qs}` : ""}`, undefined, undefined, false);
   },
   /** Every saved Trend quality scan of one or more days (at most 10), rows cut to what the History filter reads. */
-  scanHistoryAcross: (days: string[], minutes?: number | null, candles?: "NORMAL" | "HA" | null) => {
+  scanHistoryAcross: (days: string[], minutes?: number | null, candles?: "NORMAL" | "COLOUR" | "HA" | null) => {
     const q = new URLSearchParams({ days: days.join(",") });
     if (minutes) q.set("minutes", String(minutes));
     if (candles) q.set("candles", candles);

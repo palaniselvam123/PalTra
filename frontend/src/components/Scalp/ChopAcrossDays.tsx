@@ -6,12 +6,15 @@ import { CalendarRange, Download, Loader2 } from "lucide-react";
 import { smaApi, type ChopScanRow, type ScanAcross } from "@/lib/smaApi";
 import {
   CANDLE_CHOICES,
-  CROSS_RULES,
+  CANDLE_KIND_OPTIONS,
+  candleTag,
+  crossRulesFor,
+  modeWords,
+  trendKindsFor,
   NO_FILTER,
   PHASE_OPTIONS,
   SCORE_OPTIONS,
   TREND_DIRS,
-  TREND_KINDS,
   chopPasses,
   isCrossRule,
   type ChopFilter,
@@ -47,7 +50,7 @@ type Hit = {
   trendFirst: string | null;
   scoreFirst: string | null;
   candle: number | null;
-  candles: "NORMAL" | "HA";
+  candles: "NORMAL" | "COLOUR" | "HA";
 };
 /** The same stock over all the picked days. */
 type Stock = { key: string; symbol: string; days: number; matched: number; firstDay: string; firstAt: string; lastDay: string; avgMove: number | null };
@@ -69,7 +72,7 @@ type Seen = {
   dayMove: number | null;
   speed: number | null;
   candle: number | null;
-  candles: "NORMAL" | "HA";
+  candles: "NORMAL" | "COLOUR" | "HA";
   /** What changed since the stock's previous scan that day (same candle): "" when nothing did. */
   change: string;
   /** +1 the trend got stronger, -1 weaker, 0 same. */
@@ -132,7 +135,9 @@ export function ChopAcrossDays({
 }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [candle, setCandle] = useState<number>(0);
-  const [candles, setCandles] = useState<"" | "NORMAL" | "HA">("");
+  const [candles, setCandles] = useState<"" | "NORMAL" | "COLOUR" | "HA">("");
+  // The filters' words follow the Candles choice (crosses vs colour flips, SMA side vs candle colour).
+  const words = modeWords(candles || "NORMAL");
   const [f, setF] = useState<ChopFilter>(NO_FILTER);
   const [query, setQuery] = useState("");
   const [table, setTable] = useState<Table>("day");
@@ -152,7 +157,7 @@ export function ChopAcrossDays({
       const s = JSON.parse(raw);
       if (s.f && typeof s.f === "object") setF({ ...NO_FILTER, ...s.f, crossCount: isCrossRule(String(s.f.crossCount)) ? s.f.crossCount : "0" });
       if (typeof s.candle === "number") setCandle(s.candle);
-      if (s.candles === "NORMAL" || s.candles === "HA") setCandles(s.candles);
+      if (s.candles === "NORMAL" || s.candles === "COLOUR" || s.candles === "HA") setCandles(s.candles);
     } catch {
       /* storage blocked: defaults */
     }
@@ -466,13 +471,9 @@ export function ChopAcrossDays({
           <SelectFilter
             label="Candles"
             value={candles}
-            onChange={(v) => setCandles(v === "NORMAL" || v === "HA" ? v : "")}
-            options={[
-              { value: "", label: "Both" },
-              { value: "NORMAL", label: "Normal" },
-              { value: "HA", label: "Heikin Ashi" },
-            ]}
-            className="w-32"
+            onChange={(v) => setCandles(v === "NORMAL" || v === "COLOUR" || v === "HA" ? v : "")}
+            options={[{ value: "" as const, label: "Every kind" }, ...CANDLE_KIND_OPTIONS]}
+            className="w-44"
           />
           <FilterField label="Table">
             <select
@@ -533,14 +534,15 @@ export function ChopAcrossDays({
             suffix="%/min"
             className="w-44"
           />
-          <FilterField label="Crosses today">
+          <FilterField label={candles ? words.crosses : "Crosses / colour flips today"}>
             <select
               value={f.crossCount}
               onChange={(e) => set("crossCount", (isCrossRule(e.target.value) ? e.target.value : "0") as CrossRule)}
-              aria-label="How many SMA crosses today"
+              aria-label={`How many ${words.crossesShort} today`}
+              title={words.crossesHelp}
               className="min-h-9 rounded-md border border-slate-700 bg-base px-2 text-sm text-slate-100 outline-none focus:border-slate-500"
             >
-              {CROSS_RULES.map(([value, label]) => (
+              {crossRulesFor(candles || "NORMAL").map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
@@ -566,9 +568,10 @@ export function ChopAcrossDays({
               value={f.trendKind}
               onChange={(e) => set("trendKind", e.target.value as TrendKind)}
               aria-label="How strong the trend must be"
+              title={words.sideHelp}
               className="min-h-9 rounded-md border border-slate-700 bg-base px-2 text-sm text-slate-100 outline-none focus:border-slate-500"
             >
-              {TREND_KINDS.map(([value, label]) => (
+              {trendKindsFor(candles || "NORMAL").map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
                 </option>
@@ -590,7 +593,7 @@ export function ChopAcrossDays({
                 className="w-40"
               />
               <NumberFilter
-                label="SMA gap at least"
+                label={`${candles ? words.gap : "Gap / run move"} at least`}
                 value={f.minGap}
                 onChange={(v) => set("minGap", Math.min(5, Math.max(0, Math.round(v * 100) / 100)))}
                 min={0}
@@ -686,7 +689,7 @@ export function ChopAcrossDays({
                     <td className={clsx("px-2 py-1.5 text-right tabular-nums", (r.dayMove ?? 0) > 0 ? "text-profit" : (r.dayMove ?? 0) < 0 ? "text-loss" : "")}>{pct(r.dayMove)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums">{r.speed != null ? r.speed.toFixed(3) : "—"}</td>
                     <td className={clsx("px-2 py-1.5", r.dir > 0 ? "text-profit" : r.dir < 0 ? "text-loss" : "text-slate-400")}>{r.change || "—"}</td>
-                    <td className="px-2 py-1.5 text-slate-400">{r.candle ? `${r.candle}m` : ""}{r.candles === "HA" ? " HA" : ""}</td>
+                    <td className="px-2 py-1.5 text-slate-400">{r.candle ? `${r.candle}m` : ""}{candleTag(r.candles)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -765,7 +768,7 @@ export function ChopAcrossDays({
                     <td className="px-2 py-1.5 text-right tabular-nums">{h.firstPrice?.toFixed(2) ?? "—"}</td>
                     <td className={clsx("px-2 py-1.5 text-right tabular-nums", (h.movePct ?? 0) > 0 ? "text-profit" : (h.movePct ?? 0) < 0 ? "text-loss" : "")}>{pct(h.movePct)}</td>
                     <td className="px-2 py-1.5">{trendText(h.trendFirst)}{h.scoreFirst ? ` · ${h.scoreFirst.toLowerCase()}` : ""}</td>
-                    <td className="px-2 py-1.5 text-slate-400">{h.candle ? `${h.candle}m` : ""}{h.candles === "HA" ? " HA" : ""}</td>
+                    <td className="px-2 py-1.5 text-slate-400">{h.candle ? `${h.candle}m` : ""}{candleTag(h.candles)}</td>
                     <td className="px-2 py-1.5 text-right"><ArmButton symbol={h.symbol} armed={armed} arming={arming} onArm={onArm} /></td>
                   </tr>
                 ))}

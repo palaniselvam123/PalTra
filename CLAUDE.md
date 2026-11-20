@@ -1393,7 +1393,13 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   one colour (`phases`, `summary`); Fresh = the colour turned within 3 candles, no wick against it, beyond VWAP, volume
   1.5x (`fresh`). Every size of the row reads it the same way, so filters, rank, alerts (`scalp_alerts.CHECK_WORDS`),
   auto-arm and the pick backtests follow; the card relabels Crosses → Colour flips and SMA gap % → Run move %. Scan & arm, the Most active card's "Read trend
-  quality" and MCP keep normal candles. **The backtests can read Heikin Ashi too** (`candles` `NORMAL` default | `HA` on
+  quality" and MCP keep normal candles. **Normal (colours)** (`candles` `COLOUR`, `chop_scan.COLOUR` / `candle_kind` / `read_flags`; owner's request): the
+  real candles read the Heikin Ashi way (`analyze(..., colour=True)`: `ha_trend` flips, score, runs, the 7 candle checks,
+  phases, fresh), rows carry `trend_mode` `COLOUR`; `scan_worker.chop_job` takes the kind string. The card's Candles menu
+  (`chopFilter.CANDLE_KIND_OPTIONS`) has Normal (SMA cross) / Normal (colours) / Heikin Ashi, and its filters and columns
+  are worded for the picked mode (`chopFilter.modeWords`, `crossRulesFor`, `trendKindsFor`: Crosses today → Colour flips
+  today, SMA side → Candle colour, SMA gap → Run move, each with its own help line); the History tab's Across days view
+  too. The backtests and Scan & arm keep NORMAL / HA. **The backtests can read Heikin Ashi too** (`candles` `NORMAL` default | `HA` on
   `TrendPickRule`, `AutoArmRule`, `trend_picks.AutoSettings` and the comparison; `POST /api/replay/trend-picks`,
   `/api/replay/auto-arm`, `/api/trend-picks/compare`, `PUT /api/trend-picks/auto`; the Backtest tab's "Candles" menus):
   `trend_picks.read_at` passes `ha=` to `analyze` and `auto_arm.strong_read(..., ha=)` runs `ha_bars` before `enrich`, so

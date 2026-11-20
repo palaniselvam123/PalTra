@@ -25,7 +25,7 @@ export function useFirstSeen<R extends { symbol: string }>(
   rows: R[],
   passes: (r: R) => boolean,
   kind: "chop" | "cross" = "chop",
-  candles?: "NORMAL" | "HA",
+  candles?: "NORMAL" | "COLOUR" | "HA",
 ): Map<string, string> {
   const [runs, setRuns] = useState<ScanRunDetail[]>([]);
 
