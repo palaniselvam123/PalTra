@@ -17,6 +17,7 @@ import json
 import csv
 import io
 import re
+import types
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -52,6 +53,7 @@ import tsl_calc as tsl_calc_mod
 import regime_study
 import second_candle
 import strategy_lab
+import trend_log
 import morning_study
 import trend_picks
 import backtest_queue
@@ -3664,6 +3666,51 @@ async def replay_run_market_reads(run_id: int):
     if reads is None:
         raise HTTPException(404, "No such replay run")
     return reads
+
+
+@app.get("/api/replay/runs/{run_id}/trend-reads")
+async def replay_run_trend_reads(run_id: int, symbol: str = "", day: str = "", work_out: bool = False):
+    """The trend reading the backtest made at each candle close of its Trend quality stocks, and what the bot did
+    (trend_log.py). A run saved before readings were kept has none: with `work_out`, one stock and day are read again
+    from the cached 1-minute candles with the run's own settings (no positions, so only what the trend rule would have
+    said). Read-only."""
+    from models import ReplayRun
+    from replay import _run_settings
+
+    def run_row():
+        with session_factory()() as db:
+            run = db.get(ReplayRun, run_id)
+            return None if run is None else (_run_settings(run), [d for d in (run.days or "").split(",") if d])
+
+    found = await asyncio.to_thread(run_row)
+    if found is None:
+        raise HTTPException(404, "No such replay run")
+    settings, days = found
+    name = symbol.strip().upper()
+    # Only one stock's rows at a time (a run of 100 stocks over days holds tens of thousands); without a stock just the picker.
+    rows = await asyncio.to_thread(trend_log.for_run, run_id, name, day or None) if name else []
+    stocks = await asyncio.to_thread(trend_log.summary, run_id)
+    if rows or not work_out or not name:
+        return {"run_id": run_id, "source": "saved" if rows else "none", "rows": rows, "stocks": stocks, "days": days}
+    if not name or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day or ""):
+        raise HTTPException(400, "Pick one stock and one day to work the readings out.")
+    when = dt.date.fromisoformat(day)
+    colour = str(settings.get("entry_mode") or "SMA").upper() in ("COLOUR", "PATTERN")
+    minutes = int((settings.get("pattern_tf") if colour else settings.get("candle_minutes")) or (1 if colour else 1))
+    fast, slow = int(settings.get("sma_fast") or 9), int(settings.get("sma_slow") or 21)
+    cfg = types.SimpleNamespace(**{k: v for k, v in settings.items() if k.startswith("tq_")})
+
+    async def fetch(sym, start, end):
+        return await fetch_frame(_scan_broker(), sym, start, end)
+
+    await groww_pressure.wait_for_bots()
+    frame = await strategy_lab.load_tape(name, when - dt.timedelta(days=7), when, fetch)
+    if frame is None or frame.empty:
+        raise HTTPException(404, f"No 1-minute candles for {name} on {day}.")
+    out = await asyncio.to_thread(trend_log.work_out, frame, when, cfg, minutes, fast, slow)
+    for row in out:
+        row["symbol"] = name
+    return {"run_id": run_id, "source": "after", "rows": out, "stocks": stocks, "days": days}
 
 
 @app.delete("/api/replay/runs/{run_id}")

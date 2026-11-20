@@ -108,6 +108,7 @@ import recovery
 import fade_unarm
 import pivots
 import pressure_exit
+import trend_log
 import trend_trade
 import trade_flow
 import flow_exit
@@ -1447,6 +1448,13 @@ class StrategyEngine:
         self._tq_tried: dict[str, int] = {}
         self._tq_note: dict[str, str] = {}
         self._tq_judged: dict[tuple, int] = {}
+        # Trend readings (trend_log.py; display only): what the bot read on each Trend quality stock at every candle
+        # close and what it did, per stock (the chart's why line), the candle last kept, and the exit it made per candle.
+        # `trend_rows` collects them for saving (a replay sets it to a list; None = not saved).
+        self._tq_log: dict[str, list[dict]] = {}
+        self._tq_logged: dict[str, int] = {}
+        self._tq_exit_at: dict[str, tuple[int, str]] = {}
+        self.trend_rows: list[tuple[str, dict]] | None = None
         self._review_bar: dict[str, int] = {}
         self._review_episode: dict[str, dict] = {}
         self.reviews: list[dict] = []
@@ -1961,6 +1969,7 @@ class StrategyEngine:
                 if self.status != "RUNNING":
                     break
                 await self._trend_entry_pass(symbol, frame, cfg, now)
+                self._record_trend(symbol, cfg)
                 if self.status != "RUNNING":
                     break
                 await self._flow_trigger_pass(symbol, frame, cfg, now)
@@ -2017,6 +2026,7 @@ class StrategyEngine:
             if self.status != "RUNNING":
                 break
             await self._trend_entry_pass(symbol, frame, cfg, now)
+            self._record_trend(symbol, cfg)
             if self.status != "RUNNING":
                 break
             await self._flow_trigger_pass(symbol, frame, cfg, now)
@@ -2104,6 +2114,7 @@ class StrategyEngine:
         await self._watch_pivot_target(symbol_cfg)
         await self._watch_pressure_fade(symbol_cfg)
         await self._watch_trend_exit(symbol_cfg)
+        self._record_trend((symbol_cfg.symbol or self._focus or "").upper(), symbol_cfg, symbol_cfg)
         await self._watch_flow_exit(symbol_cfg)
         await self._watch_order_gate(symbol_cfg)
 
@@ -6996,7 +7007,68 @@ class StrategyEngine:
             self._tq_note[symbol] = f"{symbol} in a trade: {note}"
             return
         self._signals[symbol] = f"{symbol} Trend quality exit — {note}"
+        self._tq_exit_at[symbol] = (last_closed, f"closed the trade: {note}")
         await self._exit_now(cfg, self.ltp, trend_trade.EXIT_REASON)
+
+    TQ_LOG_KEEP = 400  # trend readings kept per stock in memory (a day of 1-minute candles)
+
+    def _record_trend(self, symbol: str, cfg: BotConfig, symbol_cfg: BotConfig | None = None) -> None:
+        """Keep the trend reading of a Trend quality stock once per closed candle (trend_log.py; display only).
+
+        Called after the trend entry / exit passes, so the decision is the one the bot just made at that candle."""
+        if not symbol:
+            return
+        try:
+            span = max(1, int(self._exit_minutes(symbol, cfg))) * 60
+            now = self._now()
+            closed = _TQ_ORIGIN + ((int(now.timestamp()) - _TQ_ORIGIN) // span) * span
+            if self._tq_logged.get(symbol) == closed:
+                return
+            self._tq_logged[symbol] = closed
+            scfg = symbol_cfg if symbol_cfg is not None else _cfg_for(cfg, symbol)
+            if not trend_trade.applies(scfg, trade_sources(scfg).get(symbol)):
+                return
+            read = self._trend_read(symbol, scfg)
+            slot = (int(now.timestamp()) - _TQ_ORIGIN) // span
+            pos = self.positions.get(symbol)
+            exit_at = self._tq_exit_at.get(symbol)
+            if exit_at is not None and exit_at[0] == closed:
+                decision = exit_at[1]
+            elif pos is not None:
+                judged = self._tq_judged.get((symbol, int(pos.trade_id))) == closed
+                if judged:
+                    decision = (self._tq_note.get(symbol) or "").split(": ", 1)[-1] or "held"
+                    decision = f"in a {pos.direction.lower()} trade: {decision}"
+                else:
+                    decision = f"in a {pos.direction.lower()} trade" + (
+                        "" if trend_trade.exit_on(scfg) else " (trend exit off: its own exits close it)"
+                    )
+            elif self._tq_tried.get(symbol) == slot:
+                note = self._tq_note.get(symbol) or ""
+                decision = note.replace(f"{symbol} Trend quality entry: ", "", 1)
+            elif not trend_trade.entry_on(scfg):
+                decision = "trend entry off"
+            elif self.status != "RUNNING":
+                decision = f"bot {self.status.lower()}"
+            elif now.time() < OPENING_BUFFER_END or now.time() >= _entry_cutoff(scfg):
+                decision = "outside entry hours"
+            elif symbol in self._pullback:
+                decision = "an entry order is waiting"
+            else:
+                decision = "not asked"
+            row = trend_log.row_from(
+                read, ts=closed, price=self._ltps.get(symbol), minutes=span // 60, decision=decision,
+                held=pos.direction if pos is not None else None,
+            )
+        except Exception:  # noqa: BLE001 - display only; never break the pass
+            logger.exception("trend reading for %s not kept", symbol)
+            return
+        rows = self._tq_log.setdefault(symbol, [])
+        rows.append(row)
+        if len(rows) > self.TQ_LOG_KEEP:
+            del rows[: len(rows) - self.TQ_LOG_KEEP]
+        if self.trend_rows is not None:
+            self.trend_rows.append((symbol, row))
 
     def _stock_cap_hit(self, cfg) -> str | None:
         """The per-stock daily cap (max_trades_per_stock, 0 = off): why this stock takes no more entries today."""
@@ -7873,7 +7945,15 @@ class StrategyEngine:
             "flow_decisions": self._flow_decisions(view, candles),
             # What the simple order-flow check read at each candle (order_gate.py; display only, the chart's why line).
             "gate_notes": self._gate_notes(view, candles),
+            # The trend reading at each candle close and what the bot did (trend_log.py; display only, the why line).
+            "trend_reads": self._trend_reads(view, candles),
         }
+
+    def _trend_reads(self, symbol: str, candles: list[dict]) -> list[dict]:
+        if not symbol or not candles:
+            return []
+        start = float(candles[0]["time"])
+        return [d for d in self._tq_log.get(symbol, []) if d.get("ts", 0) > start]
 
     def _gate_notes(self, symbol: str, candles: list[dict]) -> list[dict]:
         if not symbol or not candles:

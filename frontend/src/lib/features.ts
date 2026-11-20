@@ -657,6 +657,8 @@ export const FEATURES: Feature[] = [
     purpose: "The armed log now shows why each stock was armed: the checks passed, the candle size and rules they were read on (e.g. 15-min candles, morning rules before 10:00) and the checks it missed, so you can set it against the Trend quality History."},
   { id: "chart-colour-body", area: "terminal", added: "2026-11-20", pr: 493, href: "/terminal/", where: "Terminal → chart → the readings line, in candle colour mode", title: "Candle body against the bot's colour exit and entry floors",
     purpose: "In candle colour mode the chart now shows the body the bot reads (the Heikin Ashi body when HA colours are on) in ₹, % and ATRs, next to what the exit rule and the entry rule need, with ✓ or ✗ too small, so you can see why a candle of the other colour did or did not close the trade. The candle's size (high to low) is not what these rules read."},
+  { id: "bt-trend-readings", area: "terminal", added: "2026-11-20", pr: 494, href: "/terminal/", where: "Terminal → Backtests → a run → Trend readings; and the chart's why line on a replay", title: "Trend readings kept by each backtest",
+    purpose: "A backtest works the Trend quality reading out by itself and used to keep none of it. Now, for each stock traded on the trend reading, it keeps the trend score, the checks passed, the phase and what the bot did at every candle close, shown per stock and day in the run (with what changed, only-when-it-changed and CSV) and on the chart's why line, so you can see why it waited (e.g. score 86 but phase choppy). Older runs: Work it out now reads the candles again."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */
