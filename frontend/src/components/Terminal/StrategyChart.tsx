@@ -27,6 +27,7 @@ import { type FlowPoint, type FlowRead, cvdValues, emaValues, flowReads, heikinA
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { NewTag } from "@/components/ui/NewTag";
+import { type ColourBodyRead, bodyText, colourBodyRead, colourBodyTip } from "@/lib/colourBody";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { usePinned } from "@/lib/usePinned";
 import { StockNewsPanel } from "./StockNewsPanel";
@@ -2431,6 +2432,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     return { value: null, at: shownIndex };
   })();
   const shownSlope = slopeRead.value;
+  // Candle colour mode: this candle's body against the colour rules' floors (display only, lib/colourBody.ts).
+  const colourRead = shownIndex >= 0 && rows.length ? colourBodyRead(rows, shownIndex, filters, bar, shownAtr) : null;
   const slopeTip = rows.length ? slopeHelp(rows, slopeRead.at, slopeBack, bar, filters) : "";
   // Why the bot took no trade on the candle under the mouse (or the latest one).
   const whyLine =
@@ -2759,6 +2762,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         rsi={shownRsi}
         atr={shownAtr}
         breakoutMult={filters?.breakout_handoff ? filters.breakout_atr_mult ?? 1.8 : null}
+        colourRead={colourRead}
+        colourWrongSize={filters?.entry_mode === "COLOUR" && Number(filters.pattern_tf ?? 0) !== bar ? Number(filters.pattern_tf ?? 0) : null}
         slope={shownSlope}
         slopeBack={slopeBack}
         slopeTip={slopeTip}
@@ -3265,6 +3270,8 @@ function OhlcLine({
   rsi,
   atr,
   breakoutMult,
+  colourRead,
+  colourWrongSize,
   slope,
   slopeBack,
   slopeTip,
@@ -3289,6 +3296,10 @@ function OhlcLine({
   atr: number | null;
   /** The breakout hand-off's height rule in ATRs while it is on (null = off). */
   breakoutMult: number | null;
+  /** Candle colour mode: this candle's body against the colour rules' floors (null = not colour mode / other size). */
+  colourRead: ColourBodyRead | null;
+  /** The colour candle size when the chart shows another size (the body reading needs that size). */
+  colourWrongSize: number | null;
   slope: number | null;
   slopeBack: number;
   /** The slope's arithmetic with this candle's numbers (tooltip). */
@@ -3379,6 +3390,36 @@ function OhlcLine({
           </span>
         );
       })()}
+      {colourRead ? (
+        <span className="cursor-help whitespace-nowrap" title={colourBodyTip(colourRead)}>
+          <span className="text-slate-400">{colourRead.ha ? "HA body" : "Body"}</span>{" "}
+          <span className={colourRead.colour === "green" ? "text-emerald-300" : colourRead.colour === "red" ? "text-rose-300" : "text-slate-100"}>
+            {bodyText(colourRead.rs, colourRead.pct, colourRead.atr)}
+          </span>{" "}
+          <span className="text-slate-400">{colourRead.closeByExitRule ? "· exit needs" : "· close needs"}</span>{" "}
+          {colourRead.close.rs > 0 ? (
+            <span className={colourRead.close.ok ? "text-emerald-300" : "font-semibold text-amber-300"}>
+              ≥ {bodyText(colourRead.close.rs, colourRead.close.pct, colourRead.close.atr)} {colourRead.close.ok ? "✓" : "✗ too small"}
+            </span>
+          ) : (
+            <span className="text-slate-300">any body</span>
+          )}
+          {colourRead.entry && colourRead.entry.rs > 0 ? (
+            <>
+              {" "}
+              <span className="text-slate-400">· entry needs</span>{" "}
+              <span className={colourRead.entry.ok ? "text-emerald-300" : "text-slate-300"}>
+                ≥ {bodyText(colourRead.entry.rs, colourRead.entry.pct, colourRead.entry.atr)} {colourRead.entry.ok ? "✓" : "✗"}
+              </span>
+            </>
+          ) : null}{" "}
+          <NewTag id="chart-colour-body" link={false} />
+        </span>
+      ) : colourWrongSize ? (
+        <span className="whitespace-nowrap font-sans text-[11px] text-slate-400" title="The candle colour rules read their own candle size; switch the chart to it to see each candle's body against the bot's floors.">
+          Colour body: switch the chart to {colourWrongSize}-min candles
+        </span>
+      ) : null}
       <span className="cursor-help whitespace-nowrap" title={slopeTip || `SMA 9 slope: its move over the last ${slopeBack} candles, in % per candle`}>
         <span className="text-slate-400">Slope</span>{" "}
         <span className={clsx(slope == null ? "text-slate-400" : slope >= 0 ? "text-emerald-300" : "text-rose-300")}>
