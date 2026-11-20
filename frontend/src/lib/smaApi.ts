@@ -1861,6 +1861,19 @@ export type ChartFilters = {
   pattern_tf?: number;
   colour_count?: number;
   colour_min_body?: number;
+  /** The colour rules' body floors, for the reading line's "Colour body" (display only, see lib/colourBody.ts). */
+  ha_colours?: boolean;
+  colour_body_unit?: "PCT" | "ATR";
+  /** Entry floor in % for the colour candle size (its own size's value, else colour_min_body). */
+  colour_body_pct?: number;
+  /** Entry floor in × ATR of the colour candles (unit ATR). */
+  colour_body_atr?: number;
+  /** Each candle of the run its own floor, oldest first (null = the usual floor); read with 2+ candles in a row. */
+  colour_body_seq?: (number | null)[];
+  /** The separate rule to close a trade (colour_exit.py): body in % of the price, candles in a row. */
+  colour_exit_on?: boolean;
+  colour_exit_count?: number;
+  colour_exit_body?: number;
   use_gap_mode?: boolean;
   /** Always in a trade (always_in.py) and its reverse-after-a-loss option, for the chart's "why" line. */
   always_in?: boolean;

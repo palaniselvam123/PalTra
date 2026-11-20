@@ -80,6 +80,7 @@ import vwap_stop
 import smart_stop
 import reentry_wait
 import atr_target
+import candle_patterns
 import colour_exit
 import colour_force
 import supertrend
@@ -1095,6 +1096,17 @@ def chart_filters(cfg) -> dict:
         "pattern_tf": int(pattern_setting(cfg, "pattern_tf") or 1),
         "colour_count": _colour_count(cfg),
         "colour_min_body": _colour_min_body(cfg),
+        # The colour rules' body floors, so the chart's reading line can set a candle's body against them in ₹, % and
+        # ATRs (display only; the same helpers colour_call reads). The entry floor: per candle size in %, or × ATR,
+        # or each candle of the run its own size. The exit rule (colour_exit.py), when on, closes trades instead.
+        "ha_colours": heikin_ashi.on(cfg),
+        "colour_body_unit": candle_patterns.colour_body_unit(cfg),
+        "colour_body_pct": candle_patterns.colour_min_body_pct(cfg, int(pattern_setting(cfg, "pattern_tf") or 1)),
+        "colour_body_atr": candle_patterns.colour_body_atr(cfg),
+        "colour_body_seq": candle_patterns.parse_body_seq(getattr(cfg, "colour_body_seq", "")),
+        "colour_exit_on": colour_exit.on(cfg),
+        "colour_exit_count": colour_exit.count(cfg),
+        "colour_exit_body": colour_exit.body(cfg),
         "use_gap_mode": bool(getattr(cfg, "use_gap_mode", False)),
         # Always in a trade (always_in.py): the chart's "why" line says how a flat stock is entered.
         "always_in": always_in.enabled(cfg),

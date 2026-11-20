@@ -228,3 +228,18 @@ def test_chart_draws_another_watched_stock_without_moving_the_focus(monkeypatch)
     assert engine.chart_payload(240)["candles"] == focus["candles"]
     assert engine.chart_payload(240, "X")["candles"] == focus["candles"]
     assert engine.chart_payload(240, "NOPE")["candles"] == []
+
+
+def test_the_chart_gets_the_colour_rules_body_floors():
+    # Bot 4's run 694 (AMBER, 09 Nov): entries in ATRs per candle of the run, a separate exit rule at 0.5 % of the
+    # price on Heikin Ashi colours. The chart's reading line sets a candle's body against these.
+    f = chart_filters(_cfg(
+        entry_mode="COLOUR", pattern_tf=15, colour_count=1, colour_min_body=0.0, colour_body_unit="ATR",
+        colour_body_atr=0.0, colour_body_seq="2.5,1.5,1", colour_body_by_tf="", ha_colours=True,
+        colour_exit_on=True, colour_exit_count=1, colour_exit_body=0.5,
+    ))
+    assert f["ha_colours"] is True and f["colour_body_unit"] == "ATR"
+    assert f["colour_body_seq"] == [2.5, 1.5, 1.0]
+    assert (f["colour_exit_on"], f["colour_exit_count"], f["colour_exit_body"]) == (True, 1, 0.5)
+    pct = chart_filters(_cfg(entry_mode="COLOUR", pattern_tf=15, colour_min_body=0.13, colour_body_by_tf="15:0.2"))
+    assert pct["colour_body_unit"] == "PCT" and pct["colour_body_pct"] == 0.2 and pct["colour_exit_on"] is False
