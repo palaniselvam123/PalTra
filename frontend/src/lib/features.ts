@@ -661,6 +661,8 @@ export const FEATURES: Feature[] = [
     purpose: "A backtest works the Trend quality reading out by itself and used to keep none of it. Now, for each stock traded on the trend reading, it keeps the trend score, the checks passed, the phase and what the bot did at every candle close, shown per stock and day in the run (with what changed, only-when-it-changed and CSV) and on the chart's why line, so you can see why it waited (e.g. score 86 but phase choppy). Older runs: Work it out now reads the candles again."},
   { id: "set-trend-doji", area: "settings", added: "2026-11-20", pr: 495, href: S("sma-trend-trade"), where: "Settings → 1. When to enter → Trade on the trend score / phase", title: "Trend entry can skip a doji",
     purpose: "The trend score only checks which side of the lines the close is on, so a doji (open ≈ close) could still score high and open a trade. Tick \"skip a doji\" and the trend entry waits while the newest closed candle's body is under a set % of its high-low range (10% by default), then asks again on the next candle."},
+  { id: "cmp-candles", area: "terminal", added: "2026-11-21", pr: 498, href: TERM, where: "Terminal → Blotter → Backtests → tick runs → Compare → Stock by stock", title: "Compare backtests on the candle chart",
+    purpose: "Pick a stock and a day and every compared run's entries (▲ / ▼, labelled with the run) and exits (● with the P&L) are drawn on one candle chart, one colour per run, so you can see on the candles where each strategy got in and out. Tick boxes hide a run, 1 / 3 / 5 / 15-minute candles, hover a candle for each trade's time, price, reason and P&L; your Indicators settings (SMA, VWAP, Heikin Ashi) apply."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */

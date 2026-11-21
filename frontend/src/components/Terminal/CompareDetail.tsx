@@ -27,6 +27,7 @@ import {
   type CompareStockDay,
 } from "@/lib/smaApi";
 import { strategyLabel, type Settings } from "./BacktestRuns";
+import { CompareCandles, runCandle } from "./CompareCandles";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { pnlTone } from "./ui";
 
@@ -802,12 +803,15 @@ function StockByStock({ detail, runs, tag }: { detail: Detail; runs: Run[]; tag:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, picked, theDay]);
 
-  if (!stocks.length) return null;
   const shown = find.trim() ? stocks.filter((s) => s.symbol.includes(find.trim().toUpperCase())) : stocks;
-  const rows = mine.filter((t) => t.date === theDay).sort((a, b) => a.entry_ts - b.entry_ts || a.run_id - b.run_id);
+  const dayTrades = useMemo(() => mine.filter((t) => t.date === theDay).sort((a, b) => a.entry_ts - b.entry_ts || a.run_id - b.run_id), [mine, theDay]);
+  const candleRuns = useMemo(() => runs.map((r, i) => ({ id: r.id, place: i })), [runs]);
+  const baseSize = runCandle((runs.find((r) => r.id === detail.base) ?? runs[0])?.settings);
   const lines = chart && chart.symbol === picked && chart.day === theDay ? chart.runs.map((r) => lineOf(r, colorOf(place.get(r.run_id) ?? 0))) : [];
   const anyLogged = lines.some((l) => l.logged);
   const totals = stocks.find((s) => s.symbol === picked);
+  if (!stocks.length) return null;
+  const rows = dayTrades;
 
   return (
     <Card
@@ -898,6 +902,10 @@ function StockByStock({ detail, runs, tag }: { detail: Detail; runs: Run[]; tag:
             ))}
           </div>
           <p className="mb-1 hidden text-xs text-slate-400 print:block">{dayShort(theDay)}</p>
+          {picked && theDay ? (
+            <CompareCandles symbol={picked} day={theDay} runs={candleRuns} trades={dayTrades} defaultSize={baseSize} exitWord={exitWord} entryWord={entryWord} />
+          ) : null}
+          <p className="mb-1 text-xs font-semibold text-slate-200">Each run&apos;s P&amp;L on {picked} through the day</p>
           {lines.length ? (
             <>
               <StockChart day={chart!} lines={lines} />
