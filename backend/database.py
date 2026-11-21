@@ -435,12 +435,27 @@ def _ensure_trade_log_columns(engine) -> None:
         )
 
 
+def _ensure_wallet_columns(engine) -> None:
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql("PRAGMA table_info(paper_wallet)").fetchall()
+        if not rows:
+            return
+        names = {row[1] for row in rows}
+        if "locked" not in names:
+            conn.exec_driver_sql("ALTER TABLE paper_wallet ADD COLUMN locked BOOLEAN DEFAULT 0")
+        if "auto_qty" not in names:
+            conn.exec_driver_sql("ALTER TABLE paper_wallet ADD COLUMN auto_qty BOOLEAN DEFAULT 0")
+        if "auto_qty_pct" not in names:
+            conn.exec_driver_sql("ALTER TABLE paper_wallet ADD COLUMN auto_qty_pct FLOAT DEFAULT 10.0")
+
+
 def init_db() -> BotConfig:
     """Create tables and seed a single BotConfig row from settings."""
     engine = get_engine()
     Base.metadata.create_all(engine)
     _ensure_bot_config_columns(engine)
     _ensure_trade_log_columns(engine)
+    _ensure_wallet_columns(engine)
     SessionLocal = session_factory()
     settings = get_settings()
     with SessionLocal() as db:

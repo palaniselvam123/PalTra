@@ -261,3 +261,78 @@ def test_close_writes_off_the_loan_on_the_statement(eng):
     kinds = [l["kind"] for l in paper_wallet.statement()]
     assert kinds == ["RESET", "MARGIN", "ADD"]
     assert "Margin 20% -> 50%" in paper_wallet.statement()[1]["note"]
+
+
+@pytest.mark.asyncio
+async def test_a_locked_wallet_refuses_instead_of_borrowing(eng):
+    import paper_wallet
+    from strategy_engine import SlCancelFailed
+
+    _load(100)
+    paper_wallet.set_lock(True)
+    with pytest.raises(SlCancelFailed, match="Wallet is locked"):
+        await _buy(eng, _cfg(eng, qty=100), 10.0)  # needs Rs 200, Rs 100 free
+    assert "RELIANCE" not in eng.positions  # no order
+    w = paper_wallet.summary()
+    assert w["locked"] and w["loan"] == 0 and w["blocked"] == 0
+    await _buy(eng, _cfg(eng, qty=50), 10.0)  # Rs 100 margin: fits, still goes
+    assert "RELIANCE" in eng.positions
+    kinds = [e["kind"] for e in paper_wallet.statement()]
+    assert "LOCK" in kinds and "LOAN" not in kinds
+
+
+@pytest.mark.asyncio
+async def test_unlocking_borrows_again_and_replays_borrow_while_locked(eng):
+    import paper_wallet
+
+    _load(100)
+    paper_wallet.set_lock(True)
+    loan = paper_wallet.cover("SBIN", 100, 10.0, replay=True)  # a replay plays the same trades whatever the wallet
+    assert loan is not None and loan["borrowed"] == pytest.approx(100.0)
+    paper_wallet.set_lock(False)
+    assert paper_wallet.summary()["locked"] is False
+    await _buy(eng, _cfg(eng, qty=300), 10.0)  # Rs 600 margin, Rs 200 free: borrows again
+    assert "RELIANCE" in eng.positions and paper_wallet.summary()["loan"] == pytest.approx(500.0)
+
+
+def test_auto_quantity_from_the_free_balance(eng):
+    import paper_wallet
+
+    assert paper_wallet.auto_plan() is None  # off and no money
+    _load(10_000)
+    assert paper_wallet.auto_plan() is None  # money but switched off
+    paper_wallet.set_auto_qty(True, 10)
+    plan = paper_wallet.auto_plan()
+    assert plan == {"free": 10_000, "pct": 10, "margin_pct": 20.0}
+    # 10% of Rs 10,000 = Rs 1,000 margin = Rs 5,000 of stock at 5x: 50 shares at Rs 100, 3 at Rs 1,500.
+    assert paper_wallet.qty_for(100.0, plan) == 50
+    assert paper_wallet.qty_for(1500.0, plan) == 3
+    assert paper_wallet.qty_for(6000.0, plan) == 0
+    assert paper_wallet.qty_for(None, plan) == 0
+    with pytest.raises(ValueError):
+        paper_wallet.set_auto_qty(True, 0)
+
+
+def test_arming_a_paper_stock_sets_the_auto_quantity(eng, monkeypatch):
+    import paper_wallet
+    from fastapi.testclient import TestClient
+
+    import main
+
+    _load(10_000)
+    paper_wallet.set_auto_qty(True, 10)
+    monkeypatch.setattr(main, "news_prices", lambda symbols: {s: 100.0 for s in symbols})
+    with TestClient(main.app) as client:
+        res = client.post("/api/trade-symbols", json={"symbol": "TCS", "armed": True})
+        assert res.status_code == 200 and res.json()["auto_qty"]["qty"] == 50
+        assert client.get("/api/config/stock/TCS").json()["qty"] == 50
+        # Typed their own quantity: left alone.
+        res = client.post("/api/trade-symbols", json={"symbol": "INFY", "armed": True, "auto_qty": False})
+        assert "auto_qty" not in res.json()
+        assert client.get("/api/config/stock/INFY").json()["qty"] != 50
+        # The Arm dialogs' preview.
+        size = client.get("/api/wallet/size?symbols=TCS,WIPRO").json()
+        assert [r["qty"] for r in size["rows"]] == [50, 50] and size["auto_qty"] is True
+        assert client.put("/api/wallet/lock", json={"locked": True}).json()["locked"] is True
+        assert client.put("/api/wallet/auto-qty", json={"on": False}).json()["auto_qty"] is False
+        assert client.put("/api/wallet/auto-qty", json={"on": True, "pct": 500}).status_code == 422

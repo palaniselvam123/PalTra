@@ -14,6 +14,19 @@ after it. Each LOAN line is that loan's record (bot, stock, qty, price,
 margin needed, borrowed, repaid, due); repayments clear the oldest loan
 first. No interest is charged.
 
+**Locked** (``locked``, off by default): no more loans. A PAPER entry whose
+margin the free balance cannot cover is refused (``WalletLocked``, the bot's
+signal line says why) and no order is placed. Replays still borrow, so a
+backtest plays the same trades whatever the wallet holds.
+
+**Auto quantity** (``auto_qty``, off by default; ``auto_qty_pct`` % of the
+free balance per stock, 10 by default): arming a stock on a PAPER bot sets
+that stock's own quantity so its margin is that share of the free balance
+(``qty_for``: free x pct / 100 / margin % / price, whole shares). Set in the
+terminal's arm route, so every arm path (Arm, Arm ticked, the Stocks box,
+auto-arm, Scan & arm, the scanner's link) follows it. LIVE bots and the
+Research desk are never sized by it.
+
 The balance itself is never stored as a running number:
 
     free = loaded + borrowed + P&L of PAPER trades opened since the start
@@ -40,6 +53,13 @@ IST = ZoneInfo("Asia/Kolkata")
 MIN_LOAD = 1.0
 MAX_LOAD = 1_000_000_000.0  # Rs 100 crore per load
 DEFAULT_MARGIN_PCT = 20.0
+DEFAULT_AUTO_PCT = 10.0
+MIN_AUTO_PCT = 0.1
+MAX_AUTO_PCT = 100.0
+
+
+class WalletLocked(ValueError):
+    """A locked wallet refused an entry it could only pay for with a loan."""
 
 #: The latest loan taken this process, for the screens to pop up once (by its "at").
 LAST_LOAN: dict | None = None
@@ -128,7 +148,7 @@ def summary() -> dict:
             margin = row.margin_pct if row is not None else DEFAULT_MARGIN_PCT
             return {"active": False, "funds": 0.0, "loan": 0.0, "realized": 0.0, "blocked": 0.0,
                     "available": 0.0, "margin_pct": margin, "since": None, "open": [], "last_loan": None,
-                    "open_loans": 0}
+                    "open_loans": 0, **_switches(row)}
         figures = _figures(db, row)
         open_loans = db.execute(
             select(func.count()).select_from(WalletEntry).where(
@@ -144,7 +164,16 @@ def summary() -> dict:
             "since": row.since.isoformat(),
             "last_loan": LAST_LOAN,
             "open_loans": int(open_loans),
+            **_switches(row),
         }
+
+
+def _switches(row: PaperWallet | None) -> dict:
+    return {
+        "locked": bool(getattr(row, "locked", False)) if row is not None else False,
+        "auto_qty": bool(getattr(row, "auto_qty", False)) if row is not None else False,
+        "auto_qty_pct": float(getattr(row, "auto_qty_pct", None) or DEFAULT_AUTO_PCT) if row is not None else DEFAULT_AUTO_PCT,
+    }
 
 
 def _entry_dict(e: WalletEntry) -> dict:
@@ -181,7 +210,7 @@ def cover(symbol: str, qty: int, price: float, bot: int = 1, replay: bool = Fals
 
     Returns None when the wallet is off or the free balance covers it, else
     the loan just taken (and the total now owed), for the screens to show.
-    The order is never refused for money.
+    A locked wallet takes no loan: it raises ``WalletLocked`` instead (replays still borrow).
     """
     global LAST_LOAN
     with session_factory()() as db:
@@ -194,6 +223,11 @@ def cover(symbol: str, qty: int, price: float, bot: int = 1, replay: bool = Fals
         short = round(need - max(free, 0.0), 2)
         if short <= 0.005:
             return None
+        if getattr(row, "locked", False) and not replay:
+            raise WalletLocked(
+                f"Wallet is locked: {symbol.upper()} x{int(qty)} needs {_money(need)} margin and only "
+                f"{_money(max(free, 0.0))} is free. No loan taken, so no order was placed."
+            )
         row.funds += short
         row.loan = round((row.loan or 0.0) + short, 2)
         row.updated_at = _now()
@@ -333,3 +367,64 @@ def set_margin(margin_pct: float) -> dict:
         _record(db, "MARGIN", 0.0, note=f"Margin {before:g}% -> {margin_pct:g}%")
         db.commit()
     return summary()
+
+
+def _ensure_row(db) -> PaperWallet:
+    row = _row(db)
+    if row is None:
+        now = _now()
+        row = PaperWallet(id=1, funds=0.0, loan=0.0, margin_pct=DEFAULT_MARGIN_PCT, since=now, updated_at=now)
+        db.add(row)
+    return row
+
+
+def set_lock(locked: bool) -> dict:
+    """Lock (no more loans: an entry the free balance cannot cover is refused) or unlock the wallet."""
+    with session_factory()() as db:
+        row = _ensure_row(db)
+        if bool(row.locked) != bool(locked):
+            row.locked = bool(locked)
+            row.updated_at = _now()
+            _record(db, "LOCK" if locked else "UNLOCK", 0.0,
+                    note="Locked: no more loans, an entry the free balance cannot cover is refused" if locked
+                    else "Unlocked: a short balance borrows again")
+        db.commit()
+    return summary()
+
+
+def set_auto_qty(on: bool, pct: float | None = None) -> dict:
+    """Turn auto quantity on arming on or off, and set the share of the free balance per stock."""
+    with session_factory()() as db:
+        row = _ensure_row(db)
+        if pct is not None:
+            pct = float(pct)
+            if not MIN_AUTO_PCT <= pct <= MAX_AUTO_PCT:
+                raise ValueError(f"Use {MIN_AUTO_PCT:g}% to {MAX_AUTO_PCT:g}% of the free balance per stock.")
+        before = (bool(row.auto_qty), float(row.auto_qty_pct or DEFAULT_AUTO_PCT))
+        row.auto_qty = bool(on)
+        if pct is not None:
+            row.auto_qty_pct = pct
+        after = (bool(row.auto_qty), float(row.auto_qty_pct or DEFAULT_AUTO_PCT))
+        if after != before:
+            row.updated_at = _now()
+            _record(db, "AUTO_QTY", 0.0,
+                    note=f"Auto quantity on arming {'on' if after[0] else 'off'}, {after[1]:g}% of the free balance per stock")
+        db.commit()
+    return summary()
+
+
+def auto_plan() -> dict | None:
+    """What auto quantity sizes from now (free balance, % per stock, margin %), or None when it is off."""
+    w = summary()
+    if not w["active"] or not w.get("auto_qty"):
+        return None
+    return {"free": w["available"], "pct": w["auto_qty_pct"], "margin_pct": w["margin_pct"]}
+
+
+def qty_for(price: float | None, plan: dict | None) -> int:
+    """Whole shares whose margin is plan["pct"] % of the free balance at this price; 0 when none fit."""
+    if not plan or not price or price <= 0:
+        return 0
+    budget = max(float(plan["free"]), 0.0) * float(plan["pct"]) / 100.0
+    value = budget * 100.0 / float(plan["margin_pct"] or 100.0)
+    return max(int(value // float(price)), 0)
