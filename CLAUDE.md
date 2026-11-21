@@ -2225,7 +2225,8 @@ spinning top), body and range) / Matched / Call columns
   (`uses_wallet = False`: Research desk, `sma_research`) never touch it.
   **Lock** (`PaperWallet.locked`, off by default; `PUT /api/wallet/lock`, the wallet dialog's "Lock the wallet (no
   loans)", a lock on the chip): `paper_wallet.cover` raises `WalletLocked` instead of borrowing, so `_open` refuses a PAPER
-  entry the free balance cannot cover (`SlCancelFailed`, no order); replays still borrow (same trades whatever the wallet).
+  entry the free balance cannot cover (`SlCancelFailed`, no order); replays too (owner's choice: a backtest trades only the
+  money there is, so its trades depend on the balance; a run started locked saves `wallet_locked` / `wallet_free`).
   **Auto quantity when arming** (`auto_qty`, off by default; `auto_qty_pct` 10, 0.1-100 % of the free balance per stock;
   `PUT /api/wallet/auto-qty`): `main._set_trade_symbol` → `_auto_size` sets a stock newly armed on a PAPER bot that uses
   the wallet to `paper_wallet.qty_for` (free × pct ÷ margin % ÷ price, whole shares; price from the bots' `_ltps`, else the

@@ -50,6 +50,7 @@ from tick_sizes import round_price
 import all_bots_guard
 import fast_bot
 import handoff_chain
+import paper_wallet
 import handoff_log
 import open_pnl_log
 import trend_log
@@ -1517,6 +1518,14 @@ class ReplaySession:
                 settings = {**settings, "chain": handoff_chain.replay_snapshot(self.bot)}
             # What a stock that ends a day handed off does the next day (UNARM / BACK); runs saved before: carried on.
             settings = {**settings, "handoff_eod": handoff_chain.backtest_eod()}
+            # Shown on the run: a locked practice wallet refuses entries it cannot pay for, so the trades depend on
+            # the balance the run started with.
+            try:
+                w = paper_wallet.summary()
+                if w["active"] and w.get("locked"):
+                    settings = {**settings, "wallet_locked": True, "wallet_free": w["available"]}
+            except Exception:  # noqa: BLE001 - a note only
+                pass
         self._settings = settings
         if resume is not None:
             self.run_id = resume[0]

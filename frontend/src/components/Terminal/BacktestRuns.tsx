@@ -360,6 +360,7 @@ export function strategyLabel(s: Settings): string {
     if (s.vturn_exit) parts.push("SMA 9 V-turn exit");
     if (s.as_armed) parts.push("as armed live");
     if (s.play_handoffs) parts.push("hand-offs played as Bot 2 / Bot 3");
+    if (s.wallet_locked) parts.push(`wallet locked (₹${Math.round(Number(s.wallet_free ?? 0)).toLocaleString("en-IN")} free at start)`);
     if (s.slow_sma_exit) parts.push("slow SMA exit");
     if (s.recovery_hold) parts.push(`recovery hold (${s.recovery_tolerance_pct ?? 0.15}%, ${s.recovery_max_candles ?? 6} candles)`);
     if (s.breakout_handoff) parts.push(`breakout hand-off to Bot 3 (${s.breakout_atr_mult ?? 1.8}× ATR)`);

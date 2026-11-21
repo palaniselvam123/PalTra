@@ -462,7 +462,8 @@ function WalletDialog({
             <NewTag id="wallet-lock" link={false} />
             <span className="block text-xs text-slate-400">
               While locked, a bot entry the free balance cannot cover is refused (no order, no loan), and its signal line says
-              why. Loans already taken stay until repaid. Replays still borrow, so a backtest plays the same trades.
+              why. Backtests too: a replay entry the balance cannot cover is skipped, so its trades depend on the balance it
+              starts with. Loans already taken stay until repaid.
             </span>
           </span>
         </label>
