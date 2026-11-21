@@ -1921,12 +1921,13 @@ def test_a_loss_halt_stays_locked_when_the_trade_cap_is_raised(api):
     assert "max_daily_loss" in blocked.json()["detail"]
 
 
-def test_restart_remembers_how_many_live_trades_were_taken(api):
+def test_restart_remembers_how_many_live_trades_were_taken(api, monkeypatch):
     from database import session_factory
     from models import BotConfig, TradeLog
     from main import engine
 
-    engine._session_date = "2026-10-01"
+    # The engine is shared by every test file in this process: put its day back afterwards.
+    monkeypatch.setattr(engine, "_session_date", "2026-10-01")
     with session_factory()() as db:
         row = db.get(BotConfig, 1)
         row.trading_mode = "LIVE"
