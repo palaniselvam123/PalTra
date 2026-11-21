@@ -349,7 +349,7 @@ export function strategyLabel(s: Settings): string {
     if (s.use_cvd) parts.push(`Cum. delta ${s.cvd_lookback ?? 5} entry`);
     if (s.cvd_div_exit) parts.push(`Cum. delta divergence ${s.cvd_div_lookback ?? 10} exit`);
     if (s.reverse_on_exit) parts.push(`Reverse on ${String(s.reverse_on_exit).toLowerCase().replace(/,/g, " / ")} exit`);
-    if (s.ha_colours) parts.push("Heikin Ashi colours");
+    if (s.ha_colours) parts.push(s.ha_scope === "ENTRY" ? "Heikin Ashi entries" : s.ha_scope === "EXIT" ? "Heikin Ashi exits" : "Heikin Ashi colours");
     if (s.use_fresh) parts.push(`fresh trend${Number(s.fresh_rvol ?? 1.5) > 0 ? ` vol ${s.fresh_rvol ?? 1.5}×` : ""}`);
     if (s.use_level) parts.push(`level ${s.level_line ?? "BB_MIDDLE"}`);
     if (s.use_high52) parts.push(`52w high ${s.high52_side ?? "LONG"}${Number(s.high52_pct ?? 0) > 0 ? ` ±${s.high52_pct}%` : ""}`);
@@ -559,7 +559,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
       return parts.length ? parts.join(", ") : "Same as the bot";
     },
   ],
-  ["Heikin Ashi colours", (s) => (s.ha_colours ? "On" : "Off")],
+  ["Heikin Ashi colours", (s) => (s.ha_colours ? (s.ha_scope === "ENTRY" ? "Entries only" : s.ha_scope === "EXIT" ? "Exits only" : "On") : "Off")],
   ["Fresh trend entry", (s) => (s.use_fresh ? `On (volume ${s.fresh_rvol ?? 1.5}× usual)` : "Off")],
   ["Price level entry", (s) => (s.use_level ? `On (${{ BB_MIDDLE: "Bollinger middle", BB_UPPER: "outer Bollinger band", PIVOT_P: "pivot P", PIVOT_R1: "R1 / S1" }[String(s.level_line ?? "BB_MIDDLE")] ?? s.level_line})` : "Off")],
   ["52-week high entry", (s) => (s.use_high52 ? `On (${{ LONG: "buys at the 52-week high only", SHORT: "sells at the 52-week low only", BOTH: "buys at the high, sells at the low" }[String(s.high52_side ?? "LONG")] ?? s.high52_side}${Number(s.high52_pct ?? 0) > 0 ? `, within ${s.high52_pct}%` : ", a close at the level"})` : "Off")],

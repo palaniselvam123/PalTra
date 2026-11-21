@@ -247,8 +247,8 @@ def call(frame: pd.DataFrame | None, cfg, done_for: dt.date | None = None) -> Ca
     earlier = closed[days < today]
     prev_close = float(earlier["close"].iloc[-1]) if not earlier.empty else None
     session = closed[days == today].reset_index(drop=True)
-    if heikin_ashi.on(cfg):
-        session = heikin_ashi.view(session, cfg)
+    if heikin_ashi.on(cfg, "entry"):
+        session = heikin_ashi.view(session, cfg, "entry")
     opens = session["open"].astype(float).tolist()
     closes = session["close"].astype(float).tolist()
     close = closes[-1]

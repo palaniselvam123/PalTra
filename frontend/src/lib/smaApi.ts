@@ -245,6 +245,8 @@ export type SmaConfig = {
   exit_within?: number | string;
   /** Heikin Ashi colours (heikin_ashi.py): the candle-colour rules read Heikin Ashi candles. */
   ha_colours?: boolean;
+  /** Which rules read them: entries and exits (BOTH), entries only or exits only. */
+  ha_scope?: "BOTH" | "ENTRY" | "EXIT";
   /** Supertrend: entry only on its side; exit when it flips against the trade. */
   use_supertrend?: boolean;
   /** Price level check (level_check.py): enter only beyond a Bollinger band or a pivot level. */

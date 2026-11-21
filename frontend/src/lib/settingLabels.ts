@@ -161,6 +161,7 @@ export const SETTING_LABELS: Record<string, string> = {
   reverse_settings: "reversed trades' own entry checks, exits and stop",
   reverse_colour_exit: "a reversed trade closes on the first candle of the other colour",
   ha_colours: "Heikin Ashi colours",
+  ha_scope: "Heikin Ashi for entries / exits",
   use_supertrend: "Supertrend entry",
   use_level: "price level entry check",
   use_fresh: "fresh trend entry check",

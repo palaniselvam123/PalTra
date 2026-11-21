@@ -104,14 +104,15 @@ def run_colour(frame: pd.DataFrame | None, n: int) -> str | None:
     return None
 
 
-def read(tape: pd.DataFrame | None, cfg, own_minutes: int) -> dict[int, str | None]:
-    """Each watched size's colour run now: {size: 'G' | 'R' | None}."""
+def read(tape: pd.DataFrame | None, cfg, own_minutes: int, role: str | None = None) -> dict[int, str | None]:
+    """Each watched size's colour run now: {size: 'G' | 'R' | None}. `role` "entry" / "exit": Heikin Ashi colours
+    only when `ha_scope` covers that role (heikin_ashi.py)."""
     out: dict[int, str | None] = {}
     n = count(cfg)
     for size in watched(cfg, own_minutes):
         frame = exit_candle.closed_frame(tape, size, int(getattr(cfg, "sma_fast", 9) or 9), int(getattr(cfg, "sma_slow", 21) or 21))
-        if frame is not None and not frame.empty and heikin_ashi.on(cfg):
-            frame = heikin_ashi.view(frame, cfg)
+        if frame is not None and not frame.empty and heikin_ashi.on(cfg, role):
+            frame = heikin_ashi.view(frame, cfg, role)
         out[size] = run_colour(frame, n)
     return out
 
@@ -134,14 +135,14 @@ def entry_reason(tape: pd.DataFrame | None, direction: str, cfg, own_minutes: in
     """None when the smaller candles agree with a `direction` entry (or nothing is ticked), else why not."""
     if not entry_on(cfg) or not watched(cfg, own_minutes):
         return None
-    ok, note = agree(read(tape, cfg, own_minutes), "G" if direction == "LONG" else "R", cfg)
+    ok, note = agree(read(tape, cfg, own_minutes, "entry"), "G" if direction == "LONG" else "R", cfg)
     return None if ok else f"smaller candles: {note}"
 
 
 def confirms_turn(tape: pd.DataFrame | None, signal_direction: str, cfg, own_minutes: int) -> tuple[str, str]:
     """For a colour turn against a `signal_direction` trade: 'yes' (smaller candles agree, close), 'back' (they
     show the trade's own colour, drop the wait) or 'wait', with a note."""
-    runs = read(tape, cfg, own_minutes)
+    runs = read(tape, cfg, own_minutes, "exit")
     against = "R" if signal_direction == "LONG" else "G"
     ok, note = agree(runs, against, cfg)
     if ok:

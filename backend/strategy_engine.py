@@ -415,7 +415,7 @@ SNAPSHOT_FIELDS = (
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body",
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
-    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
+    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours", "ha_scope",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "reverse_on_exit", "reverse_colour_exit", "reverse_settings",
     "exit_join", "exit_group", "exit_need", "exit_within",
@@ -771,7 +771,7 @@ def _entry_block(
 def _base_entry_reason(frame, direction, cfg, on, only, price):
     if on("candle_dir"):
         # Heikin Ashi colours (heikin_ashi.py): the candle direction check reads the smoothed colours.
-        frame = heikin_ashi.view(frame, cfg)
+        frame = heikin_ashi.view(frame, cfg, "entry")
     return entry_filter_reason(
         frame,
         direction,
@@ -1101,6 +1101,7 @@ def chart_filters(cfg) -> dict:
         # ATRs (display only; the same helpers colour_call reads). The entry floor: per candle size in %, or × ATR,
         # or each candle of the run its own size. The exit rule (colour_exit.py), when on, closes trades instead.
         "ha_colours": heikin_ashi.on(cfg),
+        "ha_scope": heikin_ashi.scope(cfg),
         "colour_body_unit": candle_patterns.colour_body_unit(cfg),
         "colour_body_pct": candle_patterns.colour_min_body_pct(cfg, int(pattern_setting(cfg, "pattern_tf") or 1)),
         "colour_body_atr": candle_patterns.colour_body_atr(cfg),
@@ -1144,7 +1145,7 @@ _FILTER_KEYS = (
     "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min", "gap_short_max",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
-    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
+    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours", "ha_scope",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -2575,7 +2576,7 @@ class StrategyEngine:
                     waits = (
                         held not in (None, found[0])
                         and turn_entry.exit_candle_on(cfg)
-                        and not turn_entry.candle_against(heikin_ashi.view(frame, cfg).iloc[-2], held)
+                        and not turn_entry.candle_against(heikin_ashi.view(frame, cfg, "exit").iloc[-2], held)
                     )
                     self._alert(
                         turn_entry.alert_text(
@@ -2602,7 +2603,7 @@ class StrategyEngine:
             self._turn_done[symbol] = ts
             return self._say(symbol, f"{symbol} no order on the SMA {want} turn — it points away from the 9/21 cross ({note})")
         if held is not None and turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(
-            heikin_ashi.view(frame, cfg).iloc[-2], held.signal_direction
+            heikin_ashi.view(frame, cfg, "exit").iloc[-2], held.signal_direction
         ):
             # The turn came on a candle of the trade's own colour: wait for one of the other colour to close.
             self._turn_done[symbol] = ts
@@ -2656,7 +2657,7 @@ class StrategyEngine:
         if not pd.isna(slope) and float(slope) * side >= slope_exit.vturn_turn_pct(cfg):
             self._turn_wait.pop(symbol, None)
             return self._say(symbol, f"{symbol} keeps its {held.direction} — SMA 9 swung back with the trade")
-        if not turn_entry.candle_against(heikin_ashi.view(frame, cfg).iloc[-2], held.signal_direction):
+        if not turn_entry.candle_against(heikin_ashi.view(frame, cfg, "exit").iloc[-2], held.signal_direction):
             self._turn_wait[symbol] = (want, int(bar["ts"]), note)
             colour = "red" if held.signal_direction == "LONG" else "green"
             return self._say(symbol, f"{symbol} holding {held.direction} — still waiting for a {colour} candle to close (SMA 9 turned {want})")
@@ -2678,7 +2679,7 @@ class StrategyEngine:
         if self._counter_done.get(symbol) == key:
             return None
         hit, note = counter_candles.run_towards(
-            heikin_ashi.view(frame, cfg).iloc[:-1],
+            heikin_ashi.view(frame, cfg, "entry").iloc[:-1],
             want,
             counter_candles.entry_count(cfg),
             counter_candles.rule(cfg),
@@ -2723,7 +2724,7 @@ class StrategyEngine:
         if int(bar["ts"]) <= exit_ts:
             text = waiting
         else:
-            hit, note = counter_candles.resumes(heikin_ashi.view(frame, cfg).iloc[-2], side, level)
+            hit, note = counter_candles.resumes(heikin_ashi.view(frame, cfg, "entry").iloc[-2], side, level)
             if not hit:
                 text = waiting
             else:
@@ -2815,12 +2816,15 @@ class StrategyEngine:
         cut-off, the Trade list, the caps, the entry filters, the stop and the flip all apply as
         for a cross; after a stop-out the next candle's colour enters again.
         """
-        call = colour_call(frame, cfg)
+        # Heikin Ashi for entries only / exits only (heikin_ashi.py, ha_scope): each call reads its own candles.
+        call = colour_call(frame, heikin_ashi.for_role(cfg, "entry"))
         pos = self.positions.get(symbol)
         entry_call = call
         if pos is not None and colour_exit.on(cfg):
             # The trade is judged by its own exit rule (colour_exit.py); entries keep the usual one.
-            call = colour_call(frame, colour_exit.exit_cfg(cfg))
+            call = colour_call(frame, heikin_ashi.for_role(colour_exit.exit_cfg(cfg), "exit"))
+        elif pos is not None and heikin_ashi.split(cfg):
+            call = colour_call(frame, heikin_ashi.for_role(cfg, "exit"))
         why = "CANDLE_COLOUR"
         if pressure_exit.flip_on(cfg) and pressure_exit.from_most_active(trade_sources(cfg).get(symbol)):
             # Most active stocks (pressure_exit.py): buyers / sellers holding the set % overrule the colour, for the
@@ -2889,8 +2893,9 @@ class StrategyEngine:
                 text = f"{symbol} could not close on the {call.note} — {self.last_signal}"
                 self._signals[symbol] = text
                 return text
-            if colour_exit.on(cfg) and entry_call.side != call.side:
-                # Closed by the exit rule; the other side opens only when the entry rule asks for it too.
+            if (colour_exit.on(cfg) or heikin_ashi.split(cfg)) and entry_call.side != call.side:
+                # Closed by the exit rule (or the exit's own candles, heikin_ashi.ha_scope); the other side opens only
+                # when the entry rule asks for it too.
                 text = f"{symbol} closed — exit rule: {call.note}; no new entry ({entry_call.note})"
                 self._signals[symbol] = text
                 self.last_signal = text
@@ -5720,7 +5725,7 @@ class StrategyEngine:
             return
         towards = counter_candles.against(pos.signal_direction)
         hit, note = counter_candles.run_towards(
-            heikin_ashi.view(enriched, cfg).iloc[:-1],
+            heikin_ashi.view(enriched, cfg, "exit").iloc[:-1],
             towards,
             count,
             counter_candles.rule(cfg),
@@ -5965,7 +5970,7 @@ class StrategyEngine:
             return
         reason, note = hit
         if turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(
-            heikin_ashi.view(closed, cfg).iloc[-1], pos.signal_direction
+            heikin_ashi.view(closed, cfg, "exit").iloc[-1], pos.signal_direction
         ):
             # Wait for a candle of the other colour (turn_exit_candle); the next candle is judged again.
             colour = "red" if pos.signal_direction == "LONG" else "green"
@@ -6020,7 +6025,7 @@ class StrategyEngine:
             # mostly the price before the trade, so only candles that open with or after the entry count.
             return
         pos.tc_bar = closed_ts
-        if not turn_entry.candle_against(heikin_ashi.view(frame, cfg).iloc[-2], pos.signal_direction):
+        if not turn_entry.candle_against(heikin_ashi.view(frame, cfg, "exit").iloc[-2], pos.signal_direction):
             return
         colour = "red" if pos.signal_direction == "LONG" else "green"
         what = "SMA 9 turn" if turn_trade else "reversed"

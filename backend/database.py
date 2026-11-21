@@ -184,6 +184,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "exit_need": "INTEGER DEFAULT 0",
             "exit_within": "INTEGER DEFAULT 3",
             "ha_colours": "BOOLEAN DEFAULT 0",
+            "ha_scope": "VARCHAR DEFAULT 'BOTH'",
             "use_supertrend": "BOOLEAN DEFAULT 0",
             "use_level": "BOOLEAN DEFAULT 0",
             "use_fresh": "BOOLEAN DEFAULT 0",

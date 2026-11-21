@@ -140,7 +140,7 @@ def verdict(frame: pd.DataFrame | None, signal_direction: str, cfg, first_after_
         other = "SHORT" if signal_direction == "LONG" else "LONG"
         # No reason against the *other* side = every one of the last n candles went against this trade.
         # Heikin Ashi colours (heikin_ashi.py) when the bot reads them.
-        if not indicators._direction_reason(heikin_ashi.view(frame, cfg), other, n, "COLOUR"):  # noqa: SLF001
+        if not indicators._direction_reason(heikin_ashi.view(frame, cfg, "exit"), other, n, "COLOUR"):  # noqa: SLF001
             size_note.append(f"{n} candle{'s' if n > 1 else ''} in a row against the trade")
     return "; ".join(size_note) if size_note else None
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+import heikin_ashi
+
 from candle_patterns import closes_bucket, colour_call, setting, uses_colour
 
 
@@ -34,7 +36,8 @@ def side(frame: pd.DataFrame | None, cfg) -> tuple[str | None, str]:
         return None, f"no closed {tf}-minute colour candle yet"
     # colour_call drops the last row as the forming one: keep one row after the colour candle's last minute.
     cut = frame.iloc[: ends[-1] + 2]
-    call = colour_call(cut, cfg)
+    # An entry: Heikin Ashi colours only when they are read for entries (heikin_ashi.py, ha_scope).
+    call = colour_call(cut, heikin_ashi.for_role(cfg, "entry"))
     if call.side is None:
         return None, call.note
     return ("BULLISH" if call.side == "LONG" else "BEARISH"), call.note
