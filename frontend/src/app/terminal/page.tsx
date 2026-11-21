@@ -41,6 +41,12 @@ function replayRouted(info: ReplayInfo | null): boolean {
 }
 
 
+const LOAD_NOTE = "Terminal data did not load. This is not a flat position.";
+// While a replay plays the page reads its state every second, its chart every REPLAY_CHART_EVERY seconds and the
+// trade list every REPLAY_TRADES_EVERY seconds (owner's case: the polling slowed the backtest server's replays).
+const REPLAY_CHART_EVERY = 3;
+const REPLAY_TRADES_EVERY = 10;
+
 export default function TerminalPage() {
   // Which bot this page drives. Set before the first request (effects run in
   // order), so every call below already goes to the right desk.
@@ -108,6 +114,8 @@ export default function TerminalPage() {
   // Polls in a row with no answer. One slow moment (a restart, a busy
   // server) is not an outage, so the banner waits for a second miss.
   const misses = useRef(0);
+  // State reads in a row that failed (a busy backtest server can miss one); the note waits for the second.
+  const stateMisses = useRef(0);
   const [connected, setConnected] = useState(false);
   const [loadNote, setLoadNote] = useState<string | null>(null);
   const [closingSymbol, setClosingSymbol] = useState<string | null>(null);
@@ -200,9 +208,11 @@ export default function TerminalPage() {
         if (cfg.status === "fulfilled") setConfig(cfg.value);
         if (next.status === "fulfilled") {
           setState((prev) => (next.value.ltp > 0 || !prev || prev.ltp <= 0 ? next.value : prev));
+          stateMisses.current = 0;
           setLoadNote(null);
         } else {
-          setLoadNote("Terminal data did not load. This is not a flat position.");
+          stateMisses.current += 1;
+          if (stateMisses.current >= 2) setLoadNote(LOAD_NOTE);
         }
         // Down means neither call got an answer. An error reply (a 409 while a
         // replay loads, say) still came from the engine, so it is reachable.
@@ -366,28 +376,43 @@ export default function TerminalPage() {
   useEffect(() => {
     if (!routed) return;
     let n = 0;
+    // One request of each kind at a time: on a busy backtest server a slow answer must not pile more on top
+    // (every request shares the replay's single event loop and slows the replay down).
+    const inFlight = { state: false, chart: false, trades: false };
+    const once = (key: keyof typeof inFlight, call: () => Promise<unknown>) => {
+      if (inFlight[key]) return;
+      inFlight[key] = true;
+      call().finally(() => {
+        inFlight[key] = false;
+      });
+    };
     const poll = setInterval(() => {
       // A hidden tab needs no replay frames; each one costs the server CPU.
       if (typeof document !== "undefined" && document.hidden) return;
       n += 1;
-      smaApi
-        .state()
-        .then((next) => {
-          setState(next);
-          misses.current = 0;
-          setUnreachable(false);
-          setLoadNote(null);
-          if (lastPlayed.current && next.symbol) lastPlayed.current.symbol = next.symbol;
-        })
-        .catch((err: unknown) => {
-          // 409: the server has no replay (it ended or the server restarted).
-          // Re-read the replay status now so the page stops showing it.
-          if (err instanceof ApiError && err.status === 409) {
-            smaApi.replayInfo().then(onReplay).catch(() => {});
-          }
-        });
-      if (n % 2 === 0) smaApi.chart(liveBars.current, heldRef.current, liveInterval.current).then(setChart).catch(() => {});
-      if (n % 3 === 0) smaApi.trades().then(setTrades).catch(() => {});
+      once("state", () =>
+        smaApi
+          .state()
+          .then((next) => {
+            setState(next);
+            misses.current = 0;
+            stateMisses.current = 0;
+            setUnreachable(false);
+            setLoadNote(null);
+            if (lastPlayed.current && next.symbol) lastPlayed.current.symbol = next.symbol;
+          })
+          .catch((err: unknown) => {
+            // 409: the server has no replay (it ended or the server restarted).
+            // Re-read the replay status now so the page stops showing it.
+            if (err instanceof ApiError && err.status === 409) {
+              smaApi.replayInfo().then(onReplay).catch(() => {});
+            }
+          }),
+      );
+      if (n % REPLAY_CHART_EVERY === 0) {
+        once("chart", () => smaApi.chart(liveBars.current, heldRef.current, liveInterval.current).then(setChart).catch(() => {}));
+      }
+      if (n % REPLAY_TRADES_EVERY === 0) once("trades", () => smaApi.trades().then(setTrades).catch(() => {}));
     }, 1000);
     return () => clearInterval(poll);
   }, [routed, onReplay]);
