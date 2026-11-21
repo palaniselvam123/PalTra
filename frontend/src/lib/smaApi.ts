@@ -1944,13 +1944,29 @@ export type Wallet = {
   last_loan: WalletLoan | null;
   /** Loans not fully repaid. */
   open_loans?: number;
+  /** Locked: no more loans; a PAPER entry the free balance cannot cover is refused. */
+  locked?: boolean;
+  /** Auto quantity: arming a stock on a PAPER bot sets its quantity to auto_qty_pct % of the free balance. */
+  auto_qty?: boolean;
+  auto_qty_pct?: number;
+};
+
+/** What auto quantity would set for some stocks now (Arm dialogs' preview). */
+export type WalletSize = {
+  active: boolean;
+  auto_qty: boolean;
+  locked: boolean;
+  free: number;
+  pct: number;
+  margin_pct: number;
+  rows: { symbol: string; price: number | null; qty: number }[];
 };
 
 /** One line of the wallet's statement; a LOAN line is also that loan's record. */
 export type WalletEntry = {
   id: number;
   at: string;
-  kind: "ADD" | "WITHDRAW" | "LOAN" | "REPAY" | "RESET" | "MARGIN";
+  kind: "ADD" | "WITHDRAW" | "LOAN" | "REPAY" | "RESET" | "MARGIN" | "LOCK" | "UNLOCK" | "AUTO_QTY";
   amount: number;
   /** Free balance and total loan owed right after this line. */
   balance_after: number | null;
@@ -3121,19 +3137,20 @@ export const smaApi = {
     }),
   resetStockConfig: (symbol: string) =>
     request<StockConfig>(`/api/config/stock/${encodeURIComponent(symbol)}`, { method: "DELETE" }),
-  setTradeSymbol: (symbol: string, armed: boolean, source?: string | null) =>
+  /** `autoQty` false keeps the stock's quantity (typed in the Arm prompt); unset follows the wallet's auto quantity. */
+  setTradeSymbol: (symbol: string, armed: boolean, source?: string | null, autoQty?: boolean) =>
     request<SmaConfig>("/api/trade-symbols", {
       method: "POST",
-      body: JSON.stringify({ symbol, armed, source: source ?? undefined }),
+      body: JSON.stringify({ symbol, armed, source: source ?? undefined, auto_qty: autoQty }),
     }),
   /**
    * Arm or unarm a stock on a chosen desk, whatever desk this page is on:
    * 1 = main desk, 2-4 = bots 2-4, "research" = the practice research desk.
    */
-  setTradeSymbolOn: (target: ArmTarget, symbol: string, armed: boolean, source?: string | null) =>
+  setTradeSymbolOn: (target: ArmTarget, symbol: string, armed: boolean, source?: string | null, autoQty?: boolean) =>
     request<SmaConfig>(
       target === "research" ? "/api/research/trade-symbols" : target === 1 ? "/api/trade-symbols" : `/api/bots/${target}/trade-symbols`,
-      { method: "POST", body: JSON.stringify({ symbol, armed, source: source ?? undefined }) },
+      { method: "POST", body: JSON.stringify({ symbol, armed, source: source ?? undefined, auto_qty: autoQty }) },
       undefined,
       false
     ),
@@ -3215,6 +3232,12 @@ export const smaApi = {
   walletStatement: () => request<WalletEntry[]>("/api/wallet/statement", undefined, undefined, false),
   walletLoans: () => request<WalletEntry[]>("/api/wallet/loans", undefined, undefined, false),
   walletReset: () => request<Wallet>("/api/wallet/reset", { method: "POST" }, undefined, false),
+  walletLock: (locked: boolean) =>
+    request<Wallet>("/api/wallet/lock", { method: "PUT", body: JSON.stringify({ locked }) }, undefined, false),
+  walletAutoQty: (on: boolean, pct?: number) =>
+    request<Wallet>("/api/wallet/auto-qty", { method: "PUT", body: JSON.stringify({ on, pct }) }, undefined, false),
+  walletSize: (symbols: string[]) =>
+    request<WalletSize>(`/api/wallet/size?symbols=${encodeURIComponent(symbols.join(","))}`, undefined, undefined, false),
   walletMargin: (margin_pct: number) =>
     request<Wallet>("/api/wallet/margin", { method: "PUT", body: JSON.stringify({ margin_pct }) }, undefined, false),
   /** Start a cross scan (read-only; candles only). Returns at once; poll `crossScan`. */

@@ -1233,6 +1233,9 @@ class TradeSymbolUpdate(BaseModel):
     armed: bool
     # Where the arm came from, shown as a chip on the Stocks panel. Information only.
     source: str | None = Field(default=None, max_length=40)
+    # The practice wallet's auto quantity (paper_wallet.auto_qty): None follows the wallet's switch,
+    # False keeps the stock's quantity as it is (the person typed their own in the Arm prompt).
+    auto_qty: bool | None = None
 
 
 class TradeSymbolCopy(BaseModel):
@@ -1293,6 +1296,8 @@ async def _set_trade_symbol(eng: StrategyEngine, body: TradeSymbolUpdate):
                 raise HTTPException(409, f"Close {symbol} before taking it off the trade buttons")
             names = [name for name in names if name != symbol]
             source_update[symbol] = None
+        newly = body.armed and symbol not in trade_names(row)
+        paper = (row.trading_mode or "PAPER").upper() == "PAPER"
         row.trade_symbols = ",".join(names)
         row.trade_sources = apply_trade_sources(row, source_update, names)
         db.commit()
@@ -1300,7 +1305,46 @@ async def _set_trade_symbol(eng: StrategyEngine, body: TradeSymbolUpdate):
         payload = _config_dict(row)
         db.expunge(row)
     _reload(eng, payload)
+    if newly and paper and body.auto_qty is not False and getattr(eng, "uses_wallet", False):
+        sized = await _auto_size(eng, symbol)
+        if sized is not None:
+            payload = {**payload, "auto_qty": sized}
     return payload
+
+
+async def _arm_price(symbol: str) -> float | None:
+    """A last price for sizing an arm: the bots' own, else the desk's price lookup when it runs in this process."""
+    found = news_prices([symbol]).get(symbol)
+    if found:
+        return found
+    try:
+        from app.services import news_lists  # the desk, when the terminal runs inside it
+    except Exception:  # noqa: BLE001 - the terminal on its own
+        return None
+    try:
+        return (await news_lists.prices([symbol])).get(symbol)
+    except Exception:  # noqa: BLE001 - sized without a price is not sized
+        logging.getLogger("sma.wallet").info("auto quantity: no price for %s", symbol)
+        return None
+
+
+async def _auto_size(eng: StrategyEngine, symbol: str) -> dict | None:
+    """Set a stock just armed on a PAPER bot to the wallet's auto quantity. Arming never fails for it."""
+    plan = paper_wallet.auto_plan()
+    if plan is None:
+        return None
+    price = await _arm_price(symbol)
+    qty = paper_wallet.qty_for(price, plan)
+    out = {"price": price, "pct": plan["pct"], "free": plan["free"], "qty": qty or None}
+    if not price:
+        return {**out, "note": f"No price for {symbol} yet, so its quantity was not changed."}
+    if qty < 1:
+        return {**out, "note": f"{plan['pct']:g}% of the free balance does not buy one {symbol} share; quantity not changed."}
+    try:
+        await _put_stock_config(eng, symbol, StockConfigUpdate(qty=qty))
+    except HTTPException as exc:
+        return {**out, "qty": None, "note": f"Quantity not changed: {exc.detail}"}
+    return {**out, "note": f"{symbol} quantity set to {qty} ({plan['pct']:g}% of the free balance at {price:,.2f})."}
 
 
 @app.post("/api/trade-symbols")
@@ -6042,6 +6086,15 @@ class WalletMargin(BaseModel):
     margin_pct: float = Field(ge=1, le=100)
 
 
+class WalletLock(BaseModel):
+    locked: bool
+
+
+class WalletAutoQty(BaseModel):
+    on: bool
+    pct: float | None = Field(default=None, ge=paper_wallet.MIN_AUTO_PCT, le=paper_wallet.MAX_AUTO_PCT)
+
+
 def _wallet_call(fn, *args):
     try:
         return fn(*args)
@@ -6085,6 +6138,31 @@ async def wallet_statement(limit: int = 500):
 async def wallet_loans(limit: int = 500):
     """Every loan record, newest first, with what is repaid and what is still due."""
     return paper_wallet.loans(limit)
+
+
+@app.put("/api/wallet/lock")
+async def wallet_lock(body: WalletLock):
+    """Lock: no more loans; a PAPER entry the free balance cannot cover is refused. Unlock: borrow again."""
+    return _wallet_call(paper_wallet.set_lock, body.locked)
+
+
+@app.put("/api/wallet/auto-qty")
+async def wallet_auto_qty(body: WalletAutoQty):
+    """Auto quantity on arming: a stock armed on a PAPER bot gets `pct` % of the free balance as its quantity."""
+    return _wallet_call(paper_wallet.set_auto_qty, body.on, body.pct)
+
+
+@app.get("/api/wallet/size")
+async def wallet_size(symbols: str = "", pct: float | None = None):
+    """What auto quantity would set for these stocks now (read-only; for the Arm dialogs)."""
+    w = paper_wallet.summary()
+    plan = {"free": w["available"], "pct": float(pct or w["auto_qty_pct"]), "margin_pct": w["margin_pct"]}
+    names = [n for n in dict.fromkeys(x.strip().upper() for x in symbols.split(",")) if is_nse_symbol(n)][:50]
+    rows = []
+    for name in names:
+        price = await _arm_price(name)
+        rows.append({"symbol": name, "price": price, "qty": paper_wallet.qty_for(price, plan) if w["active"] else 0})
+    return {"active": w["active"], "auto_qty": w["auto_qty"], "locked": w["locked"], **plan, "rows": rows}
 
 
 @app.put("/api/wallet/margin")
