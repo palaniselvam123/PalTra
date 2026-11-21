@@ -663,6 +663,8 @@ export const FEATURES: Feature[] = [
     purpose: "The trend score only checks which side of the lines the close is on, so a doji (open ≈ close) could still score high and open a trade. Tick \"skip a doji\" and the trend entry waits while the newest closed candle's body is under a set % of its high-low range (10% by default), then asks again on the next candle."},
   { id: "cmp-candles", area: "terminal", added: "2026-11-21", pr: 498, href: TERM, where: "Terminal → Blotter → Backtests → tick runs → Compare → Stock by stock", title: "Compare backtests on the candle chart",
     purpose: "Pick a stock and a day and every compared run's entries (▲ / ▼, labelled with the run) and exits (● with the P&L) are drawn on one candle chart, one colour per run, so you can see on the candles where each strategy got in and out. Tick boxes hide a run, 1 / 3 / 5 / 15-minute candles, hover a candle for each trade's time, price, reason and P&L; your Indicators settings (SMA, VWAP, Heikin Ashi) apply."},
+  { id: "set-ha-scope", area: "settings", added: "2026-11-21", pr: 499, href: S("sma-ha-scope"), where: "Settings → 2. Checks before entering → Read candle colours from Heikin Ashi candles → Use Heikin Ashi for", title: "Heikin Ashi for entries only or exits only",
+    purpose: "Heikin Ashi colours used to apply to every colour rule at once. Now pick entries and exits, entries only (enter on the smooth Heikin Ashi trend, exit on the first normal candle against it) or exits only (enter on the normal candle, ride until the Heikin Ashi colour turns). In candle colour mode a trade closed on one kind of candle reverses only when the other kind agrees, else it waits flat."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */
@@ -693,7 +695,7 @@ export function featureById(id: string): Feature | undefined {
 const ANCHOR_GROUP: Record<string, string> = {
   "sma-candle-interval": "enter", "sma-day-extreme": "enter", "sma-colour-exit": "enter", "sma-colour-force": "enter",
   "sma-fresh": "check", "sma-exit-candle": "exit", "sma-slope-candle": "exit", "sma-small-colour": "exit",
-  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced", "sma-order-flow": "enter", "sma-flatten-exit": "exit", "sma-trend-trade": "enter",
+  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced", "sma-order-flow": "enter", "sma-flatten-exit": "exit", "sma-trend-trade": "enter", "sma-ha-scope": "check",
 };
 
 /** The strategy form's group (enter, check, exit, gap, stop, risk, advanced) a Settings link opens, or null. */

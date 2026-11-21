@@ -825,6 +825,8 @@ class ConfigUpdate(BaseModel):
 
         return reverse_exit.clean_settings(value, check)
     ha_colours: bool | None = None
+    # Heikin Ashi colours for entries and exits, entries only or exits only (heikin_ashi.py).
+    ha_scope: Literal["BOTH", "ENTRY", "EXIT"] | None = None
     use_supertrend: bool | None = None
     use_level: bool | None = None
     use_fresh: bool | None = None
@@ -1935,6 +1937,7 @@ def _gap_dict(row) -> dict:
         "exit_need": int(getattr(row, "exit_need", 0) or 0),
         "exit_within": exit_join_mod.within(row),
         "ha_colours": heikin_ashi.on(row),
+        "ha_scope": heikin_ashi.scope(row),
         "use_supertrend": supertrend.entry_on(row),
         "use_level": bool(getattr(row, "use_level", False)),
         "use_fresh": fresh_entry.on(row),

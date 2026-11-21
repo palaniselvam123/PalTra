@@ -334,7 +334,7 @@ function setupRows(run: Run): [string, string][] {
     ["Strategy", strategyLabel(run.settings as unknown as Settings)],
     ["Enters on", ENTRY_MODE[mode] ?? mode],
     ["Candle size", candle ? `${candle} min` : "1 min"],
-    ["Heikin Ashi colours (bot)", onOff(s.ha_colours)],
+    ["Heikin Ashi colours (bot)", s.ha_colours ? (s.ha_scope === "ENTRY" ? "Entries only" : s.ha_scope === "EXIT" ? "Exits only" : "On") : "Off"],
     ["SMA fast / slow", `${s.sma_fast ?? 9} / ${s.sma_slow ?? 21}`],
     ["Stop-loss", s.use_stop === false ? "Off" : STOP_TYPE[String(s.stop_type ?? "ATR").toUpperCase()] ?? String(s.stop_type)],
     ["Quantity", s.qty == null ? "—" : String(s.qty)],

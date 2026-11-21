@@ -445,6 +445,8 @@ class BotConfig(Base):
     exit_within: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
     # Heikin Ashi colours (heikin_ashi.py): every candle-colour rule reads Heikin Ashi candles.
     ha_colours: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Which rules read them: BOTH (default) | ENTRY (entries only, exits on real candles) | EXIT (the other way round).
+    ha_scope: Mapped[str | None] = mapped_column(String, nullable=True, default="BOTH")
     # Supertrend (supertrend.py): entry only on its side, exit when it flips against the trade.
     use_supertrend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Price level check (level_check.py): enter only beyond a Bollinger band or a pivot level.

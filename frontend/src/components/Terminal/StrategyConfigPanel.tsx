@@ -451,6 +451,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     exit_need: Math.max(0, Math.min(15, Math.round(Number(form.exit_need ?? 0) || 0))),
     exit_within: Math.max(1, Math.min(20, Math.round(Number(form.exit_within ?? 3) || 3))),
     ha_colours: Boolean(form.ha_colours),
+    ha_scope: (["BOTH", "ENTRY", "EXIT"].includes(String(form.ha_scope ?? "BOTH")) ? String(form.ha_scope ?? "BOTH") : "BOTH") as "BOTH" | "ENTRY" | "EXIT",
     use_supertrend: Boolean(form.use_supertrend),
     use_level: Boolean(form.use_level),
     use_fresh: Boolean(form.use_fresh),
@@ -2050,6 +2051,33 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               Candle patterns keep the real candles. Off by default; try it on Replay first.
             </InfoTip>
           </label>
+          {form.ha_colours ? (
+            <div id="sma-ha-scope" className="ml-6 mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300">
+              {isOwn("ha_scope") && <OwnTag />}
+              <label htmlFor="sma-ha-scope-pick">Use Heikin Ashi for</label>
+              <select
+                id="sma-ha-scope-pick"
+                value={String(form.ha_scope ?? "BOTH")}
+                onChange={(e) => set("ha_scope", e.target.value as "BOTH" | "ENTRY" | "EXIT")}
+                className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+              >
+                <option value="BOTH">entries and exits</option>
+                <option value="ENTRY">entries only (exits read the normal candles)</option>
+                <option value="EXIT">exits only (entries read the normal candles)</option>
+              </select>
+              <NewTag id="set-ha-scope" />
+              <InfoTip label="About Heikin Ashi for entries or exits">
+                Pick which rules read the Heikin Ashi colours. <b>Entries only</b>: the rules that open a trade (candle colour
+                entries, the candle direction check, Force following the colour, Second candle, early reversal, counter re-entry,
+                the smaller-candle entry check) read Heikin Ashi, and every exit (the colour turn, counter candles, the
+                smaller-candle exit, the SMA 9 turn&apos;s colour waits, the turn-trade colour exit, recovery hold) reads the normal
+                candles, so a trade is entered on a smooth trend and closed on the first real candle against it. <b>Exits only</b>{" "}
+                is the other way round: enter on the normal candle, ride the trade until the Heikin Ashi colour turns. In candle
+                colour mode a trade closed by the exit&apos;s candles opens the other side only when the entry&apos;s candles agree on
+                that candle; else the stock waits flat. Prices never change.
+              </InfoTip>
+            </div>
+          ) : null}
           </Only>
           <Only s="trend ind">
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
@@ -3878,7 +3906,13 @@ export function activeRules(f: SmaConfig): Rule[] {
       off: { reverse_settings: "" },
     });
   if (f.reverse_on_exit && f.reverse_colour_exit) add({ group: "exit", key: "reverse_colour_exit", text: "A reversed trade closes on the first candle of the other colour", off: { reverse_colour_exit: false } });
-  if (f.ha_colours) add({ group: "enter", key: "ha_colours", text: "Candle colour rules read Heikin Ashi candles (prices stay real)", off: { ha_colours: false } });
+  if (f.ha_colours)
+    add({
+      group: "enter",
+      key: "ha_colours",
+      text: `Candle colour rules read Heikin Ashi candles${f.ha_scope === "ENTRY" ? " for entries only (exits read the normal candles)" : f.ha_scope === "EXIT" ? " for exits only (entries read the normal candles)" : ""} (prices stay real)`,
+      off: { ha_colours: false },
+    });
   if (f.st_exit) add({ group: "exit", key: "st_exit", text: "Close when the Supertrend flips against the trade", off: { st_exit: false } });
   if (f.slope_exit) add({ group: "exit", key: "slope_exit", text: `Close when the SMA ${fast} line flattens or turns`, off: { slope_exit: false } });
   if (f.vturn_exit) add({ group: "exit", key: "vturn_exit", text: `Close on a sharp V-turn in the SMA ${fast} line`, off: { vturn_exit: false } });
