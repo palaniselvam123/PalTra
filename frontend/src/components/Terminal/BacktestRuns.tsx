@@ -16,6 +16,9 @@ import { runName } from "@/lib/liveBook";
 import { NewTag } from "@/components/ui/NewTag";
 import { ApplyRunStrategy } from "./ApplyRunStrategy";
 
+// The runs list and the open run's detail are re-read this often (they were every 5 s; owner's case: replays slowed).
+const RUNS_REFRESH_MS = 15_000;
+
 /** Opens one stock's chart for one day of a finished (or playing) run, in a new tab. */
 function RunChartLink({ run, symbol, date }: { run: ReplayRun; symbol: string; date: string }) {
   const bot = Number(run.settings.bot ?? 1) || 1;
@@ -749,7 +752,10 @@ export function BacktestRuns() {
 
   useEffect(() => {
     load();
-    const poll = setInterval(load, 5000);
+    // Every 15 s and only while the tab is shown: each read costs the backtest server time a playing replay needs.
+    const poll = setInterval(() => {
+      if (typeof document === "undefined" || !document.hidden) load();
+    }, RUNS_REFRESH_MS);
     return () => clearInterval(poll);
   }, [load]);
 
@@ -767,7 +773,9 @@ export function BacktestRuns() {
         })
         .catch(() => {});
     fetchOne();
-    const poll = setInterval(fetchOne, 5000);
+    const poll = setInterval(() => {
+      if (typeof document === "undefined" || !document.hidden) fetchOne();
+    }, RUNS_REFRESH_MS);
     return () => {
       stop = true;
       clearInterval(poll);
