@@ -158,7 +158,7 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
     setArmAsk({ symbol, desk, source: source ?? null });
   };
   /** Runs from the prompt: LIVE is confirmed again, the prompt's changes saved, then the stock armed. */
-  const armNow = async (symbol: string, desk: ArmDesk, save: () => Promise<void>, source?: string | null) => {
+  const armNow = async (symbol: string, desk: ArmDesk, save: () => Promise<void>, source?: string | null, autoQty?: boolean) => {
     const where = server;
     if (desk.mode === "LIVE" && where === "desk") {
       const ok = window.confirm(
@@ -173,11 +173,11 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
       const via = linkFor(where);
       if (via) {
         await api.deskArm(
-          { target: desk.target, symbol, source: source ?? null, confirm_live: where === "desk" && desk.mode === "LIVE" },
+          { target: desk.target, symbol, source: source ?? null, confirm_live: where === "desk" && desk.mode === "LIVE", auto_qty: autoQty },
           via
         );
       } else {
-        await smaApi.setTradeSymbolOn(desk.target, symbol, true, source ?? null);
+        await smaApi.setTradeSymbolOn(desk.target, symbol, true, source ?? null, autoQty);
       }
       if (where === "backtest" && btUrl) {
         setArmNote(
@@ -242,7 +242,8 @@ export function useArming(priceOf?: (symbol: string) => number | null | undefine
           target={armAsk.desk.target}
           live={server === "desk" && armAsk.desk.mode === "LIVE"}
           price={priceOf?.(armAsk.symbol) ?? null}
-          onArm={(save) => armNow(armAsk.symbol, armAsk.desk, save, armAsk.source)}
+          walletAuto={!linkTo && armAsk.desk.target !== "research" && armAsk.desk.mode !== "LIVE"}
+          onArm={(save, opts) => armNow(armAsk.symbol, armAsk.desk, save, armAsk.source, opts?.autoQty)}
           onClose={() => setArmAsk(null)}
           io={
             linkTo

@@ -119,6 +119,11 @@ class PaperWallet(Base):
     funds: Mapped[float] = mapped_column(Float, default=0.0)  # money loaded and borrowed, net of withdrawals
     loan: Mapped[float] = mapped_column(Float, default=0.0)  # borrowed to cover margin, still to pay back
     margin_pct: Mapped[float] = mapped_column(Float, default=20.0)  # share of the trade value blocked (20 = 5x)
+    # Locked: no more loans. A PAPER entry the free balance cannot cover is refused instead.
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Auto quantity: arming a stock on a PAPER bot sets its quantity to auto_qty_pct % of the free balance.
+    auto_qty: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_qty_pct: Mapped[float] = mapped_column(Float, default=10.0)
     since: Mapped[dt.datetime] = mapped_column(DateTime)  # closed trades count from here
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime)
 

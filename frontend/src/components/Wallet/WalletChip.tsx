@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
-import { Landmark, Loader2, Wallet as WalletIcon, X } from "lucide-react";
+import { Landmark, Loader2, Lock, Wallet as WalletIcon, X } from "lucide-react";
+import { NewTag } from "@/components/ui/NewTag";
 import { inr, smaApi, type Wallet, type WalletEntry, type WalletLoan } from "@/lib/smaApi";
 import { api, type DeskAccount } from "@/lib/api";
 import { istNow, nseSessionNow } from "@/lib/format";
@@ -137,7 +138,11 @@ export function WalletChip({ className }: { className?: string }) {
           className
         )}
       >
-        <WalletIcon size={14} aria-hidden className="text-sky-400" />
+        {w?.locked ? (
+          <Lock size={14} aria-label="Wallet locked: no loans" className="text-sky-400" />
+        ) : (
+          <WalletIcon size={14} aria-hidden className="text-sky-400" />
+        )}
         {active && w ? (
           <span>
             <span className="block text-[9px] uppercase tracking-[0.08em] text-slate-500">
@@ -295,6 +300,8 @@ function WalletDialog({
 }) {
   const [amount, setAmount] = useState("");
   const [margin, setMargin] = useState(String(wallet?.margin_pct ?? 20));
+  const [autoPct, setAutoPct] = useState(String(wallet?.auto_qty_pct ?? 10));
+  const autoPctOk = Number(autoPct) >= 0.1 && Number(autoPct) <= 100;
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const value = parseAmount(amount);
@@ -369,7 +376,7 @@ function WalletDialog({
         <p className="mb-3 text-slate-300">
           Load practice money for Bots 1–4 in PAPER. Each entry blocks {wallet?.margin_pct ?? 20}% of its value as intraday
           margin (100 shares at ₹10 block ₹200); it comes back with the P&amp;L when the trade closes. If the balance is short,
-          the bot borrows the rest and tells you the loan.
+          the bot borrows the rest and tells you the loan, unless the wallet is locked.
         </p>
       )}
 
@@ -435,6 +442,86 @@ function WalletDialog({
         ) : null}
       </div>
 
+      <div id="wallet-lock" className="mt-4 border-t border-white/10 pt-3">
+        <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-200">
+          <input
+            type="checkbox"
+            checked={!!w?.locked}
+            disabled={busy != null}
+            onChange={(e) => {
+              const on = e.target.checked;
+              void run("lock", () => smaApi.walletLock(on), on ? "Wallet locked: no more loans." : "Wallet unlocked: a short balance borrows again.");
+            }}
+            className="mt-0.5 accent-sky-500"
+          />
+          <span>
+            <span className="font-semibold">
+              <Lock size={12} aria-hidden className="mr-1 inline" />
+              Lock the wallet (no loans)
+            </span>{" "}
+            <NewTag id="wallet-lock" link={false} />
+            <span className="block text-xs text-slate-400">
+              While locked, a bot entry the free balance cannot cover is refused (no order, no loan), and its signal line says
+              why. Loans already taken stay until repaid. Replays still borrow, so a backtest plays the same trades.
+            </span>
+          </span>
+        </label>
+      </div>
+
+      <div id="wallet-auto-qty" className="mt-3 border-t border-white/10 pt-3">
+        <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-200">
+          <input
+            type="checkbox"
+            checked={!!w?.auto_qty}
+            disabled={busy != null || !autoPctOk}
+            onChange={(e) => {
+              const on = e.target.checked;
+              void run(
+                "auto",
+                () => smaApi.walletAutoQty(on, Number(autoPct)),
+                on ? `Auto quantity on: ${Number(autoPct)}% of the free balance per stock.` : "Auto quantity off."
+              );
+            }}
+            className="mt-0.5 accent-sky-500"
+          />
+          <span>
+            <span className="font-semibold">Auto quantity when arming</span> <NewTag id="wallet-auto-qty" link={false} />
+            <span className="block text-xs text-slate-400">
+              Arming a stock on a PAPER bot (Arm, Arm ticked, the Stocks box, auto-arm, Scan &amp; arm) sets its quantity so
+              its margin is this share of the free balance at the price then. LIVE bots and the Research desk are never sized.
+            </span>
+          </span>
+        </label>
+        <div className="mt-2 flex items-end gap-2 pl-6">
+          <label className="text-xs text-slate-400">
+            % of the free balance per stock
+            <input
+              type="number"
+              min={0.1}
+              max={100}
+              step={0.5}
+              value={autoPct}
+              onChange={(e) => setAutoPct(e.target.value)}
+              className="mt-1 block min-h-9 w-28 rounded-md border border-white/15 bg-black/30 px-2 font-mono text-slate-100"
+            />
+          </label>
+          <button
+            type="button"
+            disabled={busy != null || !autoPctOk}
+            onClick={() => run("auto", () => smaApi.walletAutoQty(!!w?.auto_qty, Number(autoPct)), `Saved ${Number(autoPct)}% per stock.`)}
+            className="min-h-9 rounded-md px-3 text-slate-200 ring-1 ring-inset ring-white/15 hover:bg-white/5 disabled:opacity-50"
+          >
+            Save %
+          </button>
+        </div>
+        {w?.active && autoPctOk ? (
+          <p className="mt-1 pl-6 text-xs text-slate-400">
+            Now: {inr((w.available * Number(autoPct)) / 100)} margin per stock = {inr((w.available * Number(autoPct)) / w.margin_pct)} of
+            stock at {w.margin_pct}% margin.
+          </p>
+        ) : null}
+      </div>
+
       <div className="mt-4 flex items-end gap-2 border-t border-white/10 pt-3">
         <label className="text-xs text-slate-400">
           Intraday margin % (20 = 5×, 100 = no leverage)
@@ -490,6 +577,9 @@ const KIND_LABEL: Record<WalletEntry["kind"], string> = {
   REPAY: "Loan repaid",
   RESET: "Wallet closed",
   MARGIN: "Margin changed",
+  LOCK: "Wallet locked",
+  UNLOCK: "Wallet unlocked",
+  AUTO_QTY: "Auto quantity",
 };
 
 function when(at: string): string {

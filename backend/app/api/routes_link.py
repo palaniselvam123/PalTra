@@ -396,6 +396,8 @@ class ArmRequest(BaseModel):
     source: str | None = Field(default=None, max_length=60)
     # Required when the bot is LIVE: the person confirmed the LIVE arm in the scanner page.
     confirm_live: bool = False
+    # False when the person typed their own quantity: the wallet's auto quantity is then not applied.
+    auto_qty: bool | None = None
 
 
 @router.get(STOCK_PREFIX + "{target}/{symbol}")
@@ -415,7 +417,10 @@ async def desk_stock_save(target: str, symbol: str, body: StockChange, request: 
 async def desk_arm(body: ArmRequest, request: Request):
     t = _desk_guard(request, body.target, body.confirm_live)
     await _first_sync()
-    res = await _terminal("POST", _arm_path(t), {"symbol": body.symbol, "armed": True, "source": body.source})
+    arm = {"symbol": body.symbol, "armed": True, "source": body.source}
+    if body.auto_qty is not None:
+        arm["auto_qty"] = body.auto_qty
+    res = await _terminal("POST", _arm_path(t), arm)
     if server_role.is_backtest() and res.status_code == 200:
         _remember_scanner_arm(t, body.symbol)
     return res
@@ -498,7 +503,10 @@ async def scanner_stock_save(target: str, symbol: str, body: StockChange, confir
 async def scanner_arm(body: ArmRequest, server: Server = "desk"):
     _scanner_only(server)
     _target(body.target)
-    out = await _to_desk("POST", ARM_PATH, body.model_dump(), server=server)
+    sent = body.model_dump()
+    if sent.get("auto_qty") is None:
+        sent.pop("auto_qty", None)  # unset: the desk follows its wallet's switch
+    out = await _to_desk("POST", ARM_PATH, sent, server=server)
     _cache.pop(server, None)  # the armed chips update on the next read
     return out
 

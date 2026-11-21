@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, X } from "lucide-react";
-import { inr, smaApi, type ArmTarget, type SmaConfig, type StockConfig } from "@/lib/smaApi";
+import { inr, smaApi, type ArmTarget, type SmaConfig, type StockConfig, type WalletSize } from "@/lib/smaApi";
+import { NewTag } from "@/components/ui/NewTag";
 
 // The trailing stop in ₹ (points) or % of the entry price (tsl_mode).
 type Unit = "POINTS" | "PERCENT";
@@ -37,8 +38,12 @@ function stopInUse(c: StockConfig): string {
  * them as they are; "Change" edits them for this stock only, then arms.
  *
  * `target` names the desk (Scalp page); without it the page's own desk is used.
- * `onArm(save)` arms the stock: it may ask its own LIVE question first, then
+ * `onArm(save, opts)` arms the stock: it may ask its own LIVE question first, then
  * must call `save()` before arming so a changed stop is in place first.
+ *
+ * `walletAuto` (a PAPER bot on this server): when the practice wallet's auto quantity is on, the
+ * quantity shown is the one the arm will set (a share of the free balance at the price now). Okay
+ * lets the server size it; Change saves the typed quantity and arms with `autoQty: false`.
  */
 export function ArmPrompt({
   symbol,
@@ -46,6 +51,7 @@ export function ArmPrompt({
   target,
   price,
   live = false,
+  walletAuto = false,
   onArm,
   onClose,
   io,
@@ -55,7 +61,9 @@ export function ArmPrompt({
   target?: ArmTarget;
   price?: number | null;
   live?: boolean;
-  onArm: (save: () => Promise<void>) => Promise<void>;
+  /** The practice wallet's auto quantity can size this arm (a PAPER bot on this server). */
+  walletAuto?: boolean;
+  onArm: (save: () => Promise<void>, opts?: { autoQty?: boolean }) => Promise<void>;
   onClose: () => void;
   /** Where the stock's settings are read and saved; default this server's terminal (the scanner uses the desk link). */
   io?: {
@@ -68,6 +76,8 @@ export function ArmPrompt({
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The wallet's auto quantity for this stock now, when it is on.
+  const [auto, setAuto] = useState<{ size: WalletSize; qty: number; price: number | null } | null>(null);
   const close = useRef(onClose);
   close.current = onClose;
   const box = useRef<HTMLDivElement>(null);
@@ -87,6 +97,28 @@ export function ArmPrompt({
     // `io` is fixed for the life of the prompt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, target]);
+
+  useEffect(() => {
+    if (!walletAuto) return;
+    let alive = true;
+    smaApi
+      .walletSize([symbol])
+      .then((w) => {
+        if (!alive || !w.active || !w.auto_qty) return;
+        const row = w.rows[0];
+        setAuto({ size: w, qty: row?.qty ?? 0, price: row?.price ?? null });
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [walletAuto, symbol]);
+
+  // Change starts from the auto quantity, so saving it keeps what the wallet worked out.
+  useEffect(() => {
+    if (auto && auto.qty > 0 && f && !editing && cfg && f.qty === String(cfg.qty ?? "")) setF({ ...f, qty: String(auto.qty) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, cfg]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && close.current();
@@ -139,12 +171,14 @@ export function ArmPrompt({
     setError(null);
     try {
       const body = withChanges ? changes() : {};
+      // Change saves the typed quantity, so the wallet's auto quantity must not replace it.
+      const opts = withChanges ? { autoQty: false } : undefined;
       await onArm(async () => {
         if (!Object.keys(body).length) return;
         if (target === undefined) await smaApi.saveStockConfig(symbol, body);
         else if (io) await io.save(target, symbol, body);
         else await smaApi.saveStockConfigOn(target, symbol, body);
-      });
+      }, opts);
       onClose();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not arm the stock");
@@ -218,7 +252,18 @@ export function ArmPrompt({
 
         {cfg && f ? (
           <div className="divide-y divide-white/5">
-            {row("Quantity", "qty", "Shares per order", ["qty"], "")}
+            {row("Quantity", "qty", auto ? "Shares per order · from the wallet" : "Shares per order", ["qty"], "")}
+            {auto ? (
+              <p className="py-1.5 text-xs text-sky-300">
+                <NewTag id="wallet-auto-qty" link={false} /> Auto quantity:{" "}
+                {auto.qty > 0
+                  ? `${auto.qty} shares = ${auto.size.pct}% of the free balance (${inr(auto.size.free)}) at ${auto.size.margin_pct}% margin${auto.price ? `, price now ${inr(auto.price)}` : ""}. Okay arms with it.`
+                  : auto.price
+                    ? `${auto.size.pct}% of the free balance (${inr(auto.size.free)}) does not buy one share, so the quantity stays.`
+                    : "no price for this stock yet, so the quantity stays as it is."}
+                {" "}Change to type your own.
+              </p>
+            ) : null}
             <div className="grid grid-cols-[1fr_auto] items-center gap-2 py-1.5">
               <div>
                 <div className="text-slate-200">Trailing stop in</div>

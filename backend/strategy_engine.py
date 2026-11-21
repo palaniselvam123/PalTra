@@ -4777,9 +4777,11 @@ class StrategyEngine:
         order_price = self._market_price(cfg.symbol, cross_price)
         practice = (cfg.trading_mode or "PAPER").upper()
         if self.uses_wallet and practice in ("PAPER", "REPLAY"):
-            # Practice wallet: block the margin, borrowing any shortfall. Never stops the order.
+            # Practice wallet: block the margin, borrowing any shortfall. A locked wallet refuses instead.
             try:
                 loan = paper_wallet.cover(cfg.symbol, qty, order_price, bot=self.bot_id, replay=practice == "REPLAY")
+            except paper_wallet.WalletLocked as exc:
+                raise SlCancelFailed(str(exc)) from exc
             except Exception:  # noqa: BLE001
                 logger.exception("paper wallet margin check failed for %s", cfg.symbol)
                 loan = None
