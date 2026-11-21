@@ -99,6 +99,8 @@ def test_api_saves_limits_and_start_is_refused_until_they_change(tmp_path, monke
         assert got["target"] == 0 and got["stop"] == 0 and got["hit"] is None
         assert client.put("/api/bots/guard", json={"target": -1, "stop": 0}).status_code == 422
         today = engine._now().date()
+        # The engine is shared with earlier test files: read today's book, whatever day one left it on.
+        monkeypatch.setattr(engine, "_session_date", today.isoformat())
         with database.session_factory()() as s:
             s.add(TradeLog(date=today.isoformat(), symbol="SBIN", direction="LONG", qty=10, mode="PAPER", bot=1,
                            entry_time=dt.datetime.combine(today, dt.time(10)), entry_price=100.0, ma_cross_price=100.0,
