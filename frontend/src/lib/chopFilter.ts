@@ -2,10 +2,74 @@
  * The Trend quality card's filters as plain functions, shared by the live card (ChopScan) and the History tab's
  * "Across days" view (ChopAcrossDays), so a stock passes the same way on both. Display only.
  */
-import type { ChopScanRow, ChopScore } from "@/lib/smaApi";
+import type { ChopCandles, ChopScanRow, ChopScore } from "@/lib/smaApi";
 import { trendRead, type TrendDir, type TrendKind } from "@/lib/trendRank";
 
 export const CANDLE_CHOICES = [1, 2, 3, 5, 10, 15] as const;
+
+// ---- Candle modes (chop_scan.CANDLE_KINDS) ----------------------------------------------------------------------
+// NORMAL reads the real candles by the SMA 9 / 21 cross; COLOUR reads the real candles by colour (runs and flips,
+// like Heikin Ashi, ha_trend.py); HA reads Heikin Ashi candles by colour. The filters and columns name what they
+// count in each mode, so "crosses" become "colour flips" and "SMA side" becomes the candles' colour.
+export const CANDLE_KIND_OPTIONS: { value: ChopCandles; label: string }[] = [
+  { value: "NORMAL", label: "Normal (SMA cross)" },
+  { value: "COLOUR", label: "Normal (colours)" },
+  { value: "HA", label: "Heikin Ashi" },
+];
+export const asCandleKind = (v: unknown): ChopCandles => (v === "COLOUR" || v === "HA" ? v : "NORMAL");
+/** The trend is read from the candles' colours (no SMA cross). */
+export const colourRead = (k: ChopCandles | undefined | null) => k === "COLOUR" || k === "HA";
+/** Words for a candle mode in a sentence ("on the 5-minute Heikin Ashi candle"). */
+export const candleWords = (k: ChopCandles | undefined | null) => (k === "HA" ? "Heikin Ashi " : k === "COLOUR" ? "colour-read " : "");
+/** Short tag after a candle size ("5m HA"). */
+export const candleTag = (k: ChopCandles | undefined | null) => (k === "HA" ? " HA" : k === "COLOUR" ? " colours" : "");
+/** The candles' name in the colour read: "candle" or "Heikin Ashi candle". */
+const colourCandle = (k: ChopCandles | undefined | null) => (k === "HA" ? "Heikin Ashi candle" : "candle");
+
+/** What each mode counts and calls things: the labels the card's filters and columns use. */
+export function modeWords(k: ChopCandles | undefined | null) {
+  if (!colourRead(k)) {
+    return {
+      crosses: "Crosses today",
+      crossesShort: "crosses",
+      crossesHelp:
+        "None: the SMAs have not crossed once today. Exactly 1: one turn since the morning, then a one-way run (↑ up / ↓ down: that cross's direction). At most / or more: a range. Every ticked candle size must match.",
+      side: "SMA side (fast above / below slow)",
+      sideHelp:
+        "SMA side: the fast SMA is above the slow one (bullish) or below (bearish) on the last closed candle of that size. Strong trend: the card's strong-trend read (6 of 7 checks: stack, VWAP, slope, fan, hold, structure, run) on that size. Every ticked size must agree; a size with too few candles never matches.",
+      gap: "SMA gap",
+      gapHelp: "Hide a trend whose SMA gap on any ticked size has shrunk to under half its widest in this trend",
+      score:
+        "Score counts today's SMA 9 / 21 crosses on closed candles: Trending = 0-1 crosses with over an hour since the last, Choppy = 4+ crosses or crosses under 15 minutes apart on average, Mixed = the rest.",
+      up: "crossed up",
+      down: "crossed down",
+    };
+  }
+  const c = colourCandle(k);
+  return {
+    crosses: "Colour flips today",
+    crossesShort: "colour flips",
+    crossesHelp: `None: no ${c} has changed colour today (dojis skipped). Exactly 1: one colour change since the morning, then one colour (↑ turned green / ↓ turned red). At most / or more: a range. Every ticked candle size must match.`,
+    side: `Candle colour (the current ${c} run)`,
+    sideHelp: `Candle colour: the colour of the current run of ${c}s on that size (green = bullish, red = bearish; dojis do not break a run). Strong trend: the card's colour read (6 of 7 checks: a streak of 3+, no wick against it, bodies not shrinking, higher lows / lower highs, price beyond VWAP, a move of 1 ATR, no doji lately) on that size. Every ticked size must agree; a size with too few candles never matches.`,
+    gap: "Run move",
+    gapHelp: "Hide a trend whose colour run on any ticked size has given back more than half of its widest move",
+    score: `Score counts today's ${c} colour flips (dojis skipped): Trending = 0-2 flips with a long run since, Choppy = 5+ flips or flips under 3 candles apart on average, Mixed = the rest.`,
+    up: "turned green",
+    down: "turned red",
+  };
+}
+
+/** The "Crosses today" choices worded for the candle mode (the values stay the same). */
+export function crossRulesFor(k: ChopCandles | undefined | null): [CrossRule, string][] {
+  const w = modeWords(k);
+  return CROSS_RULES.map(([v, label]) => [v, label.replace("crossed up", w.up).replace("crossed down", w.down)] as [CrossRule, string]);
+}
+
+/** The "Trend on" kinds worded for the candle mode. */
+export function trendKindsFor(k: ChopCandles | undefined | null): [TrendKind, string][] {
+  return TREND_KINDS.map(([v, label]) => [v, v === "SIDE" ? modeWords(k).side : label] as [TrendKind, string]);
+}
 
 // "Crosses today" choices: today's closed-candle SMA crosses (or Heikin Ashi colour flips) on each ticked size.
 export const CROSS_RULES = [

@@ -224,7 +224,7 @@ MAX_ACROSS_DAYS = 10
 
 def chop_rows(days: list[str], minutes: int | None = None, candles: str | None = None) -> list[dict]:
     """Every saved Trend quality run of the given days (oldest first), each with its rows cut to CHOP_KEEP.
-    `minutes` keeps one candle size, `candles` NORMAL / HA one candle kind (a run saved without it is NORMAL)."""
+    `minutes` keeps one candle size, `candles` NORMAL / COLOUR / HA one candle kind (a run saved without it is NORMAL)."""
     picked = [d for d in dict.fromkeys(days) if d][:MAX_ACROSS_DAYS]
     if not picked:
         return []
@@ -236,10 +236,11 @@ def chop_rows(days: list[str], minutes: int | None = None, candles: str | None =
     out = []
     for row in found:
         meta = _meta_row(row)
-        kind = "HA" if (meta["meta"] or {}).get("candles") == "HA" else "NORMAL"
+        saved = (meta["meta"] or {}).get("candles")
+        kind = saved if saved in ("COLOUR", "HA") else "NORMAL"
         if minutes and meta["minutes"] != minutes:
             continue
-        if candles in ("NORMAL", "HA") and kind != candles:
+        if candles in ("NORMAL", "COLOUR", "HA") and kind != candles:
             continue
         rows = _unpack(row["rows"]) or []
         meta["candles"] = kind

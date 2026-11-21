@@ -4028,8 +4028,9 @@ class ChopScanStart(BaseModel):
     # Quiet-runner alerts only for stocks priced inside this range (₹; 0 = no bound).
     price_min: float = Field(default=0.0, ge=0)
     price_max: float = Field(default=0.0, ge=0)
-    # NORMAL = the real candles; HA = read everything on Heikin Ashi candles (prices shown stay real).
-    candles: Literal["NORMAL", "HA"] = "NORMAL"
+    # NORMAL = the real candles (SMA cross); COLOUR = the real candles read by colour; HA = Heikin Ashi candles
+    # (read by colour too). Prices shown stay real.
+    candles: Literal["NORMAL", "COLOUR", "HA"] = "NORMAL"
     force: bool = False
 
 
@@ -4076,7 +4077,7 @@ def _start_chop(
         force=force,
         price_min=price_min,
         price_max=price_max,
-        job=_scan_job(scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), minutes, extra=(quiet_min, candles == chop_scan.HEIKIN_ASHI), cached=True),
+        job=_scan_job(scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), minutes, extra=(quiet_min, chop_scan.candle_kind(candles)), cached=True),
         candles=candles,
         meta={
             "stocks": len(symbols),
@@ -4186,7 +4187,7 @@ class ChopAutoUpdate(BaseModel):
     price_min: float | None = Field(default=None, ge=0)
     price_max: float | None = Field(default=None, ge=0)
     lists: list[Literal["armed", "fno", "nifty50", "nifty100", "niftybank"]] | None = None
-    candles: Literal["NORMAL", "HA"] | None = None
+    candles: Literal["NORMAL", "COLOUR", "HA"] | None = None
 
 
 @app.put("/api/chop-scan/auto")
@@ -5031,7 +5032,7 @@ async def scan_history_list(
 async def scan_history_across(
     days: str = Query(..., description="Comma-separated YYYY-MM-DD days, at most 10"),
     minutes: int | None = Query(None, ge=1, le=60),
-    candles: Literal["NORMAL", "HA"] | None = None,
+    candles: Literal["NORMAL", "COLOUR", "HA"] | None = None,
 ):
     """Every saved Trend quality scan of one or more days with the rows the History tab's "Across days" filter
     reads (scan_history.chop_rows). Read-only."""
