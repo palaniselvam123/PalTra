@@ -2223,6 +2223,15 @@ spinning top), body and range) / Matched / Call columns
   block margin and return P&L like PAPER ones, and deleting a run takes its
   P&L back off. LIVE (real Groww balance) and the research engines
   (`uses_wallet = False`: Research desk, `sma_research`) never touch it.
+  **Lock** (`PaperWallet.locked`, off by default; `PUT /api/wallet/lock`, the wallet dialog's "Lock the wallet (no
+  loans)", a lock on the chip): `paper_wallet.cover` raises `WalletLocked` instead of borrowing, so `_open` refuses a PAPER
+  entry the free balance cannot cover (`SlCancelFailed`, no order); replays still borrow (same trades whatever the wallet).
+  **Auto quantity when arming** (`auto_qty`, off by default; `auto_qty_pct` 10, 0.1-100 % of the free balance per stock;
+  `PUT /api/wallet/auto-qty`): `main._set_trade_symbol` → `_auto_size` sets a stock newly armed on a PAPER bot that uses
+  the wallet to `paper_wallet.qty_for` (free × pct ÷ margin % ÷ price, whole shares; price from the bots' `_ltps`, else the
+  desk's `news_lists.prices`; none = quantity kept), so every arm path follows it; `TradeSymbolUpdate.auto_qty` false (the
+  Arm prompt's Change, Arm ticked, also over the link's `ArmRequest.auto_qty`) keeps the typed quantity. `GET
+  /api/wallet/size?symbols=` is the Arm dialogs' preview (`ArmPrompt` `walletAuto`, `BulkArm` "Quantity from the wallet").
 - `backend/tick_store.py` – second-by-second prices: while the market is open
   the live engine fetches every watched stock's last trade in one batched
   Groww call a second (`GrowwClient.refresh_ltps`; the minute history still
