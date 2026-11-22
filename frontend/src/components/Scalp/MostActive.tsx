@@ -3,6 +3,7 @@
 import { StopScan } from "@/components/Scalp/StopScan";
 import { ActiveTrendTest } from "@/components/Scalp/ActiveTrendTest";
 import { ActivePickBacktest } from "@/components/Scalp/ActivePickBacktest";
+import { SavedScanBacktest } from "@/components/Scalp/SavedScanBacktest";
 import { Explain } from "@/components/ui/Explain";
 import { BestNow } from "@/components/Scalp/BestNow";
 import { PressureTestView } from "@/components/Scalp/PressureTest";
@@ -520,7 +521,10 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
       ) : view === "pressure" ? (
         <PressureTestView />
       ) : view === "backtest" ? (
-        <ActivePickBacktest armed={armed} />
+        <div className="space-y-4">
+          <SavedScanBacktest />
+          <ActivePickBacktest armed={armed} />
+        </div>
       ) : (
         <>
       {view === "live" ? <BestNow rows={found} tq={tq} reading={tqBusy} onRead={() => void readTrend()} armed={armed} arming={arming} onArm={onArm} /> : null}

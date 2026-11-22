@@ -58,6 +58,7 @@ import recovery
 import server_role
 import strategy_lab
 import auto_arm
+import saved_picks
 from scalp_picks import PickRule, picks_for_day, resumable as pick_resumable, rule_from_dict
 
 SPEEDS = (1, 10, 60, 300)
@@ -305,8 +306,11 @@ class ReplayEngine(StrategyEngine):
         chain: dict | None = None,
         on_bot: dict[str, int] | None = None,
         sources: dict[str, str] | None = None,
+        pick_qty: int = 0,
     ):
         self.feed = feed
+        # A saved-scan backtest's own quantity for every picked stock (saved_picks.py), 0 = the bot's own.
+        self.pick_qty = max(0, int(pick_qty or 0))
         # Trade list source chips of a pick run's stocks ({symbol: "Auto-arm: Most active"}), merged over the live
         # bot's own in load_config, so the Most active rules (pressure_exit.py) see a replayed pick as Most active.
         self.pick_sources = dict(sources or {})
@@ -627,6 +631,12 @@ class ReplayEngine(StrategyEngine):
                     data[name] = value if isinstance(value, str) else json.dumps(value or {})
                 elif name in data and name not in ("id", "symbol", "trade_symbols", "trading_mode"):
                     data[name] = value
+        if self.pick_qty:
+            # Saved-scan backtest: every picked stock at the run's quantity (saved_picks.py).
+            own = stock_settings(SimpleNamespace(stock_settings=data.get("stock_settings")))
+            for name in self.replay_symbols:
+                own[name] = {**own.get(name, {}), "qty": self.pick_qty}
+            data["stock_settings"] = json.dumps(own)
         if self._chain_fields:
             # A stock handed to Bot 2 / Bot 3 in this backtest plays with that bot's settings (handoff_chain.py).
             own = stock_settings(SimpleNamespace(stock_settings=data.get("stock_settings")))
@@ -681,6 +691,8 @@ def pick_sources(rule, picked: list[dict]) -> dict[str, str]:
         if not name:
             continue
         if kind == "ACTIVE":
+            out[name] = "Most active pick"
+        elif kind == saved_picks.KIND:
             out[name] = "Most active pick"
         elif kind == auto_arm.KIND and p.get("source"):
             out[name] = f"Auto-arm: {p['source']}"
@@ -1623,6 +1635,10 @@ class ReplaySession:
                     auto_windows = auto_arm.arm_windows(day, picked)
                     first = min(p["at"] for p in picked)
                     start = dt.time(int(first[:2]), int(first[3:5]))
+                elif getattr(self.rule, "kind", None) == saved_picks.KIND and picked:
+                    # Saved-scan backtest: from the minute after the scan read the picked stocks (saved_picks.py).
+                    first = min(p["at"] for p in picked)
+                    start = dt.time(int(first[:2]), int(first[3:5]))
                 if not symbols:
                     self._mark_run(days_done=index + 1)
                     continue
@@ -1652,6 +1668,7 @@ class ReplaySession:
                 engine = ReplayEngine(
                     feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved, arm_windows=windows, fast=fast_snap,
                     chain=chain_snap, on_bot=day_on, sources=day_sources,
+                    pick_qty=int(getattr(self.rule, "qty", 0) or 0),
                 )
                 engine.handoff = engine._hand_off
                 engine.on_handoff = lambda name: self.handed_off.append(name)

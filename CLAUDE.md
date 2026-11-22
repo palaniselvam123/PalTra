@@ -1823,6 +1823,20 @@ spinning top), body and range) / Matched / Call columns
   end_date, universe, pick_time, top_n, rank, bias, min_value_cr, bot, speed, play_handoffs). The same view's **Compare pick
   times** is `trend_compare` with `source: ACTIVE` (+ rank / bias / min_value_cr; `TrendPickCompare` `active` prop lists only
   its own source's comparisons).
+- `backend/saved_picks.py` – **Saved-scan backtest, one click** (practice money, no order path, nothing armed; the Most
+  active card's Backtest view, top box, `components/Scalp/SavedScanBacktest.tsx`; owner's routine: History → the day's
+  09:15 scan → sort by vol vs usual → top 24 → Bot 1 at qty 100): `POST /api/replay/saved-scans` (date / end_date, `at`
+  09:15-15:00, `rank_by` one or more of `COLUMNS` (rvol, value, buyers, sellers, imbalance, exec_buyers, exec_sellers,
+  move, up, down, speed, vwap, range; several = average place, a stock missing a column is last in it, ties by money
+  traded), `top_n` 1-50, `qty` (0 = the bot's own; `ReplayEngine.pick_qty` sets it as each picked stock's own qty),
+  `side` ANY / BUYERS / SELLERS (waiting orders, one-sided books never pass), `min_value_cr`, `min_rvol`, price range,
+  `until`, bot 1-4, `play_handoffs`). Before the run, per weekday, `choose_for_day` on the day's saved Most active scans
+  (this server's, else the desk's over `/api/link/backtest/saved-picks`): the first in-session scan at or after `at` with
+  at least `top_n` stocks passing the filters with every ranking column known (thinner ones skipped and named in each
+  pick's `why`: "09:15 not available (09:15:10 (8 of 210 stocks usable)), so run from this scan"), the top N, traded from
+  the minute after the latest `read_at` among them (kind `SAVED`, `SavedScanRule.chosen` saved in the run's `scalp_pick`
+  with each day's `notes`, so Resume plays the same; picks read as Most active, `pick_sources`). The run detail / PDF
+  list the scan used each day.
 - `backend/strategy_lab.py` – **Strategy lab: which checks and exits make money?** (practice money, no order path,
   nothing armed; the Scalp page's "Strategy lab" tab, `components/Scalp/StrategyLab.tsx`): the owner's filter lab. One
   run (`StrategyLab.start`, one at a time, `POST /api/strategy-lab/start` with symbols / date / end_date / bot 1-4 /

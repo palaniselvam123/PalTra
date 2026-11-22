@@ -151,7 +151,8 @@ LIVE_REFUSED = "That bot is LIVE: confirm the LIVE arm first (confirm_live)."
 def token_path(path: str) -> bool:
     """Desk paths that check a link token themselves (exempt from the Google lock)."""
     return path in (
-        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, BACKTEST_EXPORT, BACKTEST_ACTIVE, BACKTEST_QUEUE_DUE,
+        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, BACKTEST_EXPORT, BACKTEST_ACTIVE, BACKTEST_SAVED_PICKS,
+        BACKTEST_QUEUE_DUE,
         NEWS_LISTS, NEWS_LISTS_ADD
     ) or path.startswith(
         (STOCK_PREFIX, BACKTEST_EXPORT + "/")
@@ -171,6 +172,8 @@ BACKTEST_EXPORT = "/api/link/backtest/scan-export"
 BACKTEST_QUEUE_DUE = "/api/link/backtest/queue-due"
 # The desk's saved Most active scans of a day, cut down to the stocks an auto-arm replay would arm (auto_arm.py).
 BACKTEST_ACTIVE = "/api/link/backtest/active-scans"
+# One day's saved-scan backtest picks from the desk's saved Most active scans (saved_picks.py).
+BACKTEST_SAVED_PICKS = "/api/link/backtest/saved-picks"
 
 
 def _backtest_authorized(request: Request) -> None:
@@ -218,6 +221,33 @@ async def backtest_active_scans(request: Request, day: str, pct: float = 70.0, s
         raise HTTPException(400, "Bad side or percentage")
     scans = await asyncio.to_thread(auto_arm.saved_scans, when)
     return {"scans": len(scans), "hits": [list(h) for h in auto_arm.active_hits(scans, pct, side, max(0.0, min_value_cr), max(0.0, price_min), max(0.0, price_max), max(0.0, min_rvol), basis, flow_pct)]}
+
+
+@router.get(BACKTEST_SAVED_PICKS)
+async def backtest_saved_picks(request: Request, day: str, rule: str = "{}"):
+    """One day's picks for the saved-scan backtest on the backtest server (saved_picks.choose_for_day on the desk's
+    saved Most active scans). Read-only."""
+    _backtest_authorized(request)
+    import asyncio
+    import datetime as dt
+    import json
+
+    import auto_arm
+    import saved_picks
+
+    try:
+        when = dt.date.fromisoformat(day)
+        data = json.loads(rule)
+    except ValueError as exc:
+        raise HTTPException(400, "day must be YYYY-MM-DD and rule JSON") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(400, "rule must be an object")
+    parsed = saved_picks.rule_from_dict(data)
+    scans = await asyncio.to_thread(auto_arm.saved_scans, when)
+    if not scans:
+        return {"scans": 0, "picks": [], "note": "no saved Most active scans on the desk"}
+    picks, note = await asyncio.to_thread(saved_picks.choose_for_day, scans, parsed)
+    return {"scans": len(scans), "picks": picks, "note": note}
 
 
 @router.post(BACKTEST_SCANS)
