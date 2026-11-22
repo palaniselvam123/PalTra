@@ -2480,6 +2480,25 @@ export type ReplayRun = {
   by_regime?: TrendGroupRow[];
   /** Where each stock was handed during the run (handoff_log.rows), on the run detail only. */
   handoff_trail?: HandoffRow[];
+  /** Each day's highest / lowest P&L (closed + open) on the run's P&L log, with when and which came first. */
+  day_swings?: Record<string, DaySwing>;
+};
+
+/** One replayed day's P&L swing (open_pnl_log.replay_swings): before charges, and after (`_net`). */
+export type DaySwing = {
+  high: number;
+  high_at: string;
+  low: number;
+  low_at: string;
+  first: "HIGH" | "LOW" | null;
+  high_net: number;
+  high_net_at: string;
+  low_net: number;
+  low_net_at: string;
+  first_net: "HIGH" | "LOW" | null;
+  last: number;
+  last_at: string;
+  points: number;
 };
 
 /** One group of closed trades by the trend at entry. */

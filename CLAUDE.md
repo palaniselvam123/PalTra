@@ -1975,7 +1975,7 @@ spinning top), body and range) / Matched / Call columns
   low / latest. **Replays too**: each `ReplaySession` day gets an `open_pnl_log.ReplayRecorder`
   (run id, bot) that keeps the first tick of each replayed minute after `eng.tick` (`_note_pnl`) and
   saves in batches off the loop (`flush` every 30 points, at the day's end and on Stop) into
-  `replay_pnl` (keyed by run and replayed minute; `delete_run` drops it). `GET /api/open-pnl/replays?bot=`
+  `replay_pnl` (keyed by run and replayed minute; `delete_run` drops it). **Day high / low** (`replay_swings`, `get_run` → `day_swings`; display only): each replayed day's highest and lowest P&L (closed + open, before and after charges) with the minute and which came first (`first` HIGH / LOW), shown in the run detail's day-wise "Day high / low" column and the Armed log's day rows (`BacktestRuns.SwingText`). `GET /api/open-pnl/replays?bot=`
   lists a bot's runs, `GET /api/open-pnl/replay/{run_id}?day=` gives one replayed day.
   UI: the Stocks bar's "P&L log" button (`OpenPnlLog`: Market days / Replays switch, run and day
   pickers, chart with hover, table, CSV; opens on Replays while the desk shows a replay).

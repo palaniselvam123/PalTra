@@ -673,6 +673,8 @@ export const FEATURES: Feature[] = [
     purpose: "Pick a % of the free balance per stock: every stock armed on a PAPER bot (Arm, Arm ticked, the Stocks box, auto-arm, Scan & arm) gets the whole-share quantity whose margin is that share of the free balance at its price then. The Arm dialogs show the quantity it will set; Change lets you type your own instead. LIVE bots and the Research desk are never sized."},
   { id: "saved-scan-backtest", area: "active", added: "2026-11-22", pr: 504, href: "/scalp/?view=backtest#active", where: "Scalp → Most active → Backtest → Backtest the saved scans in one click", title: "Backtest the saved Most active scans in one click",
     purpose: "Pick the days, a time (e.g. 09:15), one or more columns to rank by (vol vs usual, buyers %, sellers %, money traded, executed buy / sell %, day move, speed…), how many stocks and the quantity: each day's first saved Most active scan at or after that time is used (a thinner scan is skipped and named, e.g. '09:15 not available, run from 09:29'), its top stocks are traded by the bot from the minute after the scan read them. Practice money only."},
+  { id: "bt-day-swing", area: "terminal", added: "2026-11-22", pr: 506, href: TERM, where: "Terminal → Blotter → Backtests → open a run → each day (day-wise table's 'Day high / low' column, and the Armed log's day rows)", title: "Each backtest day's highest and lowest P&L, with times",
+    purpose: "Shows how high and how low the day's P&L went (closed plus open trades, before charges), at what time, and whether the high or the low came first, so you can see what the day offered before it ended where it did."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */
