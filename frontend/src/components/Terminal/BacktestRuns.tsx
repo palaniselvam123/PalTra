@@ -14,6 +14,8 @@ import { REASON_SHORT } from "./TradeHistoryTable";
 import { chartHref } from "./StockTabs";
 import { runName } from "@/lib/liveBook";
 import { NewTag } from "@/components/ui/NewTag";
+import { BacktestBasisSwitch, useBacktestBasis } from "@/components/ui/BacktestBasisSwitch";
+import { backtestBasis as backtestBasisNow, basisWords, tradesOnBasis } from "@/lib/pnlBasis";
 import { ApplyRunStrategy } from "./ApplyRunStrategy";
 
 // The runs list and the open run's detail are re-read this often (they were every 5 s; owner's case: replays slowed).
@@ -524,14 +526,19 @@ const RUN_COLS: RunColKey[] = ["run", "days", "strategy", "trades", "win", "prof
 type DayColKey = "date" | "trades" | "wl" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative" | "swing";
 const DAY_COLS: DayColKey[] = ["date", "trades", "wl", "profit", "loss", "gross", "charges", "net", "cumulative", "swing"];
 
-/** A day's highest and lowest P&L with times and which came first (display only; before charges like the screens). */
-function SwingText({ s, compact = false }: { s?: DaySwing | null; compact?: boolean }) {
-  if (!s) return <span className="text-slate-500">—</span>;
+/** A day's highest and lowest P&L with times and which came first (display only; on the backtest basis switch). */
+function SwingText({ s: raw, compact = false }: { s?: DaySwing | null; compact?: boolean }) {
+  const basis = useBacktestBasis();
+  if (!raw) return <span className="text-slate-500">—</span>;
+  const s =
+    basis === "net"
+      ? { ...raw, high: raw.high_net, high_at: raw.high_net_at, low: raw.low_net, low_at: raw.low_net_at, first: raw.first_net }
+      : raw;
   const first = s.first === "HIGH" ? "high first" : s.first === "LOW" ? "low first" : null;
   return (
     <span
       className="whitespace-nowrap font-mono"
-      title={`Day's P&L (closed + open trades, before charges) at each replayed minute. Highest ${signed(s.high)} at ${s.high_at}, lowest ${signed(s.low)} at ${s.low_at}${first ? `; the ${first.replace(" first", "")} came first` : ""}. Ended ${signed(s.last)} at ${s.last_at}.`}
+      title={`Day's P&L (closed + open trades, ${basisWords(basis)}) at each replayed minute. Highest ${signed(s.high)} at ${s.high_at}, lowest ${signed(s.low)} at ${s.low_at}${first ? `; the ${first.replace(" first", "")} came first` : ""}.${basis === "gross" ? ` Ended ${signed(s.last)} at ${s.last_at}.` : ""}`}
     >
       <span className="text-slate-500">{compact ? "Hi " : "High "}</span>
       <span className={pnlTone(s.high)}>{signed(s.high)}</span>
@@ -708,6 +715,8 @@ export function bot5Rows(settings: Settings): [string, string][] {
 
 /** Replay runs side by side, and one run's day-wise P&L. */
 export function BacktestRuns() {
+  // Before / after charges for every figure here (BacktestBasisSwitch); a change reloads the runs on that basis.
+  const basis = useBacktestBasis();
   const [runs, setRuns] = useState<ReplayRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -764,7 +773,8 @@ export function BacktestRuns() {
       const { downloadBacktestPdf } = await import("@/lib/backtestPdf");
       await downloadBacktestPdf({
         run: full,
-        trades: book.rows.filter((trade) => trade.run_id === run.id),
+        trades: tradesOnBasis(book.rows.filter((trade) => trade.run_id === run.id)),
+        basis: backtestBasisNow(),
         marginPct: wallet?.margin_pct ?? 20,
         strategy: strategyLabel(full.settings),
         settings: [...SETTING_ROWS.map(([label, value]) => [label, value(full.settings)] as [string, string]), ...bot5Rows(full.settings)],
@@ -797,7 +807,8 @@ export function BacktestRuns() {
         }
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Runs did not load"));
-  }, [limit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [limit, basis]);
 
   useEffect(() => {
     load();
@@ -829,7 +840,7 @@ export function BacktestRuns() {
       stop = true;
       clearInterval(poll);
     };
-  }, [openId]);
+  }, [openId, basis]);
 
   type RunKey = "id" | "days" | "strategy" | "trades" | "win" | "profit" | "loss" | "net" | "dd";
   const shownRuns = useMemo(() => (runs ?? []).filter((run) => runMatches(run, filters)), [runs, filters]);
@@ -887,7 +898,8 @@ export function BacktestRuns() {
     <div className="border-t border-white/10">
       <p className="px-4 pt-3 text-xs text-slate-400">
         Each replay run with the strategy settings it used. Run the same days again with other settings to compare. P&amp;L
-        is practice money on Groww&apos;s past candles.
+        is practice money on Groww&apos;s past candles, shown {basisWords(basis)}.{" "}
+        <BacktestBasisSwitch className="ml-1 align-middle" /> <NewTag id="bt-charges-switch" />
       </p>
       {error ? (
         <p role="alert" className="px-4 pt-2 text-xs text-rose-300">
@@ -973,7 +985,7 @@ export function BacktestRuns() {
                   win: <SortTh label="Win %" k="win" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("win")} />,
                   profit: <SortTh label="Profit" k="profit" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("profit")} />,
                   loss: <SortTh label="Loss" k="loss" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("loss")} />,
-                  net: <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={runSort} onSort={onRunSort} drag={runCols.dragProps("net")} />,
+                  net: <SortTh label="P&L" k="net" num title={`Profit + loss, ${basisWords(basis)}`} sort={runSort} onSort={onRunSort} drag={runCols.dragProps("net")} />,
                   dd: <SortTh label="Max DD" k="dd" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("dd")} />,
                   actions: <th {...runCols.dragProps("actions")} className={clsx("px-2 py-2", runCols.dragProps("actions").className)} />,
                 })}
@@ -1318,6 +1330,7 @@ function RunDetailBody({
 }) {
   // A day opens to show how each stock did that day (the stock table below opens the other way).
   const [openDay, setOpenDay] = useState<string | null>(null);
+  const basis = useBacktestBasis();
   const stocks = run.stocks ?? [];
   type DayKey = "date" | "trades" | "wins" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative";
   const dayCols = useColumnOrder<DayColKey>("backtests.cols.days", DAY_COLS);
@@ -1383,10 +1396,10 @@ function RunDetailBody({
                 loss: <SortTh label="Loss" k="loss" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("loss")} />,
                 gross: <SortTh label="Gross" k="gross" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("gross")} />,
                 charges: <SortTh label="Charges" k="charges" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("charges")} />,
-                net: <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("net")} />,
+                net: <SortTh label="P&L" k="net" num title={`Profit + loss, ${basisWords(basis)}`} sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("net")} />,
                 cumulative: <SortTh label="Running total" k="cumulative" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("cumulative")} />,
                 swing: (
-                  <th {...dayCols.dragProps("swing")} className="px-2 py-1.5 text-left font-medium" title="The day's highest and lowest P&L (closed + open, before charges), when, and which came first">
+                  <th {...dayCols.dragProps("swing")} className="px-2 py-1.5 text-left font-medium" title={`The day's highest and lowest P&L (closed + open, ${basisWords(basis)}), when, and which came first`}>
                     Day high / low <NewTag id="bt-day-swing" />
                   </th>
                 ),
@@ -1518,6 +1531,7 @@ swing: <td className="px-2 py-2" />
 
 /** The run split by stock. Each row opens that stock's own day-wise P&L. */
 function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Settings }) {
+  const basis = useBacktestBasis();
   const [open, setOpen] = useState<string | null>(null);
   // The whole section folds like a day row; folded by default (owner's request), remembered per browser.
   const [shown, setShown] = useState<boolean>(() => {
@@ -1574,7 +1588,7 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
                 loss: <SortTh label="Loss" k="loss" num sort={sort} onSort={onSort} drag={stockCols.dragProps("loss")} />,
                 gross: <SortTh label="Gross" k="gross" num sort={sort} onSort={onSort} drag={stockCols.dragProps("gross")} />,
                 charges: <SortTh label="Charges" k="charges" num sort={sort} onSort={onSort} drag={stockCols.dragProps("charges")} />,
-                net: <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={sort} onSort={onSort} drag={stockCols.dragProps("net")} />,
+                net: <SortTh label="P&L" k="net" num title={`Profit + loss, ${basisWords(basis)}`} sort={sort} onSort={onSort} drag={stockCols.dragProps("net")} />,
                 dd: <SortTh label="Max DD" k="dd" num sort={sort} onSort={onSort} drag={stockCols.dragProps("dd")} />,
               })}
             </tr>

@@ -5,7 +5,7 @@ routes are mounted at `/sma` on this host, so the browser must not call
 127.0.0.1.
 */
 
-import { runBeforeCharges, tradeBeforeCharges } from "./pnlBasis";
+import { runOnBasis, tradeBeforeCharges } from "./pnlBasis";
 import { onSignedOut } from "./session";
 import type { TrendRead } from "./trendReads";
 
@@ -2171,6 +2171,8 @@ export type TradeRow = {
   gross_pnl: number | null;
   brokerage_and_taxes: number | null;
   net_pnl: number | null;
+  /** The server's P&L after charges, kept when `net_pnl` is turned to before charges (pnlBasis.tradeBeforeCharges). */
+  net_after?: number | null;
   points: number | null;
   mode: string;
   /** The replay run a REPLAY trade belongs to. */
@@ -3743,9 +3745,9 @@ export const smaApi = {
     request<ArmLogDay>(`/api/arm-log?desk=${encodeURIComponent(desk)}${day ? `&day=${day}` : ""}`),
   /** The newest `limit` runs (server default 50, at most 500). */
   replayRuns: (limit?: number): Promise<ReplayRun[]> =>
-    request<ReplayRun[]>(limit ? `/api/replay/runs?limit=${limit}` : "/api/replay/runs").then((runs) => runs.map((r) => runBeforeCharges(r))),
+    request<ReplayRun[]>(limit ? `/api/replay/runs?limit=${limit}` : "/api/replay/runs").then((runs) => runs.map((r) => runOnBasis(r))),
   replayRun: (id: number): Promise<ReplayRun> =>
-    request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
+    request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runOnBasis(r)),
   /** Each trade's latest saved Most active read before its entry (by trade id); trades without one are left out. */
   replayRunMarketReads: (id: number) => request<Record<string, MarketRead>>(`/api/replay/runs/${id}/market-reads`),
   replayRunTrendReads: (id: number, opts: { symbol?: string; day?: string; workOut?: boolean } = {}) => {
