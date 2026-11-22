@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { SettingsCard } from "@/components/Settings/SettingsCard";
 import { NewTag } from "@/components/ui/NewTag";
 import { inr, smaApi, type AllBotsGuard as Guard } from "@/lib/smaApi";
+import { LevelBox, UnitSwitch, type LevelUnit } from "@/components/Settings/CapitalLevel";
 
 const input = "min-h-9 w-28 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100";
 const num = (v: string) => Math.max(0, Number(v) || 0);
@@ -22,6 +23,10 @@ export function ProfitSafetyNet() {
   const [keep, setKeep] = useState("70");
   const [start2, setStart2] = useState("10000");
   const [keep2, setKeep2] = useState("75");
+  const [unit, setUnit] = useState<LevelUnit>("RS");
+  const [stopPct, setStopPct] = useState("");
+  const [startPct, setStartPct] = useState("");
+  const [start2Pct, setStart2Pct] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -37,6 +42,10 @@ export function ProfitSafetyNet() {
           setKeep(String(g.trail_keep ?? 70));
           setStart2(String(g.trail_start2 ?? 0));
           setKeep2(String(g.trail_keep2 ?? 75));
+          setUnit(g.unit ?? "RS");
+          setStopPct(String(g.stop_pct || 0));
+          setStartPct(String(g.trail_start_pct || 0));
+          setStart2Pct(String(g.trail_start2_pct || 0));
         }
       })
       .catch(() => undefined);
@@ -50,6 +59,7 @@ export function ProfitSafetyNet() {
 
   const useMine = () => {
     setOn(true);
+    setUnit("RS");
     setStop("4000");
     setStart("5000");
     setKeep("70");
@@ -59,8 +69,9 @@ export function ProfitSafetyNet() {
   };
 
   const save = async () => {
-    const s1 = num(start);
-    const s2 = num(start2);
+    const pct = unit === "PCT";
+    const s1 = pct ? num(startPct) : num(start);
+    const s2 = pct ? num(start2Pct) : num(start2);
     if (on && s1 <= 0) return setNote("Set the profit that switches the safety net on.");
     if (s2 && s2 <= s1) return setNote("The second step must start above the first (or 0 for none).");
     const live = await smaApi.bots().then((b) => b.some((x) => x.mode === "LIVE")).catch(() => false);
@@ -71,9 +82,13 @@ export function ProfitSafetyNet() {
       const g = await smaApi.saveProfitNet({
         stop: num(stop),
         trail: on,
-        trail_start: s1 || 5000,
+        unit,
+        stop_pct: num(stopPct),
+        trail_start_pct: num(startPct),
+        trail_start2_pct: num(start2Pct),
+        trail_start: num(start) || 5000,
         trail_keep: Math.min(99, Math.max(1, Number(keep) || 70)),
-        trail_start2: s2,
+        trail_start2: num(start2),
         trail_keep2: Math.min(99, Math.max(1, Number(keep2) || 75)),
       });
       setGuard(g);
@@ -86,9 +101,10 @@ export function ProfitSafetyNet() {
   };
 
   const total = guard?.total ?? 0;
-  const s1 = num(start);
+  const cap = guard?.capital ?? 0;
+  const s1 = unit === "PCT" ? (num(startPct) * cap) / 100 : num(start);
   const k1 = Number(keep) || 70;
-  const s2 = num(start2);
+  const s2 = unit === "PCT" ? (num(start2Pct) * cap) / 100 : num(start2);
   const k2 = Number(keep2) || 75;
   const example = (best: number) => (s2 && best >= s2 ? (best * k2) / 100 : (best * k1) / 100);
   return (
@@ -100,7 +116,7 @@ export function ProfitSafetyNet() {
         </>
       }
       tier="start"
-      status={guard ? { on: Boolean(guard.trail || guard.stop) } : null}
+      status={guard ? { on: Boolean(guard.trail || guard.effective?.stop) } : null}
       summary="Live P&L (MTM) = today's closed trades plus open trades of Bots 1-4, before charges. Quit at a set loss; once the profit reaches a level, never let the market take back more than a set share of the day's best profit. Either one closes every bot and stops it for the day."
       help={
         <>
@@ -113,27 +129,19 @@ export function ProfitSafetyNet() {
         </>
       }
     >
+      <UnitSwitch unit={unit} onChange={setUnit} capital={cap} />
       <div className="mt-3 flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs text-slate-400">
-          Quit at a loss of (₹)
-          <input inputMode="decimal" value={stop} onChange={(e) => setStop(e.target.value)} className={input} />
-        </label>
+        <LevelBox label="Quit at a loss of" unit={unit} rs={stop} pct={stopPct} onRs={setStop} onPct={setStopPct} capital={cap} />
         <label className="flex min-h-9 items-center gap-1.5 self-end text-xs text-slate-200">
           <input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} className="accent-violet-400" />
           Profit safety net
         </label>
-        <label className="flex flex-col gap-1 text-xs text-slate-400">
-          Once profit reaches (₹)
-          <input inputMode="decimal" value={start} onChange={(e) => setStart(e.target.value)} className={input} disabled={!on} />
-        </label>
+        <LevelBox label="Once profit reaches" unit={unit} rs={start} pct={startPct} onRs={setStart} onPct={setStartPct} capital={cap} disabled={!on} />
         <label className="flex flex-col gap-1 text-xs text-slate-400">
           Keep (% of best)
           <input inputMode="decimal" value={keep} onChange={(e) => setKeep(e.target.value)} className={clsx(input, "w-20")} disabled={!on} />
         </label>
-        <label className="flex flex-col gap-1 text-xs text-slate-400">
-          From profit (₹, 0 = none)
-          <input inputMode="decimal" value={start2} onChange={(e) => setStart2(e.target.value)} className={input} disabled={!on} />
-        </label>
+        <LevelBox label="From profit (0 = none)" unit={unit} rs={start2} pct={start2Pct} onRs={setStart2} onPct={setStart2Pct} capital={cap} disabled={!on} />
         <label className="flex flex-col gap-1 text-xs text-slate-400">
           Keep (% of best)
           <input inputMode="decimal" value={keep2} onChange={(e) => setKeep2(e.target.value)} className={clsx(input, "w-20")} disabled={!on || !s2} />

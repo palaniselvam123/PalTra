@@ -25,6 +25,10 @@ nothing here places an order of its own.
 the best. The floor only rises with the best; the P&L falling to it trips the same panic (`kind` "trail"). The
 best is kept per IST day in memory (`note_peak`), seeded after a restart from the open P&L log
 (`seed_peak`). Backtests keep their own day's best on the replay engine.
+
+**In % of capital** (`all_bots_unit` "PCT", owner's request; "RS" = the ₹ fields, the default): the target, stop
+loss and both Profit Arm levels are read from their `*_pct` fields as that % of the practice wallet's money
+(`capital`: `PaperWallet.funds`, the money loaded); with no money loaded they are off. The keep % are unchanged.
 """
 from __future__ import annotations
 
@@ -51,9 +55,44 @@ def _amount(value) -> float:
     return min(out, MAX_AMOUNT)
 
 
-def limits(cfg) -> tuple[float, float]:
+def capital() -> float:
+    """The practice wallet's money loaded (₹), 0 when none. A DB read."""
+    try:
+        from database import session_factory
+        from models import PaperWallet
+
+        with session_factory()() as db:
+            row = db.get(PaperWallet, 1)
+            return max(0.0, float(row.funds or 0.0)) if row is not None else 0.0
+    except Exception:  # noqa: BLE001
+        log.exception("all-bots guard: could not read the wallet")
+        return 0.0
+
+
+def in_pct(cfg) -> bool:
+    return str(getattr(cfg, "all_bots_unit", "RS") or "RS").upper() == "PCT"
+
+
+def _pct_amount(cfg, field: str, cap: float | None) -> float:
+    """`field`_pct of the capital in ₹ (0 when the % or the capital is 0)."""
+    cap = capital() if cap is None else cap
+    try:
+        pct = float(getattr(cfg, f"{field}_pct", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(pct) or pct <= 0 or cap <= 0:
+        return 0.0
+    return round(min(pct, 1000.0) * cap / 100.0, 2)
+
+
+def level(cfg, field: str, cap: float | None = None) -> float:
+    """One level in ₹: the ₹ field, or its % of capital when the unit is PCT."""
+    return _pct_amount(cfg, field, cap) if in_pct(cfg) else _amount(getattr(cfg, field, 0))
+
+
+def limits(cfg, cap: float | None = None) -> tuple[float, float]:
     """(target, stop) in ₹ from bot 1's settings row; 0 = off."""
-    return _amount(getattr(cfg, "all_bots_target", 0)), _amount(getattr(cfg, "all_bots_stop", 0))
+    return level(cfg, "all_bots_target", cap), level(cfg, "all_bots_stop", cap)
 
 
 EARLIEST, LATEST = dt.time(9, 15), dt.time(15, 30)
@@ -81,14 +120,18 @@ def _pct(value, default: float) -> float:
     return min(99.0, max(1.0, out)) if math.isfinite(out) else default
 
 
-def trail_rule(cfg) -> tuple[float, float, float, float] | None:
+def trail_rule(cfg, cap: float | None = None) -> tuple[float, float, float, float] | None:
     """(start, keep %, start2, keep2 %) of the profit safety net, or None when it is off."""
     if not bool(getattr(cfg, "all_bots_trail", False)):
         return None
-    start = _amount(getattr(cfg, "all_bots_trail_start", 5000.0))
+    if in_pct(cfg):
+        cap = capital() if cap is None else cap
+        start, start2 = _pct_amount(cfg, "all_bots_trail_start", cap), _pct_amount(cfg, "all_bots_trail_start2", cap)
+    else:
+        start = _amount(getattr(cfg, "all_bots_trail_start", 5000.0))
+        start2 = _amount(getattr(cfg, "all_bots_trail_start2", 0.0))
     if start <= 0:
         return None
-    start2 = _amount(getattr(cfg, "all_bots_trail_start2", 0.0))
     return (start, _pct(getattr(cfg, "all_bots_trail_keep", 70.0), 70.0),
             start2 if start2 > start else 0.0, _pct(getattr(cfg, "all_bots_trail_keep2", 75.0), 75.0))
 
@@ -246,9 +289,10 @@ async def run(engines_fn, config_fn, is_open_fn, poll: float = POLL_SEC, now_fn=
         try:
             if is_open_fn():
                 cfg = config_fn()
-                target, stop = limits(cfg)
+                cap = await asyncio.to_thread(capital) if in_pct(cfg) else 0.0
+                target, stop = limits(cfg, cap)
                 at = squareoff_at(cfg)
-                rule = trail_rule(cfg)
+                rule = trail_rule(cfg, cap)
                 floor = peak = None
                 if target > 0 or stop > 0 or at is not None or rule:
                     engines = list(engines_fn())
