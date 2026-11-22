@@ -675,6 +675,8 @@ export const FEATURES: Feature[] = [
     purpose: "Pick the days, a time (e.g. 09:15), one or more columns to rank by (vol vs usual, buyers %, sellers %, money traded, executed buy / sell %, day move, speed…), how many stocks and the quantity: each day's first saved Most active scan at or after that time is used (a thinner scan is skipped and named, e.g. '09:15 not available, run from 09:29'), its top stocks are traded by the bot from the minute after the scan read them. Practice money only."},
   { id: "bt-day-swing", area: "terminal", added: "2026-11-22", pr: 506, href: TERM, where: "Terminal → Blotter → Backtests → open a run → each day (day-wise table's 'Day high / low' column, and the Armed log's day rows)", title: "Each backtest day's highest and lowest P&L, with times",
     purpose: "Shows how high and how low the day's P&L went (closed plus open trades, before charges), at what time, and whether the high or the low came first, so you can see what the day offered before it ended where it did."},
+  { id: "profit-safety-net", area: "settings", added: "2026-11-22", pr: 507, href: "/settings/#all-bots-profit-net", where: "Settings → Bots → All bots: loss quit and profit safety net", title: "All bots: profit safety net (trailing day profit lock)",
+    purpose: "Quit every bot at a set day loss (e.g. -₹4,000), and once the day's live profit (closed + open) reaches a level (e.g. +₹5,000), keep a share of the best profit (70 %, 75 % from +₹10,000): if the profit falls back to that safety net every bot closes and stops for the day. Backtests use it too."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */

@@ -271,3 +271,47 @@ async def test_a_backtest_day_ends_once_the_bot_is_halted_and_flat(monkeypatch, 
     assert len(ends) == 2 and all(e.time() <= dt.time(10, 31) for e in ends), ends
     assert "rest of the replayed day skipped" in session.engine.halt_reason
     database.reset_engine()
+
+
+def test_profit_safety_net_floor_moves_up_with_the_best():
+    off = type("C", (), {"all_bots_trail": False})()
+    assert guard.trail_rule(off) is None
+    cfg = type("C", (), {"all_bots_trail": True, "all_bots_trail_start": 5000, "all_bots_trail_keep": 70,
+                         "all_bots_trail_start2": 10000, "all_bots_trail_keep2": 75})()
+    rule = guard.trail_rule(cfg)
+    assert guard.trail_floor(4999, rule) is None
+    assert guard.trail_floor(5000, rule) == 3500
+    assert guard.trail_floor(8000, rule) == 5600
+    assert guard.trail_floor(20000, rule) == 15000
+    assert guard.verdict(3600, 0, 4000, floor=3500) is None
+    assert guard.verdict(3500, 0, 4000, floor=3500) == "trail"
+    assert guard.verdict(-4000, 0, 4000, floor=None) == "stop"
+
+
+@pytest.mark.asyncio
+async def test_profit_safety_net_panics_once_the_pnl_falls_back(monkeypatch):
+    monkeypatch.setattr(guard, "_PEAK", {"day": None, "peak": None})
+    monkeypatch.setattr(guard, "seed_peak", lambda day: None)
+    bot = FakeEngine(1, 0.0, opened=6000)
+    cfg = type("C", (), {"all_bots_target": 0, "all_bots_stop": 4000, "all_bots_trail": True,
+                         "all_bots_trail_start": 5000, "all_bots_trail_keep": 70,
+                         "all_bots_trail_start2": 10000, "all_bots_trail_keep2": 75})()
+    task = asyncio.create_task(guard.run(lambda: [bot], lambda: cfg, lambda: True, poll=0.01))
+    await asyncio.sleep(0.05)
+    assert not bot.killed, "best ₹6,000, net ₹4,200: still running"
+    bot.opened = 4300
+    await asyncio.sleep(0.05)
+    assert not bot.killed
+    bot.opened = 4200
+    await asyncio.sleep(0.05)
+    task.cancel()
+    assert len(bot.killed) == 1 and "safety net" in bot.halt_reason and "4,200" in bot.halt_reason
+
+
+@pytest.mark.asyncio
+async def test_a_backtest_stops_at_the_profit_safety_net(db):  # noqa: F811
+    _, plain = await _replay_day(db)
+    eng, rows = await _replay_day(db, all_bots_trail=True, all_bots_trail_start=1.0, all_bots_trail_keep=99.0,
+                                  all_bots_trail_start2=0.0)
+    assert eng.status == "HALTED" and "safety net" in eng.halt_reason
+    assert len(rows) < len(plain)

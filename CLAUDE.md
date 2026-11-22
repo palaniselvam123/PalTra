@@ -2285,6 +2285,13 @@ spinning top), body and range) / Matched / Call columns
   panic) and holds nothing, the rest of that day is not played (`ReplaySession._halted_flat`, owner's request): the day
   finishes and the next one starts; its halt reason adds "rest of the replayed day skipped at HH:MM". A halted bot still
   holding a stock plays on, so its square-off is retried.
+  **Profit safety net** (`all_bots_trail`, off by default; `all_bots_trail_start` ₹5,000 / `all_bots_trail_keep` 70 %,
+  `all_bots_trail_start2` ₹10,000 (0 = none) / `all_bots_trail_keep2` 75 %, row 1, in `COPY_SKIP`; owner's request): once
+  the day's combined P&L (closed + open, before charges) has reached the start, `trail_floor` = that % of the day's best
+  (`note_peak`, per IST day in memory, `seed_peak` from the open P&L log after a restart); the P&L falling to it trips the
+  same panic (`kind` "trail", "profit safety net hit"). Backtests keep each replayed day's best on the engine
+  (`_day_peak`). `PUT /api/bots/guard` takes `trail*` and `trail_only` (target / square-off left alone); Settings → Bots,
+  "All bots: loss quit and profit safety net" (`components/Settings/ProfitSafetyNet.tsx`, its loss box is `all_bots_stop`).
 - `backend/pnl_alerts.py` – all-bots P&L alerts (off by default; alerts only, never trades): `pnl_alert_profit` /
   `pnl_alert_loss` ₹ on `BotConfig` row 1 (0 = off), `pnl_alert_telegram` / `pnl_alert_call` (both on by default) and
   `pnl_alert_basis` (`GROSS` before charges, as the screens; `NET` after). While NSE is open `run` (started in

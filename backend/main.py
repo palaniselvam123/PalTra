@@ -1447,6 +1447,7 @@ COPY_SKIP = frozenset({
     "id", "symbol", "trade_symbols", "trade_sources", "trading_mode", "bot_name", "stock_settings",
     "second_ticks", "trade_count_reset_id", "trade_count_reset_date", "max_trades_bumped",
     "all_bots_target", "all_bots_stop", "all_bots_squareoff",
+    "all_bots_trail", "all_bots_trail_start", "all_bots_trail_keep", "all_bots_trail_start2", "all_bots_trail_keep2",
     "pnl_alert_profit", "pnl_alert_loss", "pnl_alert_telegram", "pnl_alert_call", "pnl_alert_basis",
     "news_entry_bot", "news_entry_impact", "news_entry_scope", "news_entry_max_age_min", "news_entry_max_day",
     "auto_start",
@@ -2387,7 +2388,10 @@ async def _start_bot(eng: StrategyEngine):
         cfg = engine.load_config()
         target, stop = all_bots_guard.limits(cfg)
         amount = closed + all_bots_guard.open_total(_all_bots())
-        if all_bots_guard.verdict(amount, target, stop, engine._now(), all_bots_guard.squareoff_at(cfg)) is None:
+        now = engine._now()
+        peak = all_bots_guard.peak_today(now.date())
+        floor = all_bots_guard.trail_floor(max(peak if peak is not None else amount, amount), all_bots_guard.trail_rule(cfg))
+        if all_bots_guard.verdict(amount, target, stop, now, all_bots_guard.squareoff_at(cfg), floor) is None:
             eng.status, eng.halt_reason = "STOPPED", ""
     if eng.status == "HALTED":
         raise HTTPException(423, eng.halt_reason or "Halted for the day")
@@ -6264,6 +6268,14 @@ class AllBotsGuard(BaseModel):
     stop: float = Field(ge=0, le=all_bots_guard.MAX_AMOUNT)
     # "HH:MM" IST between 09:15 and 15:30; empty = off. Left out = unchanged.
     squareoff: str | None = None
+    # The profit safety net (all_bots_guard.trail_rule). Left out = unchanged.
+    trail: bool | None = None
+    trail_start: float | None = Field(default=None, ge=0, le=all_bots_guard.MAX_AMOUNT)
+    trail_keep: float | None = Field(default=None, ge=1, le=99)
+    trail_start2: float | None = Field(default=None, ge=0, le=all_bots_guard.MAX_AMOUNT)
+    trail_keep2: float | None = Field(default=None, ge=1, le=99)
+    # Save only the safety net (its own card): target / stop / square-off left as they are.
+    trail_only: bool = False
 
 
 async def _guard_view() -> dict:
@@ -6274,12 +6286,26 @@ async def _guard_view() -> dict:
     closed = await asyncio.to_thread(all_bots_guard.closed_total, bots)
     amount = round(closed + all_bots_guard.open_total(bots), 2)
     halted = [eng.bot_id for eng in bots if all_bots_guard.is_guard_halt(eng)]
+    rule = all_bots_guard.trail_rule(cfg)
+    now = engine._now()
+    peak = all_bots_guard.peak_today(now.date())
+    if peak is None:
+        peak = await asyncio.to_thread(all_bots_guard.seed_peak, now.date())
+    best = max(peak if peak is not None else amount, amount)
+    floor = all_bots_guard.trail_floor(best, rule)
     return {
         "target": target,
         "stop": stop,
         "squareoff": at.strftime("%H:%M") if at else "",
+        "trail": bool(getattr(cfg, "all_bots_trail", False)),
+        "trail_start": float(getattr(cfg, "all_bots_trail_start", None) or 5000.0),
+        "trail_keep": float(getattr(cfg, "all_bots_trail_keep", None) or 70.0),
+        "trail_start2": float(getattr(cfg, "all_bots_trail_start2", None) or 0.0),
+        "trail_keep2": float(getattr(cfg, "all_bots_trail_keep2", None) or 75.0),
+        "peak": round(best, 2),
+        "floor": floor,
         "total": amount,
-        "hit": all_bots_guard.verdict(amount, target, stop, engine._now(), at),
+        "hit": all_bots_guard.verdict(amount, target, stop, now, at, floor),
         "halted_bots": halted,
         "reason": next((eng.halt_reason for eng in bots if all_bots_guard.is_guard_halt(eng)), ""),
     }
@@ -6298,9 +6324,18 @@ async def all_bots_guard_put(body: AllBotsGuard):
         row = db.get(BotConfig, 1)
         if row is None:
             raise HTTPException(500, "BotConfig missing")
-        row.all_bots_target = float(body.target)
+        if not body.trail_only:
+            row.all_bots_target = float(body.target)
         row.all_bots_stop = float(body.stop)
-        if body.squareoff is not None:
+        if body.trail is not None:
+            row.all_bots_trail = bool(body.trail)
+        for field in ("trail_start", "trail_keep", "trail_start2", "trail_keep2"):
+            value = getattr(body, field)
+            if value is not None:
+                setattr(row, f"all_bots_{field}", float(value))
+        if (body.trail_start2 or 0) and body.trail_start is not None and body.trail_start2 <= body.trail_start:
+            raise HTTPException(422, "The second step must start above the first (or 0 for none).")
+        if body.squareoff is not None and not body.trail_only:
             text = body.squareoff.strip()
             if text and all_bots_guard.parse_time(text) is None:
                 raise HTTPException(422, "Square-off time must be HH:MM between 09:15 and 15:30, or empty for off.")
