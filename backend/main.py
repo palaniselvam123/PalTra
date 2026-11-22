@@ -39,6 +39,7 @@ import order_gate as order_gate_mod
 import auto_start
 import scalp_alerts
 import auto_arm
+import saved_picks
 import scan_trade_test
 import hold_test
 import trend_rank
@@ -2842,7 +2843,7 @@ class TrendPickStart(BaseModel):
 async def _start_trend_picks(
     bot: int, universe: list[str], day: dt.date, end_day: dt.date, pick_time: dt.time, top_n: int, direction: str,
     minutes: int, speed: int, play_handoffs: bool = True, active: dict | None = None, rule=None,
-    candles: str = "NORMAL", until: dt.time | None = None,
+    candles: str = "NORMAL", until: dt.time | None = None, cap: int | None = None,
 ) -> dict:
     """Start a strong-trend pick backtest on `bot`'s replay player, or with `active` (rank, bias, min_value_cr) a Most
     active pick backtest (active_picks.py). Raises HTTPException on a refusal."""
@@ -2860,7 +2861,7 @@ async def _start_trend_picks(
             names.append(name)
     if not names:
         raise HTTPException(400, "Give at least one stock to pick from.")
-    names = names[: trend_picks.MAX_UNIVERSE]
+    names = names[: cap or trend_picks.MAX_UNIVERSE]
     if not engine.broker.token:
         engine.broker.adopt_saved_session()
     if not engine.broker.token:
@@ -3038,6 +3039,88 @@ async def replay_auto_arm(body: AutoArmStart):
         play_handoffs=body.play_handoffs, rule=rule,
     )
     return {**info, "notes": notes[:10]}
+
+
+class SavedScanStart(BaseModel):
+    date: str
+    end_date: str | None = None
+    #: The asked time: each day's first saved Most active scan at or after it with enough usable stocks.
+    at: str = "09:15"
+    #: One or more ranking columns (saved_picks.COLUMNS); several = average place.
+    rank_by: list[str] = Field(default_factory=lambda: ["rvol"])
+    top_n: int = Field(default=24, ge=1, le=saved_picks.MAX_TOP_N)
+    #: Shares per picked stock, 0 = the bot's own quantity.
+    qty: int = Field(default=0, ge=0, le=1_000_000)
+    side: Literal["ANY", "BUYERS", "SELLERS"] = "ANY"
+    min_value_cr: float = Field(default=0.0, ge=0, le=100000)
+    min_rvol: float = Field(default=0.0, ge=0, le=100)
+    price_min: float = Field(default=0.0, ge=0, le=1_000_000)
+    price_max: float = Field(default=0.0, ge=0, le=1_000_000)
+    until: str | None = None
+    bot: int = Field(default=1, ge=1, le=4)
+    speed: int = 300
+    play_handoffs: bool = True
+
+
+async def _saved_scan_picks(day: dt.date, rule: "saved_picks.SavedScanRule") -> tuple[list[dict], str]:
+    """One day's saved-scan picks: this server's saved Most active scans, else (on the backtest server) the desk's."""
+    scans = await asyncio.to_thread(auto_arm.saved_scans, day)
+    if scans:
+        return await asyncio.to_thread(saved_picks.choose_for_day, scans, rule)
+    if server_role.is_backtest() and server_role.backtest_link_token():
+        from urllib.parse import urlencode
+
+        query = urlencode({"day": day.isoformat(), "rule": json.dumps(rule.query())})
+        try:
+            body = await backtest_server._desk_get(f"/api/link/backtest/saved-picks?{query}")
+        except Exception as exc:  # noqa: BLE001
+            return [], f"the desk's saved Most active scans could not be read ({exc})"
+        return [p for p in body.get("picks") or [] if isinstance(p, dict)], str(body.get("note") or "")
+    return [], "no saved Most active scans"
+
+
+@app.post("/api/replay/saved-scans")
+async def replay_saved_scans(body: SavedScanStart):
+    """Saved-scan backtest (saved_picks.py): each day's first saved Most active scan at or after the asked time, the
+    top N by the chosen columns, traded by the bot from the minute after the scan read them. Practice money; never
+    sends an order, never changes a Trade list."""
+    _refuse_desk_replay_in_market()
+    if body.speed not in SPEEDS:
+        raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
+    bad = [k for k in body.rank_by if k not in saved_picks.COLUMNS]
+    if bad or not body.rank_by:
+        raise HTTPException(400, f"Rank by one or more of: {', '.join(saved_picks.COLUMNS)}.")
+    try:
+        day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
+        at = parse_start(body.at)
+        _, until = trend_picks.parse_window(body.at, body.until)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not (dt.time(9, 15) <= at <= dt.time(15, 0)):
+        raise HTTPException(400, "Pick a time between 09:15 and 15:00 IST.")
+    lo, hi = sorted((body.price_min, body.price_max)) if body.price_min and body.price_max else (body.price_min, body.price_max)
+    rule = saved_picks.SavedScanRule(
+        pick_time=at, top_n=body.top_n, rank_by=saved_picks.clean_rank(body.rank_by), qty=body.qty, side=body.side,
+        min_value_cr=body.min_value_cr, min_rvol=body.min_rvol, price_min=lo, price_max=hi, until=until,
+    )
+    names: list[str] = []
+    d = day
+    while d <= end_day:
+        if d.weekday() < 5:
+            picks, note = await _saved_scan_picks(d, rule)
+            rule.notes[d.isoformat()] = note
+            if picks:
+                rule.chosen[d.isoformat()] = picks
+                names += [p["symbol"] for p in picks if p["symbol"] not in names]
+        d += dt.timedelta(days=1)
+    notes = [f"{k}: {v}" for k, v in rule.notes.items()]
+    if not rule.chosen:
+        raise HTTPException(400, " · ".join(notes[:5]) or "No saved Most active scans for those days.")
+    info = await _start_trend_picks(
+        body.bot, names[: saved_picks.MAX_UNIVERSE], day, end_day, at, body.top_n, "BOTH", 5, body.speed,
+        play_handoffs=body.play_handoffs, rule=rule, cap=saved_picks.MAX_UNIVERSE,
+    )
+    return {**info, "notes": notes, "days_with_picks": len(rule.chosen)}
 
 
 # ---- Backtest queue and schedule (backtest_queue.py): auto-arm backtests one after another, practice money ----

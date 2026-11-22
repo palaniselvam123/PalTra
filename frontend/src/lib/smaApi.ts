@@ -2333,8 +2333,13 @@ export type ReplayInfo = {
 /** The rule a pick run recorded (`scalp_pick` in the run's settings). `kind` says which backtest picked: absent =
  * the Scalp page's scalp picks (scalp_picks.py), `TREND` = strong-trend picks (trend_picks.py), `ACTIVE` = Most active
  * picks (active_picks.py); each kind keeps its own fields, so read them by kind. */
+/** Ranking columns of the saved-scan backtest (backend saved_picks.COLUMNS). */
+export type SavedScanColumn =
+  | "rvol" | "value" | "buyers" | "sellers" | "imbalance" | "exec_buyers" | "exec_sellers"
+  | "move" | "up" | "down" | "speed" | "vwap" | "range";
+
 export type ScalpPickRule = {
-  kind?: "TREND" | "ACTIVE" | "AUTOARM";
+  kind?: "TREND" | "ACTIVE" | "AUTOARM" | "SAVED";
   pick_time: string;
   /** The run saved the stocks it picks from, so a run cut short can be resumed (runs started since this was added). */
   resumable?: boolean;
@@ -2778,7 +2783,7 @@ export type ResumableRun = {
   next_day: string | null;
   symbols: string[];
   /** Which Scalp-page backtest it is (TREND / ACTIVE / AUTOARM / SCALP); null for a plain replay. */
-  kind?: "TREND" | "ACTIVE" | "AUTOARM" | "SCALP" | null;
+  kind?: "TREND" | "ACTIVE" | "AUTOARM" | "SAVED" | "SCALP" | null;
 };
 
 export function replayActive(info: ReplayInfo | null | undefined): boolean {
@@ -3590,6 +3595,26 @@ export const smaApi = {
     play_handoffs: boolean;
     speed?: number;
   }) => request<ReplayInfo>("/api/replay/active-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
+  /** Saved-scan backtest (backend saved_picks.py): each day's first saved Most active scan at or after `at`, the top N
+   * by one or more columns (average place), traded by `bot` from the minute after the scan read them, at `qty` shares
+   * (0 = the bot's own). Practice money; nothing is armed. */
+  replaySavedScans: (body: {
+    date: string;
+    end_date: string;
+    at: string;
+    rank_by: SavedScanColumn[];
+    top_n: number;
+    qty: number;
+    side: "ANY" | "BUYERS" | "SELLERS";
+    min_value_cr: number;
+    min_rvol: number;
+    price_min?: number;
+    price_max?: number;
+    until?: string;
+    bot: number;
+    play_handoffs: boolean;
+    speed?: number;
+  }) => request<ReplayInfo & { notes?: string[]; days_with_picks?: number }>("/api/replay/saved-scans", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 120000),
   /** Stock ranking: backtest a bot's strategy on many stocks in batches, then rank the stocks (stock_rank.py). */
   stockRankStart: (body: {
     date: string;

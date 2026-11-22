@@ -16,7 +16,7 @@ import { smaApi, type ResumableRun } from "@/lib/smaApi";
 const HIDE_KEY = "scalp.resume.hidden";
 const BOTS = [1, 2, 3, 4];
 
-export type PickKind = "TREND" | "ACTIVE" | "AUTOARM" | "SCALP";
+export type PickKind = "TREND" | "ACTIVE" | "AUTOARM" | "SAVED" | "SCALP";
 
 function shortDay(iso: string): string {
   const d = new Date(`${iso}T00:00:00+05:30`);

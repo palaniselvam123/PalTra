@@ -70,10 +70,18 @@ export function scalpPickOf(s: Settings): ScalpPickInfo | null {
 }
 
 /** Which backtest made the picks, in words. */
+const SAVED_COLUMN_LABEL: Record<string, string> = {
+  rvol: "Vol vs usual", value: "Money traded", buyers: "Buyers % (waiting)", sellers: "Sellers % (waiting)",
+  imbalance: "Buyer/seller imbalance", exec_buyers: "Executed buy %", exec_sellers: "Executed sell %",
+  move: "Day move (either way)", up: "Day move up", down: "Day move down", speed: "Speed", vwap: "Distance from average price",
+  range: "Day range",
+};
+
 function pickKindLabel(pick: ScalpPickRule): string {
   if (pick.kind === "TREND") return "Strong-trend";
   if (pick.kind === "ACTIVE") return "Most active";
   if (pick.kind === "AUTOARM") return "Auto-arm";
+  if (pick.kind === "SAVED") return "Saved Most active scan";
   return "Scalp";
 }
 
@@ -122,6 +130,21 @@ export function pickRuleRows(run: { settings: Settings; days_total?: number; sta
     if (s("until")) rows.push(["Trade until", `${s("until")} IST (squared off there)`]);
     rows.push(["Price range", n("price_min") || n("price_max") ? `${rupee(n("price_min"))} to ${rupee(n("price_max"))}` : "any"]);
     rows.push(["At most", `${n("max_day") ?? 10} stocks a day`]);
+    return rows;
+  }
+  if (pick.kind === "SAVED") {
+    rows.push(["Scan time", `the first saved Most active scan at or after ${pick.pick_time} IST each day`]);
+    const by = Array.isArray(r.rank_by) ? (r.rank_by as string[]).map((k) => SAVED_COLUMN_LABEL[k] ?? k).join(" + ") : "-";
+    rows.push(["Ranked by", by]);
+    rows.push(["Top", String(pick.top_n)]);
+    rows.push(["Quantity", n("qty") ? `${n("qty")} shares a stock` : "the bot's own"]);
+    rows.push(["Which", s("side") === "BUYERS" ? "buyers lead the waiting orders" : s("side") === "SELLERS" ? "sellers lead the waiting orders" : "any"]);
+    rows.push(["Money traded at least", n("min_value_cr") ? `Rs ${n("min_value_cr")} cr` : "any"]);
+    if (n("min_rvol")) rows.push(["Vol vs usual at least", `${n("min_rvol")}x`]);
+    if (n("price_min") || n("price_max")) rows.push(["Price range", `${rupee(n("price_min"))} to ${rupee(n("price_max"))}`]);
+    if (pick.until) rows.push(["Trade until", `${pick.until} IST (squared off there)`]);
+    const notes = r.notes && typeof r.notes === "object" ? (r.notes as Record<string, string>) : {};
+    for (const d of Object.keys(notes).sort()) rows.push([`Scan used ${d}`, notes[d]]);
     return rows;
   }
   rows.push(["Pick time", `${pick.pick_time} IST`]);
