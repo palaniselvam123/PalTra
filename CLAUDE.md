@@ -2281,7 +2281,10 @@ spinning top), body and range) / Matched / Call columns
   `sma_research` baseline) checks once per replayed minute (`_check_day_guard`) its own day's P&L (closed + open, before
   charges) against the target / stop and the replay clock against the square-off time, and on a hit `trip`s itself
   (squared off as `KILL_SWITCH`, HALTED for the rest of that replayed day; the next day starts fresh). A replay plays
-  one bot, so it is judged on that bot's P&L alone.
+  one bot, so it is judged on that bot's P&L alone. Once a replayed bot is HALTED (this guard, the daily loss limit, a
+  panic) and holds nothing, the rest of that day is not played (`ReplaySession._halted_flat`, owner's request): the day
+  finishes and the next one starts; its halt reason adds "rest of the replayed day skipped at HH:MM". A halted bot still
+  holding a stock plays on, so its square-off is retried.
 - `backend/pnl_alerts.py` – all-bots P&L alerts (off by default; alerts only, never trades): `pnl_alert_profit` /
   `pnl_alert_loss` ₹ on `BotConfig` row 1 (0 = off), `pnl_alert_telegram` / `pnl_alert_call` (both on by default) and
   `pnl_alert_basis` (`GROSS` before charges, as the screens; `NET` after). While NSE is open `run` (started in

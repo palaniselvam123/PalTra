@@ -221,3 +221,53 @@ async def test_a_backtest_stops_at_the_all_bots_target(db):  # noqa: F811
     assert any(t["gross"] > 1 for t in plain)  # the wave day has winning trades
     assert eng.status == "HALTED" and "target" in eng.halt_reason
     assert len(rows) < len(plain)
+
+
+@pytest.mark.asyncio
+async def test_a_backtest_day_ends_once_the_bot_is_halted_and_flat(monkeypatch, tmp_path):
+    """Owner's request: after the day target / stop loss / square-off time, the replay no longer plays empty minutes
+    to 15:30; that day finishes and the next one starts."""
+    import pandas as pd
+
+    import database
+    import replay as replay_mod
+    from models import BotConfig
+    from replay import ReplaySession
+    from tests.test_gap_mode import _day
+
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/r.db")
+    database.reset_engine()
+    database.init_db()
+    with database.session_factory()() as s:
+        row = s.get(BotConfig, 1) or BotConfig(id=1)
+        row.all_bots_squareoff = "10:30"
+        s.add(row)
+        s.commit()
+    days = (dt.date(2026, 9, 24), dt.date(2026, 9, 25), dt.date(2026, 9, 28))
+    wave = lambda i, p: 1000.0 + 3.0 * ((i // 12) % 2)  # noqa: E731
+
+    async def fake_fetch(broker, symbol, start, end):  # noqa: ARG001
+        return pd.DataFrame([bar for d in days for bar in _day(d, wave)])
+
+    monkeypatch.setattr(replay_mod, "fetch_frame", fake_fetch)
+    monkeypatch.setattr(replay_mod, "STEP_SECONDS", 60)
+    monkeypatch.setattr(replay_mod, "CPU_SHARE", 1000.0)
+    monkeypatch.setattr(replay_mod, "LOOP_SECONDS", 0.01)
+    ends: list[dt.datetime] = []
+    finish = ReplaySession._finish_day
+
+    async def note_end(self):
+        ends.append(self.engine.feed.clock)
+        await finish(self)
+
+    monkeypatch.setattr(ReplaySession, "_finish_day", note_end)
+    session = ReplaySession()
+    await session.begin(object(), ["AAA"], days[1], dt.time(9, 15), 1_000_000, end_day=days[2], settings={"qty": 10})
+    for _ in range(600):
+        await asyncio.sleep(0.05)
+        if session.status in ("FINISHED", "ERROR"):
+            break
+    assert session.status == "FINISHED", session.error
+    assert len(ends) == 2 and all(e.time() <= dt.time(10, 31) for e in ends), ends
+    assert "rest of the replayed day skipped" in session.engine.halt_reason
+    database.reset_engine()

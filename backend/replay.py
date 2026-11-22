@@ -1781,7 +1781,7 @@ class ReplaySession:
                     eng.last_error = str(exc)
                 self._note_pnl(eng)
                 used += time.perf_counter() - began
-                if eng.feed.clock >= end:
+                if eng.feed.clock >= end or self._halted_flat(eng):
                     self._seek = None
                     await self._finish_day()
                     return True
@@ -1834,7 +1834,7 @@ class ReplaySession:
                     eng.last_error = str(exc)
                 self._note_pnl(eng)
                 used += time.perf_counter() - began
-                if eng.feed.clock >= end:
+                if eng.feed.clock >= end or self._halted_flat(eng):
                     await self._finish_day()
                     return
                 # Let the live engine and the API run between ticks.
@@ -1881,6 +1881,19 @@ class ReplaySession:
         task = loop.create_task(asyncio.to_thread(trend_log.save, run_id, bot, rows))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
+
+    @staticmethod
+    def _halted_flat(eng) -> bool:
+        """The day is over for this bot: halted (all-bots day target / stop loss / square-off time, the daily loss
+        limit, a panic) with nothing held, so it cannot trade again that day. The rest of the day is not played
+        (owner's request: it used to tick empty minutes to 15:30); the day finishes and the next one starts. A halted
+        bot still holding a stock plays on, so its square-off is retried as live."""
+        if getattr(eng, "status", None) != "HALTED" or getattr(eng, "positions", None):
+            return False
+        reason = getattr(eng, "halt_reason", "") or ""
+        if "rest of the replayed day skipped" not in reason:
+            eng.halt_reason = f"{reason} — rest of the replayed day skipped at {eng.feed.clock:%H:%M}".lstrip(" —")
+        return True
 
     def _day_end(self) -> dt.datetime:
         assert self.day is not None
