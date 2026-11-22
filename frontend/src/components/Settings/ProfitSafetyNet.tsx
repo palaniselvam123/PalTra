@@ -105,8 +105,8 @@ export function ProfitSafetyNet() {
       help={
         <>
           The loss quit is the same setting as the day stop loss on the card above (saving here changes it there too). The safety
-          net switches on once the day&apos;s live profit reaches the first level; it then sits at the kept % of the best profit so
-          far and only moves up. From the second level (0 = none) it keeps the second, tighter %. When the live profit falls back to
+          net switches on once the day&apos;s live profit reaches the Tier 1 Profit Arm (before that there is no net, so trades move freely); it then sits at the kept % of the best profit so
+          far and only moves up. From the Tier 2 Profit Arm (0 = none) it keeps the second, tighter %, because more money is on the table. When the live profit falls back to
           the net, every bot is panic squared off (LIVE stops cancelled first) and stays stopped today, like the day target. The best
           profit is kept for the day, also across a restart (read from the P&amp;L log). Backtests use it too, on each replayed
           day&apos;s own P&amp;L.
@@ -123,19 +123,19 @@ export function ProfitSafetyNet() {
           Profit safety net
         </label>
         <label className="flex flex-col gap-1 text-xs text-slate-400">
-          Once profit reaches (₹)
+          Tier 1 Profit Arm (₹)
           <input inputMode="decimal" value={start} onChange={(e) => setStart(e.target.value)} className={input} disabled={!on} />
         </label>
         <label className="flex flex-col gap-1 text-xs text-slate-400">
-          Keep (% of best)
+          Tier 1 net keeps (% of best)
           <input inputMode="decimal" value={keep} onChange={(e) => setKeep(e.target.value)} className={clsx(input, "w-20")} disabled={!on} />
         </label>
         <label className="flex flex-col gap-1 text-xs text-slate-400">
-          From profit (₹, 0 = none)
+          Tier 2 Profit Arm (₹, 0 = none)
           <input inputMode="decimal" value={start2} onChange={(e) => setStart2(e.target.value)} className={input} disabled={!on} />
         </label>
         <label className="flex flex-col gap-1 text-xs text-slate-400">
-          Keep (% of best)
+          Tier 2 net keeps (% of best)
           <input inputMode="decimal" value={keep2} onChange={(e) => setKeep2(e.target.value)} className={clsx(input, "w-20")} disabled={!on || !s2} />
         </label>
         <button
@@ -175,9 +175,21 @@ export function ProfitSafetyNet() {
           <span>
             Safety net:{" "}
             <span className="font-mono font-semibold text-amber-200">
-              {guard.trail ? (guard.floor != null ? inr(guard.floor) : `not yet (until ${inr(guard.trail_start)})`) : "off"}
+              {guard.trail ? (guard.floor != null ? inr(guard.floor) : `not armed yet (arms at ${inr(guard.trail_start)})`) : "off"}
             </span>
           </span>
+          {guard.trail ? (
+            <span>
+              Armed:{" "}
+              <span className="font-mono font-semibold">
+                {guard.floor == null
+                  ? "no"
+                  : guard.trail_start2 && (guard.peak ?? 0) >= guard.trail_start2
+                    ? `Tier 2 (keeps ${guard.trail_keep2} %)`
+                    : `Tier 1 (keeps ${guard.trail_keep} %)`}
+              </span>
+            </span>
+          ) : null}
         </div>
       ) : null}
       {note ? <p className="mt-1 text-xs text-slate-400">{note}</p> : null}
