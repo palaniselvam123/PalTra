@@ -14,6 +14,7 @@ import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { saveFile } from "@/lib/chartTable";
 import { smaApi, type PnlDashboard as Dash, type PnlDashOptions, type PnlDashQuery } from "@/lib/smaApi";
 import { Bars, C, DayRanges, DivergingBars, Legend, TimeChart, money } from "./charts";
+import { backtestBasis, onBacktestBasis, setBacktestBasis } from "@/lib/pnlBasis";
 
 const STORE = "pnlDash.filters";
 const DESK_LABEL: Record<string, string> = { "1": "Bot 1", "2": "Bot 2", "3": "Bot 3", "4": "Bot 4", "5": "Bot 5", research: "Research" };
@@ -49,7 +50,8 @@ export function PnlDashboard() {
   const [pickedDay, setPickedDay] = useState<string | null>(null);
 
   useEffect(() => {
-    setF(loadFilters());
+    // P&L basis follows the switch every backtest screen shares (pnlBasis.backtestBasis).
+    setF({ ...loadFilters(), basis: backtestBasis() });
     setReady(true);
     smaApi
       .pnlDashOptions()
@@ -65,7 +67,11 @@ export function PnlDashboard() {
     }
   }, [f, ready]);
 
-  const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setF((cur) => ({ ...cur, [k]: v }));
+  const set = <K extends keyof Filters>(k: K, v: Filters[K]) => {
+    if (k === "basis") setBacktestBasis(v as "gross" | "net");
+    setF((cur) => ({ ...cur, [k]: v }));
+  };
+  useEffect(() => onBacktestBasis((basis) => setF((cur) => (cur.basis === basis ? cur : { ...cur, basis }))), []);
 
   const load = useCallback(async () => {
     setBusy(true);

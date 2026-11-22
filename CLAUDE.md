@@ -2267,6 +2267,12 @@ spinning top), body and range) / Matched / Call columns
   trades added up, the terminal's first P&L card "Gross profit / loss", `PnlMetricsRow`), `/api/bots` `gross_today`,
   chart markers `gross_pnl`). Charges stay recorded and shown on their own; the
   daily loss limit, stored `net_pnl` and Telegram alerts still use the net.
+  **Backtest results switch** (`pnlBasis.backtestBasis` / `setBacktestBasis`, `sma.backtest.basis` per browser, default
+  before charges; `components/ui/BacktestBasisSwitch.tsx`): one "Before charges / After charges" switch on the Backtests
+  tab's top line turns every backtest result to that basis: the runs list and run detail (`smaApi.replayRuns` / `replayRun`
+  → `runOnBasis`, refetched on a change), days, stocks, day high / low (`DaySwing` `_net` fields), the run PDF
+  (`tradesOnBasis`, trades keep the server's figure in `net_after`; `downloadBacktestPdf({ basis })`), the Compare page and
+  the P&L dashboard (both read and set the same switch). Live screens stay before charges.
 - `backend/all_bots_guard.py` – all-bots day target / stop loss (off by default: `all_bots_target` /
   `all_bots_stop` ₹ on `BotConfig` row 1, 0 = off; `GET/PUT /api/bots/guard`, Settings → "All bots: day target and
   stop loss", `components/Settings/AllBotsGuard.tsx`). While NSE is open the watcher (`run`, started in `boot_engine`,

@@ -677,6 +677,8 @@ export const FEATURES: Feature[] = [
     purpose: "Shows how high and how low the day's P&L went (closed plus open trades, before charges), at what time, and whether the high or the low came first, so you can see what the day offered before it ended where it did."},
   { id: "profit-safety-net", area: "settings", added: "2026-11-22", pr: 507, href: "/settings/#all-bots-profit-net", where: "Settings → Bots → All bots: loss quit and profit safety net", title: "All bots: profit safety net (trailing day profit lock)",
     purpose: "Quit every bot at a set day loss (e.g. -₹4,000), and once the day's live profit (closed + open) reaches a level (e.g. +₹5,000), keep a share of the best profit (70 %, 75 % from +₹10,000): if the profit falls back to that safety net every bot closes and stops for the day. Backtests use it too."},
+  { id: "bt-charges-switch", area: "terminal", added: "2026-11-22", pr: 509, href: TERM, where: "Terminal → Blotter → Backtests (top line), the Compare page and the P&L dashboard", title: "Backtest results before or after charges, one click",
+    purpose: "One Before charges / After charges switch for every backtest result: the runs list, each run's days, stocks, day high / low, the run PDF, the Compare page and the P&L dashboard all follow it (kept per browser)."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */

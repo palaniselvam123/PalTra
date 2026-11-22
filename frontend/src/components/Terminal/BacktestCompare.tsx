@@ -29,6 +29,7 @@ import { ThemeToggle } from "./Header";
 import { SortTh, useSort } from "./sortable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { Badge, pnlTone } from "./ui";
+import { backtestBasis, onBacktestBasis, setBacktestBasis } from "@/lib/pnlBasis";
 
 type Basis = "gross" | "net";
 type Run = Compare["runs"][number];
@@ -201,7 +202,9 @@ export function BacktestCompare() {
     setIds(Array.from(new Set(list)));
     const b = Number(q.get("base"));
     if (Number.isInteger(b) && b !== 0) setBase(b);
-    if (q.get("basis") === "net") setBasis("net");
+    // The page link's basis, else the switch every backtest screen shares (pnlBasis.backtestBasis).
+    setBasis(q.get("basis") === "net" ? "net" : q.get("basis") === "gross" ? "gross" : backtestBasis());
+    return onBacktestBasis(setBasis);
   }, []);
 
   useEffect(() => {
@@ -309,7 +312,10 @@ export function BacktestCompare() {
                 key={b}
                 type="button"
                 aria-pressed={basis === b}
-                onClick={() => setBasis(b)}
+                onClick={() => {
+                  setBasis(b);
+                  setBacktestBasis(b);
+                }}
                 className={clsx("min-h-9 px-2.5", basis === b ? "bg-white/10 font-semibold text-slate-100" : "text-slate-400 hover:bg-white/5")}
               >
                 {b === "gross" ? "Before charges" : "After charges"}
