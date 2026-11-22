@@ -679,6 +679,8 @@ export const FEATURES: Feature[] = [
     purpose: "Quit every bot at a set day loss (e.g. -₹4,000), and once the day's live profit (closed + open) reaches a level (e.g. +₹5,000), keep a share of the best profit (70 %, 75 % from +₹10,000): if the profit falls back to that safety net every bot closes and stops for the day. Backtests use it too."},
   { id: "bt-charges-switch", area: "terminal", added: "2026-11-22", pr: 509, href: TERM, where: "Terminal → Blotter → Backtests (top line), the Compare page and the P&L dashboard", title: "Backtest results before or after charges, one click",
     purpose: "One Before charges / After charges switch for every backtest result: the runs list, each run's days, stocks, day high / low, the run PDF, the Compare page and the P&L dashboard all follow it (kept per browser)."},
+  { id: "all-bots-capital-pct", area: "settings", added: "2026-11-22", pr: 510, href: "/settings/#all-bots-guard", where: "Settings → Bots → All bots: day target / stop loss and the profit safety net → Enter the levels as ₹ amount / % of capital", title: "All-bots limits in % of capital",
+    purpose: "Enter the day target, stop loss and both Profit Arm levels as a % of the practice wallet's money instead of ₹; each box shows the other unit beside it (₹ ↔ %). The ₹ setup stays as it was. The Backtests runs list shows each run's Capital (most wallet money blocked at once) and its P&L in % in place of Max DD."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */

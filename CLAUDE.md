@@ -2298,6 +2298,14 @@ spinning top), body and range) / Matched / Call columns
   same panic (`kind` "trail", "profit safety net hit"). Backtests keep each replayed day's best on the engine
   (`_day_peak`). `PUT /api/bots/guard` takes `trail*` and `trail_only` (target / square-off left alone); Settings → Bots,
   "All bots: loss quit and profit safety net" (`components/Settings/ProfitSafetyNet.tsx`, its loss box is `all_bots_stop`).
+  **In % of capital** (`all_bots_unit` `RS` default | `PCT`; `all_bots_target_pct`, `all_bots_stop_pct`,
+  `all_bots_trail_start_pct`, `all_bots_trail_start2_pct`; row 1, `COPY_SKIP`): with `PCT` the target, stop and both Profit
+  Arm levels are that % of the practice wallet's money loaded (`all_bots_guard.capital`, `PaperWallet.funds`; none = off),
+  live and in backtests (`level`, `limits(cfg, cap)`, `trail_rule(cfg, cap)`); the ₹ fields are kept. `GET /api/bots/guard`
+  carries `capital`, `unit`, the `*_pct` fields and `effective` (the ₹ in force); both cards have a "₹ amount / % of capital"
+  switch and show the other unit under each box (`components/Settings/CapitalLevel.tsx`). The Backtests runs list's
+  last-but-one column is **Capital** (the run's `capital.peak_value` × the wallet's margin %, with its P&L in %) in place of
+  Max DD (still in its tooltip).
 - `backend/pnl_alerts.py` – all-bots P&L alerts (off by default; alerts only, never trades): `pnl_alert_profit` /
   `pnl_alert_loss` ₹ on `BotConfig` row 1 (0 = off), `pnl_alert_telegram` / `pnl_alert_call` (both on by default) and
   `pnl_alert_basis` (`GROSS` before charges, as the screens; `NET` after). While NSE is open `run` (started in

@@ -612,6 +612,13 @@ class BotConfig(Base):
     all_bots_trail_keep: Mapped[float | None] = mapped_column(Float, nullable=True, default=70.0)
     all_bots_trail_start2: Mapped[float | None] = mapped_column(Float, nullable=True, default=10000.0)
     all_bots_trail_keep2: Mapped[float | None] = mapped_column(Float, nullable=True, default=75.0)
+    # Enter the all-bots levels as % of the practice wallet's money (all_bots_guard.capital) instead of ₹:
+    # `all_bots_unit` "RS" (default, the ₹ fields above) | "PCT" (the *_pct fields below; the keep % stay as they are).
+    all_bots_unit: Mapped[str | None] = mapped_column(String(3), nullable=True, default="RS")
+    all_bots_target_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    all_bots_stop_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    all_bots_trail_start_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    all_bots_trail_start2_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     # All-bots P&L alerts (pnl_alerts.py), read from row 1 only: ₹ levels (0 = off), how, which P&L.
     pnl_alert_profit: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     pnl_alert_loss: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)

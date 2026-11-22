@@ -2010,6 +2010,16 @@ export interface AllBotsGuard {
   trail_start2: number;
   trail_keep2: number;
   /** Today's best combined P&L so far, and the safety net it gives (null until the best reaches the start). */
+  /** The practice wallet's money loaded (₹, 0 = none): the capital the % levels are read from. */
+  capital: number;
+  /** "RS" = the ₹ fields are in force, "PCT" = the *_pct fields as % of capital. */
+  unit: "RS" | "PCT";
+  target_pct: number;
+  stop_pct: number;
+  trail_start_pct: number;
+  trail_start2_pct: number;
+  /** The levels in force now, in ₹. */
+  effective: { target: number; stop: number; trail_start: number; trail_start2: number };
   peak: number;
   floor: number | null;
   total: number;
@@ -3494,9 +3504,20 @@ export const smaApi = {
       }),
     }),
   testPnlAlerts: () => request<Record<string, string>>("/api/bots/pnl-alerts/test", { method: "POST" }),
-  saveAllBotsGuard: (target: number, stop: number, squareoff: string) =>
-    request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ target, stop, squareoff }) }),
-  saveProfitNet: (body: { stop: number; trail: boolean; trail_start: number; trail_keep: number; trail_start2: number; trail_keep2: number }) =>
+  saveAllBotsGuard: (target: number, stop: number, squareoff: string, pct?: { unit: "RS" | "PCT"; target_pct: number; stop_pct: number }) =>
+    request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ target, stop, squareoff, ...(pct ?? {}) }) }),
+  saveProfitNet: (body: {
+    stop: number;
+    trail: boolean;
+    trail_start: number;
+    trail_keep: number;
+    trail_start2: number;
+    trail_keep2: number;
+    unit?: "RS" | "PCT";
+    stop_pct?: number;
+    trail_start_pct?: number;
+    trail_start2_pct?: number;
+  }) =>
     request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ ...body, target: 0, trail_only: true }) }),
   killAllBots: () => request<{ bot: number; bot_status: string }[]>("/api/bots/kill-all", { method: "POST" }),
   setMode: (mode: "PAPER" | "LIVE", confirmLive = false) =>

@@ -315,3 +315,36 @@ async def test_a_backtest_stops_at_the_profit_safety_net(db):  # noqa: F811
                                   all_bots_trail_start2=0.0)
     assert eng.status == "HALTED" and "safety net" in eng.halt_reason
     assert len(rows) < len(plain)
+
+
+def test_levels_in_percent_of_capital():
+    cfg = type("C", (), {"all_bots_unit": "PCT", "all_bots_target": 9999, "all_bots_stop": 9999,
+                         "all_bots_target_pct": 2.0, "all_bots_stop_pct": 0.8, "all_bots_trail": True,
+                         "all_bots_trail_start_pct": 1.0, "all_bots_trail_keep": 70,
+                         "all_bots_trail_start2_pct": 2.0, "all_bots_trail_keep2": 75})()
+    assert guard.limits(cfg, 500_000) == (10_000, 4_000)
+    assert guard.trail_rule(cfg, 500_000) == (5_000, 70, 10_000, 75)
+    assert guard.limits(cfg, 0) == (0, 0) and guard.trail_rule(cfg, 0) is None  # no money loaded: off
+    cfg.all_bots_unit = "RS"
+    assert guard.limits(cfg, 500_000) == (9999, 9999)
+
+
+def test_api_saves_percent_levels(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/pct.db")
+    monkeypatch.setenv("OPEN_PNL_FILE", str(tmp_path / "pnl.db"))
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    import paper_wallet
+    from fastapi.testclient import TestClient
+    from main import app
+
+    paper_wallet.add(500_000)
+    with TestClient(app) as client:
+        got = client.put("/api/bots/guard", json={"target": 0, "stop": 0, "unit": "PCT", "target_pct": 2,
+                                                  "stop_pct": 0.8}).json()
+        assert got["unit"] == "PCT" and got["capital"] == 500_000
+        assert (got["effective"]["target"], got["effective"]["stop"]) == (10_000, 4_000)
+        assert got["effective"]["stop"] == 4_000 and got["stop_pct"] == 0.8
+    database.reset_engine()

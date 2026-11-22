@@ -1448,6 +1448,7 @@ COPY_SKIP = frozenset({
     "second_ticks", "trade_count_reset_id", "trade_count_reset_date", "max_trades_bumped",
     "all_bots_target", "all_bots_stop", "all_bots_squareoff",
     "all_bots_trail", "all_bots_trail_start", "all_bots_trail_keep", "all_bots_trail_start2", "all_bots_trail_keep2",
+    "all_bots_unit", "all_bots_target_pct", "all_bots_stop_pct", "all_bots_trail_start_pct", "all_bots_trail_start2_pct",
     "pnl_alert_profit", "pnl_alert_loss", "pnl_alert_telegram", "pnl_alert_call", "pnl_alert_basis",
     "news_entry_bot", "news_entry_impact", "news_entry_scope", "news_entry_max_age_min", "news_entry_max_day",
     "auto_start",
@@ -6276,17 +6277,24 @@ class AllBotsGuard(BaseModel):
     trail_keep2: float | None = Field(default=None, ge=1, le=99)
     # Save only the safety net (its own card): target / stop / square-off left as they are.
     trail_only: bool = False
+    # Levels as % of the wallet's money (all_bots_guard.in_pct): "RS" / "PCT", and the % fields. Left out = unchanged.
+    unit: Literal["RS", "PCT"] | None = None
+    target_pct: float | None = Field(default=None, ge=0, le=1000)
+    stop_pct: float | None = Field(default=None, ge=0, le=1000)
+    trail_start_pct: float | None = Field(default=None, ge=0, le=1000)
+    trail_start2_pct: float | None = Field(default=None, ge=0, le=1000)
 
 
 async def _guard_view() -> dict:
     bots = _all_bots()
     cfg = engine.load_config()
-    target, stop = all_bots_guard.limits(cfg)
+    cap = await asyncio.to_thread(all_bots_guard.capital)
+    target, stop = all_bots_guard.limits(cfg, cap)
     at = all_bots_guard.squareoff_at(cfg)
     closed = await asyncio.to_thread(all_bots_guard.closed_total, bots)
     amount = round(closed + all_bots_guard.open_total(bots), 2)
     halted = [eng.bot_id for eng in bots if all_bots_guard.is_guard_halt(eng)]
-    rule = all_bots_guard.trail_rule(cfg)
+    rule = all_bots_guard.trail_rule(cfg, cap)
     now = engine._now()
     peak = all_bots_guard.peak_today(now.date())
     if peak is None:
@@ -6294,14 +6302,28 @@ async def _guard_view() -> dict:
     best = max(peak if peak is not None else amount, amount)
     floor = all_bots_guard.trail_floor(best, rule)
     return {
-        "target": target,
-        "stop": stop,
+        # The ₹ fields as saved (the levels in force are under "effective": ₹ or % of capital).
+        "target": all_bots_guard._amount(getattr(cfg, "all_bots_target", 0)),  # noqa: SLF001
+        "stop": all_bots_guard._amount(getattr(cfg, "all_bots_stop", 0)),  # noqa: SLF001
         "squareoff": at.strftime("%H:%M") if at else "",
         "trail": bool(getattr(cfg, "all_bots_trail", False)),
         "trail_start": float(getattr(cfg, "all_bots_trail_start", None) or 5000.0),
         "trail_keep": float(getattr(cfg, "all_bots_trail_keep", None) or 70.0),
         "trail_start2": float(getattr(cfg, "all_bots_trail_start2", None) or 0.0),
         "trail_keep2": float(getattr(cfg, "all_bots_trail_keep2", None) or 75.0),
+        # Capital (the wallet's money loaded) and the levels both ways: the ₹ each one is now, the % fields.
+        "capital": round(cap, 2),
+        "unit": "PCT" if all_bots_guard.in_pct(cfg) else "RS",
+        "target_pct": float(getattr(cfg, "all_bots_target_pct", 0) or 0),
+        "stop_pct": float(getattr(cfg, "all_bots_stop_pct", 0) or 0),
+        "trail_start_pct": float(getattr(cfg, "all_bots_trail_start_pct", 0) or 0),
+        "trail_start2_pct": float(getattr(cfg, "all_bots_trail_start2_pct", 0) or 0),
+        "effective": {
+            "target": target,
+            "stop": stop,
+            "trail_start": rule[0] if rule else all_bots_guard.level(cfg, "all_bots_trail_start", cap),
+            "trail_start2": rule[2] if rule else all_bots_guard.level(cfg, "all_bots_trail_start2", cap),
+        },
         "peak": round(best, 2),
         "floor": floor,
         "total": amount,
@@ -6333,6 +6355,14 @@ async def all_bots_guard_put(body: AllBotsGuard):
             value = getattr(body, field)
             if value is not None:
                 setattr(row, f"all_bots_{field}", float(value))
+        if body.unit is not None:
+            row.all_bots_unit = body.unit
+        for field in ("target_pct", "stop_pct", "trail_start_pct", "trail_start2_pct"):
+            value = getattr(body, field)
+            if value is not None:
+                setattr(row, f"all_bots_{field}", float(value))
+        if (body.trail_start2_pct or 0) and body.trail_start_pct is not None and body.trail_start2_pct <= body.trail_start_pct:
+            raise HTTPException(422, "The second step must start above the first (or 0 for none).")
         if (body.trail_start2 or 0) and body.trail_start is not None and body.trail_start2 <= body.trail_start:
             raise HTTPException(422, "The second step must start above the first (or 0 for none).")
         if body.squareoff is not None and not body.trail_only:

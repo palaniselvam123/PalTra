@@ -717,6 +717,15 @@ export function bot5Rows(settings: Settings): [string, string][] {
 export function BacktestRuns() {
   // Before / after charges for every figure here (BacktestBasisSwitch); a change reloads the runs on that basis.
   const basis = useBacktestBasis();
+  // The practice wallet's margin share (20 % = 5x): a run's capital = the most money it had in open trades × that.
+  const [marginPct, setMarginPct] = useState(20);
+  useEffect(() => {
+    smaApi
+      .wallet()
+      .then((w) => setMarginPct(w?.margin_pct || 20))
+      .catch(() => undefined);
+  }, []);
+  const capitalOf = (run: ReplayRun) => ((run.capital?.peak_value ?? 0) * marginPct) / 100;
   const [runs, setRuns] = useState<ReplayRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -865,7 +874,7 @@ export function BacktestRuns() {
                   ? r.totals.loss
                   : k === "net"
                     ? r.totals.net
-                    : r.totals.max_drawdown
+                    : capitalOf(r)
   );
 
   const remove = (run: ReplayRun) => {
@@ -986,7 +995,17 @@ export function BacktestRuns() {
                   profit: <SortTh label="Profit" k="profit" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("profit")} />,
                   loss: <SortTh label="Loss" k="loss" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("loss")} />,
                   net: <SortTh label="P&L" k="net" num title={`Profit + loss, ${basisWords(basis)}`} sort={runSort} onSort={onRunSort} drag={runCols.dragProps("net")} />,
-                  dd: <SortTh label="Max DD" k="dd" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("dd")} />,
+                  dd: (
+                    <SortTh
+                      label="Capital"
+                      k="dd"
+                      num
+                      title={`Wallet money the run used: the most it had blocked at one moment (open trades' value × ${marginPct} % margin), with its P&L as % of it`}
+                      sort={runSort}
+                      onSort={onRunSort}
+                      drag={runCols.dragProps("dd")}
+                    />
+                  ),
                   actions: <th {...runCols.dragProps("actions")} className={clsx("px-2 py-2", runCols.dragProps("actions").className)} />,
                 })}
               </tr>
@@ -1068,7 +1087,18 @@ loss: <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{si
 net: <td className={clsx("px-2 py-2 text-right align-top font-mono font-semibold", pnlTone(t.net))}>
                         {signed(t.net)}
                       </td>,
-dd: <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.max_drawdown)}</td>,
+dd: (() => {
+                        const cap = capitalOf(run);
+                        return (
+                          <td
+                            className="px-2 py-2 text-right align-top font-mono"
+                            title={`Most in open trades at once: ${inr(run.capital?.peak_value ?? 0)} of shares (${run.capital?.peak_positions ?? 0} positions) × ${marginPct} % margin = ${inr(cap)}. Max drawdown ${signed(t.max_drawdown)}${cap > 0 ? ` (${((t.max_drawdown / cap) * 100).toFixed(1)} %)` : ""}.`}
+                          >
+                            <div className="text-slate-200">{cap > 0 ? inr(cap) : "—"}</div>
+                            {cap > 0 ? <div className={clsx("text-[11px]", pnlTone(t.net))}>{`${t.net >= 0 ? "+" : ""}${((t.net / cap) * 100).toFixed(1)} %`}</div> : null}
+                          </td>
+                        );
+                      })(),
 actions: <td className="px-2 py-2 text-right align-top">
                         {(run.status === "INTERRUPTED" || run.status === "STOPPED") &&
                         run.days_done < run.days_total &&
