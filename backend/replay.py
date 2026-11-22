@@ -403,12 +403,17 @@ class ReplayEngine(StrategyEngine):
                 return
             target, stop = all_bots_guard.limits(row)
             at = all_bots_guard.squareoff_at(row)
-        if not (target or stop or at):
+            rule = all_bots_guard.trail_rule(row)
+        if not (target or stop or at or rule):
             return
         amount = all_bots_guard.total([self])
-        kind = all_bots_guard.verdict(amount, target, stop, now, at)
+        # The profit safety net follows this replayed day's own best P&L (a fresh engine each day).
+        prev = getattr(self, "_day_peak", None)
+        self._day_peak = amount if prev is None else max(prev, amount)
+        floor = all_bots_guard.trail_floor(self._day_peak, rule)
+        kind = all_bots_guard.verdict(amount, target, stop, now, at, floor)
         if kind:
-            await all_bots_guard.trip([self], kind, amount, target, stop, at)
+            await all_bots_guard.trip([self], kind, amount, target, stop, at, floor, self._day_peak)
 
     async def _fast_replay(self, now: dt.datetime) -> None:
         """The fast-mover hand-off on a replayed day (fast_bot.py): a held stock moving fast its way is cut

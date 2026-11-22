@@ -2003,8 +2003,17 @@ export interface AllBotsGuard {
   stop: number;
   /** "HH:MM" IST square-off time for every bot, "" = off. */
   squareoff: string;
+  /** Profit safety net (all_bots_guard.trail_rule): on, start ₹ / keep %, second step ₹ (0 = none) / keep %. */
+  trail: boolean;
+  trail_start: number;
+  trail_keep: number;
+  trail_start2: number;
+  trail_keep2: number;
+  /** Today's best combined P&L so far, and the safety net it gives (null until the best reaches the start). */
+  peak: number;
+  floor: number | null;
   total: number;
-  hit: "target" | "stop" | null;
+  hit: "target" | "stop" | "time" | "trail" | null;
   halted_bots: number[];
   reason: string;
 }
@@ -3485,6 +3494,8 @@ export const smaApi = {
   testPnlAlerts: () => request<Record<string, string>>("/api/bots/pnl-alerts/test", { method: "POST" }),
   saveAllBotsGuard: (target: number, stop: number, squareoff: string) =>
     request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ target, stop, squareoff }) }),
+  saveProfitNet: (body: { stop: number; trail: boolean; trail_start: number; trail_keep: number; trail_start2: number; trail_keep2: number }) =>
+    request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ ...body, target: 0, trail_only: true }) }),
   killAllBots: () => request<{ bot: number; bot_status: string }[]>("/api/bots/kill-all", { method: "POST" }),
   setMode: (mode: "PAPER" | "LIVE", confirmLive = false) =>
     request<{ trading_mode: string }>("/api/mode", {

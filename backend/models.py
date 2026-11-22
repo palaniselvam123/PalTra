@@ -604,6 +604,14 @@ class BotConfig(Base):
     all_bots_target: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     all_bots_stop: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     all_bots_squareoff: Mapped[str | None] = mapped_column(String(5), nullable=True, default="")
+    # All-bots profit safety net (all_bots_guard.trail_floor), row 1 only: once today's combined P&L has reached
+    # `all_bots_trail_start` ₹, close every bot when it falls back to `all_bots_trail_keep` % of the day's best;
+    # from `all_bots_trail_start2` ₹ (0 = no second step) keep `all_bots_trail_keep2` % instead. Off by default.
+    all_bots_trail: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    all_bots_trail_start: Mapped[float | None] = mapped_column(Float, nullable=True, default=5000.0)
+    all_bots_trail_keep: Mapped[float | None] = mapped_column(Float, nullable=True, default=70.0)
+    all_bots_trail_start2: Mapped[float | None] = mapped_column(Float, nullable=True, default=10000.0)
+    all_bots_trail_keep2: Mapped[float | None] = mapped_column(Float, nullable=True, default=75.0)
     # All-bots P&L alerts (pnl_alerts.py), read from row 1 only: ₹ levels (0 = off), how, which P&L.
     pnl_alert_profit: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     pnl_alert_loss: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
