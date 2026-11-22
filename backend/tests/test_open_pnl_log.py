@@ -201,3 +201,26 @@ def test_by_stock_adds_closed_trades_and_open_pnl():
     assert [p["total"] for p in out["SBIN"]] == [120.0, -30.0, -40.0]
     assert [p["closed"] for p in out["INFY"]] == [200.0, 200.0, 200.0]
     assert [p["open"] for p in out["TCS"]] == [0.0, 0.0, 15.0] and out["TCS"][2]["side"] == "SHORT"
+
+
+def test_replay_swings_give_each_days_high_low_and_which_came_first(tmp_path, monkeypatch):
+    import datetime as dt
+
+    import open_pnl_log
+    from groww_client import IST
+
+    monkeypatch.setenv("OPEN_PNL_FILE", str(tmp_path / "pnl.db"))
+    day = dt.datetime(2026, 11, 20, 9, 15, tzinfo=IST)
+    open_ = [0, 300, 900, 200, -400, -100]          # high 900 @09:17, then low -400 @09:19
+    closed = [0, 0, 0, 0, 0, 50]
+    rows = [(day + dt.timedelta(minutes=i), {"gross": o, "net": o - 10, "held": 1, "stocks": [],
+                                             "closed_gross": c, "closed_net": c})
+            for i, (o, c) in enumerate(zip(open_, closed))]
+    rows.append((day + dt.timedelta(days=1), {"gross": -50, "net": -60, "held": 1, "stocks": []}))
+    assert open_pnl_log.save_replay(7, 1, rows) == 7
+    s = open_pnl_log.replay_swings(7)
+    d = s["2026-11-20"]
+    assert (d["high"], d["high_at"], d["low"], d["low_at"], d["first"]) == (900, "09:17", -400, "09:19", "HIGH")
+    assert (d["last"], d["last_at"]) == (-50, "09:20")
+    assert s["2026-11-21"]["first"] == "LOW"
+    assert open_pnl_log.replay_swings(8) == {}

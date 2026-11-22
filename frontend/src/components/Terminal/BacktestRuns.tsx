@@ -6,7 +6,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { readReverse } from "@/components/Terminal/ReverseOwnSettings";
-import { inr, smaApi, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
+import { inr, smaApi, type DaySwing, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { SortTh, useSort } from "./sortable";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import { Badge, Skeleton, pnlTone } from "./ui";
@@ -521,8 +521,33 @@ export function filtersShort(s: Settings): string {
 // Column keys of the three Backtests tables; their order is dragged and kept per browser (columnOrder.tsx).
 type RunColKey = "run" | "days" | "strategy" | "trades" | "win" | "profit" | "loss" | "net" | "dd" | "actions";
 const RUN_COLS: RunColKey[] = ["run", "days", "strategy", "trades", "win", "profit", "loss", "net", "dd", "actions"];
-type DayColKey = "date" | "trades" | "wl" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative";
-const DAY_COLS: DayColKey[] = ["date", "trades", "wl", "profit", "loss", "gross", "charges", "net", "cumulative"];
+type DayColKey = "date" | "trades" | "wl" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative" | "swing";
+const DAY_COLS: DayColKey[] = ["date", "trades", "wl", "profit", "loss", "gross", "charges", "net", "cumulative", "swing"];
+
+/** A day's highest and lowest P&L with times and which came first (display only; before charges like the screens). */
+function SwingText({ s, compact = false }: { s?: DaySwing | null; compact?: boolean }) {
+  if (!s) return <span className="text-slate-500">—</span>;
+  const first = s.first === "HIGH" ? "high first" : s.first === "LOW" ? "low first" : null;
+  return (
+    <span
+      className="whitespace-nowrap font-mono"
+      title={`Day's P&L (closed + open trades, before charges) at each replayed minute. Highest ${signed(s.high)} at ${s.high_at}, lowest ${signed(s.low)} at ${s.low_at}${first ? `; the ${first.replace(" first", "")} came first` : ""}. Ended ${signed(s.last)} at ${s.last_at}.`}
+    >
+      <span className="text-slate-500">{compact ? "Hi " : "High "}</span>
+      <span className={pnlTone(s.high)}>{signed(s.high)}</span>
+      <span className="text-slate-500"> @{s.high_at}</span>
+      <span className="text-slate-600"> · </span>
+      <span className="text-slate-500">{compact ? "Lo " : "Low "}</span>
+      <span className={pnlTone(s.low)}>{signed(s.low)}</span>
+      <span className="text-slate-500"> @{s.low_at}</span>
+      {first ? (
+        <span className={clsx("ml-1.5 rounded px-1 text-[10px] font-sans font-semibold", s.first === "HIGH" ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300")}>
+          {first}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 type StockColKey = "symbol" | "trades" | "wl" | "win" | "profit" | "loss" | "gross" | "charges" | "net" | "dd";
 const STOCK_COLS: StockColKey[] = ["symbol", "trades", "wl", "win", "profit", "loss", "gross", "charges", "net", "dd"];
 
@@ -1311,7 +1336,7 @@ function RunDetailBody({
         </h3>
         <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>P&amp;L {signed(t.net)}</span>
       </div>
-      {scalpPickOf(run.settings) ? <PickList pick={scalpPickOf(run.settings)!} stocks={stocks} /> : null}
+      {scalpPickOf(run.settings) ? <PickList pick={scalpPickOf(run.settings)!} stocks={stocks} swings={run.day_swings} /> : null}
       {run.fast_move ? (
         <p className="mb-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-100">
           <span className="font-semibold">Fast movers → Bot 5:</span> {run.fast_move.cut} trade
@@ -1360,6 +1385,11 @@ function RunDetailBody({
                 charges: <SortTh label="Charges" k="charges" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("charges")} />,
                 net: <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("net")} />,
                 cumulative: <SortTh label="Running total" k="cumulative" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("cumulative")} />,
+                swing: (
+                  <th {...dayCols.dragProps("swing")} className="px-2 py-1.5 text-left font-medium" title="The day's highest and lowest P&L (closed + open, before charges), when, and which came first">
+                    Day high / low <NewTag id="bt-day-swing" />
+                  </th>
+                ),
               })}
             </tr>
           </thead>
@@ -1407,7 +1437,8 @@ loss: <td className="px-2 py-1.5 text-right text-rose-300">{signed(d.loss)}</td>
 gross: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.gross))}>{signed(d.gross)}</td>,
 charges: <td className="px-2 py-1.5 text-right text-amber-300">{inr(d.charges)}</td>,
 net: <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(d.net))}>{signed(d.net)}</td>,
-cumulative: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.cumulative))}>{signed(d.cumulative)}</td>
+cumulative: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.cumulative))}>{signed(d.cumulative)}</td>,
+swing: <td className="px-2 py-1.5 text-xs">{heading ? <span className="text-slate-500">—</span> : <SwingText s={run.day_swings?.[d.date]} compact />}</td>
 })}
 </tr>
                 {isOpen
@@ -1429,7 +1460,8 @@ charges: <td className="px-2 py-1 text-right text-amber-300">{inr(sd.charges)}</
 net: <td className={clsx("px-2 py-1 text-right", pnlTone(sd.net))}>{signed(sd.net)}</td>,
 cumulative: <td className="px-2 py-1 text-right text-slate-500" title="Share of the day's P&L">
                           {d.net !== 0 ? `${Math.round((sd.net / Math.abs(d.net)) * 100)}% of day` : "—"}
-                        </td>
+                        </td>,
+swing: <td className="px-2 py-1" />
 })}
 </tr>
                     ))
@@ -1453,7 +1485,8 @@ loss: <td className="px-2 py-2 text-right text-rose-300">{signed(t.loss)}</td>,
 gross: <td className={clsx("px-2 py-2 text-right", pnlTone(t.gross))}>{signed(t.gross)}</td>,
 charges: <td className="px-2 py-2 text-right text-amber-300">{inr(t.charges)}</td>,
 net: <td className={clsx("px-2 py-2 text-right font-semibold", pnlTone(t.net))}>{signed(t.net)}</td>,
-cumulative: <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t.max_drawdown)}</td>
+cumulative: <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t.max_drawdown)}</td>,
+swing: <td className="px-2 py-2" />
 })}
 </tr>
             </tfoot>
@@ -1628,7 +1661,7 @@ dd: <td className={clsx("px-2 py-1 text-right", pnlTone(d.cumulative))} title="R
 /** A pick run: which stocks each day picked at the pick time, and why. Each kind of pick backtest records its own
  * fields (scalp score / strong-trend score / volume vs usual), so every number is read by kind and a missing one shows
  * as a dash: an older run or another kind's rows must never break the Backtests tab. */
-function PickList({ pick, stocks }: { pick: ScalpPickInfo; stocks: ReplayStockRow[] }) {
+function PickList({ pick, stocks, swings }: { pick: ScalpPickInfo; stocks: ReplayStockRow[]; swings?: Record<string, DaySwing> }) {
   const days = Object.keys(pick.picks ?? {}).sort();
   const kind = pick.kind;
   const [show, setShow] = useState<"all" | "traded" | "won" | "lost" | "idle">("all");
@@ -1744,6 +1777,11 @@ function PickList({ pick, stocks }: { pick: ScalpPickInfo; stocks: ReplayStockRo
                       <span className="text-slate-400">
                         {d.rows.length} armed · {d.traded} traded · {d.won} won · {d.lost} lost
                       </span>
+                      {swings?.[d.date] ? (
+                        <span className="text-[11px]">
+                          <SwingText s={swings[d.date]} />
+                        </span>
+                      ) : null}
                       <span className={clsx("ml-auto font-mono font-semibold", pnlTone(d.pnl))}>{signed(d.pnl)}</span>
                     </>
                   )}
