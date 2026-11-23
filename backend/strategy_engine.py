@@ -446,6 +446,7 @@ SNAPSHOT_FIELDS = (
     "turn_gap_on", "turn_gap_long_min", "turn_gap_long_max", "turn_gap_short_min", "turn_gap_short_max",
     "day_target", "day_target_min_pct", "day_target_early_pct",
     "target_net", "target_net_keep", "target_net_keep2", "target_net_at2",
+    "target_net_start", "target_net_start_pct", "target_net_start_rs", "target_net_start_atr",
     "live_sma_check", "live_sma_min_gap",
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
@@ -2124,6 +2125,7 @@ class StrategyEngine:
         await self._watch_gap_fade(symbol_cfg)
         await self._watch_pivot_target(symbol_cfg)
         await self._watch_day_target(symbol_cfg)
+        await self._watch_profit_net(symbol_cfg)
         await self._watch_pressure_fade(symbol_cfg)
         await self._watch_trend_exit(symbol_cfg)
         self._record_trend((symbol_cfg.symbol or self._focus or "").upper(), symbol_cfg, symbol_cfg)
@@ -6152,6 +6154,22 @@ class StrategyEngine:
             return
         self._signals[symbol] = f"{symbol} day target — {goal[0]} {goal[1]:.2f} reached"
         await self._exit_now(cfg, self.ltp, day_target.EXIT_REASON)
+
+    async def _watch_profit_net(self, cfg: BotConfig) -> None:
+        """Every price: the safety net started by a profit on any trade (target_net_start PCT / RS / ATR)."""
+        pos = self.position
+        if pos is None or not target_net.on(cfg) or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other exits).
+            return
+        found = target_net.start_level(
+            pos.direction, float(pos.entry_price), int(pos.qty or 0), _finite(pos.atr_at_entry), cfg
+        )
+        if found is None:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        await self._target_net(cfg, pos, symbol, found[0], found[1])
 
     async def _target_net(self, cfg: BotConfig, pos: OpenPosition, symbol: str, name: str, target: float) -> None:
         """Safety net after a target (target_net.py): once the best price reached `target`, keep the set % of the best

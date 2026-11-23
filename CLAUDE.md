@@ -311,7 +311,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   profit safety net, per trade). With it on the pivot target and the day high / low target no longer close: once the best
   price since the entry (`pos.high` / `low`) reaches the target, `StrategyEngine._target_net` keeps that % of the best profit
   per share (`floor`, stateless, so a restart finds the same net), closes at it (`TARGET_NET` via `_exit_now`, LIVE stop
-  cancelled first) and, with the stop on, moves the stop up to it (`_move_stop`, tighter only; a hit there shows as the stop).
+  cancelled first) and, with the stop on, moves the stop up to it (`_move_stop`, tighter only; a hit there shows as the stop). **Start on every trade** (`target_net_start` `TARGET` default | `PCT` | `RS` | `ATR`; `target_net_start_pct` 0.25 % of
+  the entry, `target_net_start_rs` ₹500 for the trade's qty, `target_net_start_atr` 1.0 × `pos.atr_at_entry`; owner's request:
+  the net only worked at the pivot / day targets): `target_net.start_level` gives the start price and
+  `StrategyEngine._watch_profit_net` (held-stock loop, after `_watch_day_target`) runs the same `_target_net` with it on any
+  trade, no target needed (the start distance is the "target distance" for the second step); the pivot / day targets keep
+  their own net, whichever floor is hit first closes. Counts as an exit for `strategyChecks.noExitOn`.
 - `backend/order_gate.py` – **Simple order-flow check** (owner's request: the waiting / executed settings were hard to set
   up together; a separate plain card, the old settings untouched; `og_entry_exec` / `og_entry_exec_pct` 60, `og_entry_wait` /
   `og_entry_wait_pct` 60, `og_exit_exec` / `og_exit_exec_pct` 45, `og_exit_wait` / `og_exit_wait_pct` 45, all off, % 1-99;

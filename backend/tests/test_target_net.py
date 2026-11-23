@@ -86,4 +86,40 @@ def test_api_saves_the_net(tmp_path, monkeypatch):
         ok = client.put("/api/bots/2/config", json={"target_net": True, "target_net_keep": 60, "target_net_keep2": 80}).json()
         assert ok["target_net"] is True and ok["target_net_keep"] == 60 and ok["target_net_keep2"] == 80
         assert client.put("/api/bots/2/config", json={"target_net_keep": 100}).status_code == 422
+        ok = client.put("/api/bots/2/config", json={"target_net_start": "RS", "target_net_start_rs": 500}).json()
+        assert ok["target_net_start"] == "RS" and ok["target_net_start_rs"] == 500 and ok["target_net_start_pct"] == 0.25
+        assert client.put("/api/bots/2/config", json={"target_net_start": "X"}).status_code == 422
     database.reset_engine()
+
+
+def test_start_level_on_any_trade():
+    rs = SimpleNamespace(target_net=True, target_net_start="RS", target_net_start_rs=500)
+    assert target_net.start_level("SHORT", 2715.3, 100, None, rs) == ("₹500 profit", pytest.approx(2710.3))
+    pct = SimpleNamespace(target_net=True, target_net_start="PCT", target_net_start_pct=0.25)
+    assert target_net.start_level("LONG", 1000.0, 10, None, pct)[1] == pytest.approx(1002.5)
+    atr = SimpleNamespace(target_net=True, target_net_start="ATR", target_net_start_atr=1.5)
+    assert target_net.start_level("LONG", 100.0, 10, 2.0, atr)[1] == pytest.approx(103.0)
+    assert target_net.start_level("LONG", 100.0, 10, None, atr) is None  # no ATR formed
+    assert target_net.start_level("LONG", 100.0, 10, 2.0, ON) is None  # TARGET: pivot / day only
+    assert target_net.start(SimpleNamespace(target_net_start="junk")) == "TARGET"
+
+
+@pytest.mark.asyncio
+async def test_profit_start_runs_the_net_without_any_target():
+    eng, calls = _engine("LONG", 100.0)
+    pos = eng.positions["SHREECEM"]
+    pos.stop_active = False
+    pos.qty = 100
+    cfg = SimpleNamespace(target_net=True, target_net_start="RS", target_net_start_rs=200, symbol="SHREECEM")
+    eng.ltp = 101.9
+    pos.high = 101.9
+    await eng._watch_profit_net(cfg)
+    assert calls == [] and "safety net" not in eng._signals.get("SHREECEM", "")
+    for price in (102.0, 104.0):  # start 102 (₹200 / 100 shares)
+        eng.ltp = price
+        pos.high = max(pos.high, price)
+        await eng._watch_profit_net(cfg)
+    assert calls == [] and "safety net at 103.00" in eng._signals["SHREECEM"]  # 4 >= 2 x 2: 75% of 4
+    eng.ltp = 102.9
+    await eng._watch_profit_net(cfg)
+    assert calls == [(102.9, target_net.EXIT_REASON)]

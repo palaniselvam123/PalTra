@@ -882,6 +882,10 @@ class ConfigUpdate(BaseModel):
     target_net_keep: float | None = Field(default=None, ge=1, le=99)
     target_net_keep2: float | None = Field(default=None, ge=1, le=99)
     target_net_at2: float | None = Field(default=None, ge=0, le=target_net_mod.MAX_AT2)
+    target_net_start: Literal["TARGET", "PCT", "RS", "ATR"] | None = None
+    target_net_start_pct: float | None = Field(default=None, ge=0.01, le=20)
+    target_net_start_rs: float | None = Field(default=None, ge=1, le=10_000_000)
+    target_net_start_atr: float | None = Field(default=None, ge=0.05, le=20)
     day_extreme_guard: bool | None = None
     day_extreme_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
     day_extreme_pull_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
@@ -2053,6 +2057,10 @@ def _gap_dict(row) -> dict:
         "target_net_keep": target_net_mod.keep(row),
         "target_net_keep2": target_net_mod.keep2(row),
         "target_net_at2": target_net_mod.at2(row),
+        "target_net_start": target_net_mod.start(row),
+        "target_net_start_pct": target_net_mod.start_pct(row),
+        "target_net_start_rs": target_net_mod.start_rs(row),
+        "target_net_start_atr": target_net_mod.start_atr(row),
         "day_extreme_guard": day_extreme_mod.on(row),
         "day_extreme_pct": day_extreme_mod.near_pct(row),
         "day_extreme_pull_pct": day_extreme_mod.pull_pct(row),
