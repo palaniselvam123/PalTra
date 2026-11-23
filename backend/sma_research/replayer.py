@@ -45,6 +45,7 @@ BASELINE_OFF = {
     "candle_minutes": 1,
     "exit_candle_minutes": 0,
     "small_exit_minutes": "",
+    "small_exit_upper": "",
     "slope_minutes": 0,
     "review_on": False,
     "counter_exit_count": 0,

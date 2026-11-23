@@ -1003,6 +1003,10 @@ class ConfigUpdate(BaseModel):
     small_exit_counter: int | None = Field(default=None, ge=0, le=small_candles.MAX_COUNTER)
     small_exit_loss_pct: float | None = Field(default=None, ge=0, le=50)
     small_exit_agree: int | None = Field(default=None, ge=1, le=small_candles.MAX_AGREE)
+    small_exit_when: Literal["ALWAYS", "TROUBLE"] | None = None
+    small_exit_giveback: float | None = Field(default=None, ge=1, le=100)
+    small_exit_upper: str | None = Field(default=None, max_length=32)
+    small_exit_upper_must: bool | None = None
     # Smaller-candle colours (small_colour.py): sizes (CSV, "" = off), N in a row, how sizes combine, and the two uses.
     sc_minutes: str | None = Field(default=None, max_length=32)
     sc_count: int | None = Field(default=None, ge=1, le=small_colour.MAX_COUNT)
@@ -1606,6 +1610,8 @@ def _import_desk(desk: str, data: dict, body: SettingsImport, dry: bool = False)
         checked["review_check_minutes"] = _as_check_minutes_csv(checked["review_check_minutes"])
     if "small_exit_minutes" in checked:
         checked["small_exit_minutes"] = small_candles.clean_sizes(checked["small_exit_minutes"])
+    if "small_exit_upper" in checked:
+        checked["small_exit_upper"] = small_candles.clean_upper(checked["small_exit_upper"])
     notes: list[str] = []
     with session_factory()() as db:
         row = db.get(BotConfig, eng.config_id)
@@ -1639,6 +1645,8 @@ def _import_desk(desk: str, data: dict, body: SettingsImport, dry: bool = False)
                         values["review_check_minutes"] = _as_check_minutes_csv(probe["review_check_minutes"])
                     if "small_exit_minutes" in values:
                         values["small_exit_minutes"] = small_candles.clean_sizes(values["small_exit_minutes"])
+                    if "small_exit_upper" in values:
+                        values["small_exit_upper"] = small_candles.clean_upper(values["small_exit_upper"])
                 except (ValidationError, ValueError, TypeError) as exc:
                     if not isinstance(exc, ValidationError):
                         raise HTTPException(400, f"{_desk_label(desk)}: {symbol} has a setting that is not valid") from exc
@@ -1767,6 +1775,8 @@ async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
             data["review_check_minutes"] = _as_check_minutes_csv(data["review_check_minutes"])
         if "small_exit_minutes" in data:
             data["small_exit_minutes"] = small_candles.clean_sizes(data["small_exit_minutes"])
+        if "small_exit_upper" in data:
+            data["small_exit_upper"] = small_candles.clean_upper(data["small_exit_upper"])
         if "sma_fast" in data and "sma_slow" in data and data["sma_fast"] >= data["sma_slow"]:
             raise HTTPException(400, "Fast SMA period must be shorter than the slow period")
         for key, value in data.items():
@@ -2159,6 +2169,10 @@ def _gap_dict(row) -> dict:
         "small_exit_counter": small_candles.counter(row),
         "small_exit_loss_pct": small_candles.loss_pct(row),
         "small_exit_agree": small_candles.agree(row),
+        "small_exit_when": small_candles.when(row),
+        "small_exit_giveback": small_candles.giveback(row),
+        "small_exit_upper": ",".join(str(s) for s in small_candles.upper_sizes(row)),
+        "small_exit_upper_must": small_candles.upper_must(row),
         "sc_minutes": ",".join(str(s) for s in small_colour.sizes(row)),
         "sc_count": small_colour.count(row),
         "sc_join": small_colour.join(row),
@@ -2240,6 +2254,8 @@ async def _put_stock_config(eng: StrategyEngine, symbol: str, body: StockConfigU
             data["review_check_minutes"] = _as_check_minutes_csv(data["review_check_minutes"])
         if "small_exit_minutes" in data:
             data["small_exit_minutes"] = small_candles.clean_sizes(data["small_exit_minutes"])
+        if "small_exit_upper" in data:
+            data["small_exit_upper"] = small_candles.clean_upper(data["small_exit_upper"])
         for key, value in data.items():
             if value == getattr(row, key):
                 own.pop(key, None)

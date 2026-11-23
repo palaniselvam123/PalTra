@@ -394,6 +394,11 @@ class BotConfig(Base):
     small_exit_counter: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     small_exit_loss_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     small_exit_agree: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    # Look only in trouble (loss / giving back profit) and bigger candles too (small_candles.py).
+    small_exit_when: Mapped[str | None] = mapped_column(String(8), nullable=True, default="ALWAYS")
+    small_exit_giveback: Mapped[float | None] = mapped_column(Float, nullable=True, default=30.0)
+    small_exit_upper: Mapped[str | None] = mapped_column(String, nullable=True, default="")
+    small_exit_upper_must: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Smaller-candle colours (small_colour.py): entry check and colour-turn confirm, off by default.
     sc_minutes: Mapped[str | None] = mapped_column(String, nullable=True, default="")
     sc_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)

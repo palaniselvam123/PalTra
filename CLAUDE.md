@@ -814,7 +814,12 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   (N, 0 = off; `indicators._direction_reason` colour rule). Each size's verdict sits in `pos.small_state`; `decide` closes the
   trade (`SMALL_CANDLE_EXIT`, via `_exit_now`, LIVE stop cancelled first; a LIVE position restored without its stop id is
   left to that stop) once `small_exit_agree` (1) sizes say so and, with `small_exit_loss_pct` > 0, only while the trade is at
-  least that % under water (`losing_pct`). No reverse unless `reverse_on_exit` has `SMALL` (reverse_exit.py); entries unchanged. Counts as an exit for
+  least that % under water (`losing_pct`). **Only in trouble** (`small_exit_when` `ALWAYS` default | `TROUBLE`, `small_exit_giveback` 30 % of the best
+  profit; owner's request): with `TROUBLE`, `decide` closes only while the trade is in a loss or has fallen back from its
+  best price since the entry (`pos.high` / `low`) by that % of the best profit (`in_trouble`), and the latest readings are
+  judged again on every pass while it holds. **Bigger candles too** (`small_exit_upper` CSV of 5/10/15/30/60 bigger than
+  the bot's candle, `small_exit_upper_must` off): the same readings on bigger candles (`watched_upper`), counted toward
+  `small_exit_agree`; with the must tick a bigger size has to say exit as well. Settings anchor `#sma-small-candles`. No reverse unless `reverse_on_exit` has `SMALL` (reverse_exit.py); entries unchanged. Counts as an exit for
   `strategyChecks.noExitOn`. The stock research baseline keeps it off.
 - `backend/small_colour.py` – **colours on smaller candles** (`sc_minutes` CSV of 1/2/3/5/10 smaller than the bot's candle,
   "" = off; `sc_count` 1-5 candles in a row, default 2; `sc_join` `ALL` default | `ANY` | `AT_LEAST` `sc_need`; per bot and

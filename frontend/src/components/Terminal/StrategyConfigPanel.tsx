@@ -338,6 +338,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     small_exit_counter: Math.min(10, Math.max(0, Math.round(Number(form.small_exit_counter ?? 0)) || 0)),
     small_exit_loss_pct: Math.min(50, Math.max(0, Number(form.small_exit_loss_pct ?? 0) || 0)),
     small_exit_agree: Math.min(5, Math.max(1, Math.round(Number(form.small_exit_agree ?? 1)) || 1)),
+    small_exit_when: (form.small_exit_when === "TROUBLE" ? "TROUBLE" : "ALWAYS") as "ALWAYS" | "TROUBLE",
+    small_exit_giveback: Math.min(100, Math.max(1, Number(form.small_exit_giveback ?? 30) || 30)),
+    small_exit_upper: String(form.small_exit_upper ?? ""),
+    small_exit_upper_must: Boolean(form.small_exit_upper_must),
     sc_minutes: String(form.sc_minutes ?? ""),
     sc_count: Math.min(5, Math.max(1, Math.round(Number(form.sc_count ?? 2)) || 2)),
     sc_join: form.sc_join === "ANY" || form.sc_join === "AT_LEAST" ? form.sc_join : "ALL",
@@ -4062,9 +4066,12 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "check", key: "sc_entry", text: `Before entering, the last ${n(f.sc_count, 2)} ${scSizes.join(" / ")}-min candles must be green to buy / red to sell (${f.sc_join === "ANY" ? "any one size" : f.sc_join === "AT_LEAST" ? `at least ${n(f.sc_need, 1)} sizes` : "every size"})`, off: { sc_entry: false } });
   if (scSizes.length && f.sc_confirm)
     add({ group: "exit", key: "sc_confirm", text: `A colour-turn exit waits until the last ${n(f.sc_count, 2)} ${scSizes.join(" / ")}-min candles agree`, off: { sc_confirm: false } });
-  const smallSizes = String(f.small_exit_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < Number(f.candle_minutes ?? 1));
+  const smallSizes = [
+    ...String(f.small_exit_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < Number(f.candle_minutes ?? 1)),
+    ...String(f.small_exit_upper ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > Number(f.candle_minutes ?? 1)),
+  ];
   if (smallSizes.length)
-    add({ group: "exit", key: "small_exit_minutes", text: `Watches ${smallSizes.join(" / ")}-min candles while in a trade: exits on their SMA cross / SMA 9 turn against it${Number(f.small_exit_loss_pct ?? 0) > 0 ? ` (only when ${f.small_exit_loss_pct}% under water)` : ""}`, off: { small_exit_minutes: "" } });
+    add({ group: "exit", key: "small_exit_minutes", text: `Watches ${smallSizes.join(" / ")}-min candles while in a trade: exits on their SMA cross / SMA 9 turn against it${Number(f.small_exit_loss_pct ?? 0) > 0 ? ` (only when ${f.small_exit_loss_pct}% under water)` : ""}${f.small_exit_when === "TROUBLE" ? ` (only when in a loss or ${f.small_exit_giveback ?? 30}% of the best profit given back)` : ""}${f.small_exit_upper_must ? " (a bigger size must agree)" : ""}`, off: { small_exit_minutes: "", small_exit_upper: "" } });
   if (n(f.counter_exit_count, 0) > 0) add({ group: "exit", key: "counter_exit_count", text: `Close after ${n(f.counter_exit_count, 0)} candles in a row against the trade`, off: { counter_exit_count: "0" } });
   if (n(f.counter_exit_count, 0) > 0 && f.counter_reenter) add({ group: "enter", key: "counter_reenter", text: `Re-enter after a counter-candle exit when a candle breaks the exit candle (up to ${n(f.counter_reenter_max, 3)} per SMA run)`, off: { counter_reenter: false } });
   if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
@@ -4514,6 +4521,7 @@ function Hint({ children, label }: { children: ReactNode; label: string }) {
 
 
 const SMALL_SIZES = [1, 2, 3, 5, 10] as const;
+const UPPER_SIZES = [5, 10, 15, 30, 60] as const;
 
 /** Watch smaller candles while in a trade (small_candles.py): exit on a 1 / 3 / 5-minute turn before the bot's own candle can. */
 function SmallCandlesCard({
@@ -4530,15 +4538,25 @@ function SmallCandlesCard({
     .split(",")
     .map((s) => Number(s.trim()))
     .filter((n) => (SMALL_SIZES as readonly number[]).includes(n));
-  const watched = picked.filter((n) => n < own);
+  const upperPicked = String(form.small_exit_upper ?? "")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => (UPPER_SIZES as readonly number[]).includes(n));
+  const upperWatched = upperPicked.filter((n) => n > own);
+  const watched = [...picked.filter((n) => n < own), ...upperWatched];
   const on = watched.length > 0;
   const toggle = (m: number, next: boolean) => {
     const list = next ? Array.from(new Set([...picked, m])) : picked.filter((n) => n !== m);
     set("small_exit_minutes", list.sort((a, b) => a - b).join(","));
   };
+  const toggleUpper = (m: number, next: boolean) => {
+    const list = next ? Array.from(new Set([...upperPicked, m])) : upperPicked.filter((n) => n !== m);
+    set("small_exit_upper", list.sort((a, b) => a - b).join(","));
+  };
+  const trouble = form.small_exit_when === "TROUBLE";
   const counter = Number(form.small_exit_counter ?? 0) || 0;
   return (
-    <div className={clsx("mt-3 rounded-md p-2 ring-1 ring-inset", on ? "ring-emerald-400/40 bg-emerald-500/[0.05]" : "ring-white/10")}>
+    <div id="sma-small-candles" className={clsx("mt-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset", on ? "ring-emerald-400/40 bg-emerald-500/[0.05]" : "ring-white/10")}>
       <div className="flex flex-wrap items-center gap-1 text-sm text-slate-300">
         {isOwn("small_exit_minutes") && <OwnTag />}
         <b className="text-slate-100">Watch smaller candles while in a trade</b>
@@ -4550,7 +4568,11 @@ function SmallCandlesCard({
           row against it. One size saying so closes the trade (SMALL_CANDLE_EXIT), or set how many sizes must agree. &quot;Only
           when under water&quot; keeps a winning trade with the bot&apos;s own exits and lets the small candles cut only a losing
           one. No reverse: the next entry waits for the bot&apos;s own signal. Entries are unchanged. Sizes at or above the
-          bot&apos;s candle are ignored.
+          bot&apos;s candle are ignored. &quot;Look only when in a loss or falling from profit&quot; skips the candles while the price
+          keeps going the trade&apos;s way: they are read only while the trade is in a loss or has given back the set % of its
+          best profit (a buy at 100 that ran to 104 and is back at 102.50 gave back 38%). &quot;Bigger candles too&quot; reads the
+          same three things on candles bigger than the bot&apos;s; they count toward &quot;sizes that must agree&quot;, and with
+          &quot;a bigger size must agree&quot; the trade closes only while one of them says so too.
         </InfoTip>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300" role="group" aria-label="Smaller candle sizes to watch">
@@ -4583,6 +4605,45 @@ function SmallCandlesCard({
         <Field label="Candles in a row against (0 = off)" value={String(counter)} onChange={(v) => set("small_exit_counter", v)} own={isOwn("small_exit_counter")} />
         <Field label="Only when under water by (%, 0 = always)" value={String(form.small_exit_loss_pct ?? 0)} onChange={(v) => set("small_exit_loss_pct", v)} own={isOwn("small_exit_loss_pct")} />
         <Field label="Sizes that must agree (1 = any)" value={String(form.small_exit_agree ?? 1)} onChange={(v) => set("small_exit_agree", v)} own={isOwn("small_exit_agree")} />
+      </div>
+      <div className={clsx("mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-2", !on && "opacity-50")}>
+        <label className="text-xs text-slate-400">
+          <span className="flex items-center gap-1">When to look <NewTag id="small-trouble" /> {isOwn("small_exit_when") && <OwnTag />}</span>
+          <select
+            value={trouble ? "TROUBLE" : "ALWAYS"}
+            onChange={(e) => set("small_exit_when", e.target.value)}
+            className="mt-1 w-full rounded-md bg-slate-900 px-2 py-1.5 text-sm text-slate-200 ring-1 ring-inset ring-white/10"
+          >
+            <option value="ALWAYS">always while in a trade</option>
+            <option value="TROUBLE">only when in a loss or falling from profit</option>
+          </select>
+        </label>
+        {trouble ? (
+          <Field label="Falling from profit = gave back % of the best profit" value={String(form.small_exit_giveback ?? 30)} onChange={(v) => set("small_exit_giveback", v)} own={isOwn("small_exit_giveback")} />
+        ) : (
+          <div />
+        )}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300" role="group" aria-label="Bigger candle sizes to watch">
+        <span className="flex items-center gap-1 text-slate-400">Bigger candles too: <NewTag id="small-trouble" /> {isOwn("small_exit_upper") && <OwnTag />}</span>
+        {UPPER_SIZES.map((m) => (
+          <label
+            key={m}
+            className={clsx(
+              "flex items-center gap-1 rounded-full px-2.5 py-1 ring-1 ring-inset",
+              m <= own ? "opacity-40" : upperPicked.includes(m) ? "bg-emerald-500/15 text-slate-100 ring-emerald-400/50" : "ring-white/15 hover:bg-white/5"
+            )}
+            title={m <= own ? `Not bigger than the bot's ${own}-minute candle` : undefined}
+          >
+            <input type="checkbox" checked={upperPicked.includes(m)} disabled={m <= own} onChange={(e) => toggleUpper(m, e.target.checked)} className="accent-emerald-400" aria-label={`Also watch ${m}-minute candles`} />
+            {m} min
+          </label>
+        ))}
+        <label className={clsx("ml-2 flex items-center gap-1", !upperWatched.length && "opacity-50")}>
+          <input type="checkbox" checked={Boolean(form.small_exit_upper_must)} onChange={(e) => set("small_exit_upper_must", e.target.checked)} className="accent-[#10B981]" />
+          {isOwn("small_exit_upper_must") && <OwnTag />}
+          a bigger size must agree
+        </label>
       </div>
     </div>
   );
@@ -4758,9 +4819,10 @@ const REVERSE_KEYS = [
     label: "smaller-candle",
     on: (f: SmaConfig) => {
       const own = Number(f.candle_minutes ?? 1) || 1;
-      return String(f.small_exit_minutes ?? "")
-        .split(",")
-        .some((s) => Number(s.trim()) > 0 && Number(s.trim()) < own);
+      return (
+        String(f.small_exit_minutes ?? "").split(",").some((s) => Number(s.trim()) > 0 && Number(s.trim()) < own) ||
+        String(f.small_exit_upper ?? "").split(",").some((s) => Number(s.trim()) > own)
+      );
     },
   },
 ] as const;

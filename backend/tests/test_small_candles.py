@@ -93,6 +93,9 @@ def test_api_saves_the_small_candle_settings(tmp_path, monkeypatch):
         own = client.put("/api/config/stock/SBIN", json={"small_exit_minutes": "3"})
         assert own.status_code == 200 and own.json()["small_exit_minutes"] == "3"
         assert client.put("/api/config", json={"small_exit_agree": 9}).status_code == 422
+        ok = client.put("/api/config", json={"small_exit_when": "TROUBLE", "small_exit_giveback": 40, "small_exit_upper": "60,15,3", "small_exit_upper_must": True}).json()
+        assert ok["small_exit_when"] == "TROUBLE" and ok["small_exit_giveback"] == 40 and ok["small_exit_upper"] == "15,60" and ok["small_exit_upper_must"] is True
+        assert client.put("/api/config", json={"small_exit_when": "X"}).status_code == 422
     database.reset_engine()
 
 
@@ -155,3 +158,35 @@ async def test_engine_exits_a_15_minute_long_on_the_1_minute_turn(tmp_path, monk
     assert closed == [("ACME", 97.0, small_candles.REASON)]
     assert reversed_ == ([("ACME", "LONG", small_candles.REASON)] if reverse else [])
     database.reset_engine()
+
+
+def test_trouble_gate_looks_only_in_a_loss_or_after_giving_back_profit():
+    cfg = Cfg(small_exit_when="TROUBLE", small_exit_giveback=30)
+    state = {1: "cross"}
+    # Running in profit at its best: not looked at.
+    assert small_candles.decide(state, cfg, "LONG", 100.0, 104.0, 104.0) == (False, "")
+    # Gave back 1 of a best 4 (25%): still not.
+    assert small_candles.decide(state, cfg, "LONG", 100.0, 103.0, 104.0)[0] is False
+    # Gave back 1.5 of 4 (38%): looked at, closes.
+    hit, note = small_candles.decide(state, cfg, "LONG", 100.0, 102.5, 104.0)
+    assert hit and "gave back 38%" in note
+    # In a loss: looked at.
+    assert small_candles.decide(state, cfg, "LONG", 100.0, 99.9, 100.5)[0] is True
+    # A short: price above the entry is a loss; a fall back up from its best low gives back profit.
+    assert small_candles.decide(state, cfg, "SHORT", 100.0, 100.2, 99.0)[0] is True
+    assert small_candles.decide(state, cfg, "SHORT", 100.0, 96.5, 96.0)[0] is False
+    assert small_candles.decide(state, cfg, "SHORT", 100.0, 97.5, 96.0)[0] is True
+    # ALWAYS (default) keeps the old behaviour.
+    assert small_candles.decide(state, Cfg(), "LONG", 100.0, 104.0, 104.0)[0] is True
+
+
+def test_bigger_candles_count_and_can_be_required():
+    assert small_candles.clean_upper("60,15,7,3") == "15,60"
+    assert small_candles.watched_upper(Cfg(small_exit_upper="5,15,60"), 5) == [15, 60]
+    assert small_candles.on(Cfg(small_exit_upper="15"), 5) is True
+    cfg = Cfg(small_exit_agree=2)
+    hit, note = small_candles.decide({1: "cross", 15: "slope"}, cfg, "LONG", 100.0, 99.0, upper=[15])
+    assert hit and "15-min (bigger): slope" in note
+    must = Cfg(small_exit_upper_must=True)
+    assert small_candles.decide({1: "cross", 15: None}, must, "LONG", 100.0, 99.0, upper=[15])[0] is False
+    assert small_candles.decide({1: "cross", 15: "turn"}, must, "LONG", 100.0, 99.0, upper=[15])[0] is True

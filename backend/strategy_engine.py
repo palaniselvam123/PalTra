@@ -459,6 +459,7 @@ SNAPSHOT_FIELDS = (
     "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks", "nth_dir_rule",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
+    "small_exit_when", "small_exit_giveback", "small_exit_upper", "small_exit_upper_must",
     "sc_minutes", "sc_count", "sc_join", "sc_need", "sc_entry", "sc_confirm",
     "slope_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
@@ -5902,7 +5903,8 @@ class StrategyEngine:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
         own_minutes = self._exit_minutes(symbol, cfg)
-        watched = small_candles.watched(cfg, own_minutes)
+        upper = small_candles.watched_upper(cfg, own_minutes)
+        watched = small_candles.watched(cfg, own_minutes) + upper
         if not watched:
             return
         if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
@@ -5924,9 +5926,17 @@ class StrategyEngine:
             pos.small_bars[size] = closed_ts
             pos.small_state[size] = small_candles.verdict(frame, pos.signal_direction, cfg, first)
             changed = True
-        if not changed:
-            return
-        hit, note = small_candles.decide(pos.small_state, cfg, pos.direction, pos.entry_price, self.ltp)
+        trouble = small_candles.when(cfg) == "TROUBLE"
+        if not changed and not trouble:
+            return  # with "only in trouble" the latest readings are judged again on every price
+        if pos.direction == "LONG":
+            best = max(x for x in (pos.high, self.ltp) if x is not None)
+        else:
+            best = min(x for x in (pos.low, self.ltp) if x is not None)
+        hit, note = small_candles.decide(
+            {k: v for k, v in pos.small_state.items() if k in watched},
+            cfg, pos.direction, pos.entry_price, self.ltp, best, upper,
+        )
         if not hit:
             return
         self._signals[symbol] = f"{symbol} smaller candles say exit — {note}"
