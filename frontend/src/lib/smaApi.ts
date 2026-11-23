@@ -2124,7 +2124,8 @@ export type ChartPayload = {
   filters?: ChartFilters;
   /** Buyers' share of the waiting orders from the Most active scans (live and saved), oldest first; display only. */
   /** Saved Most active reads: buyers %, and volume vs usual (×) / money traded (₹ cr) when that read had them. */
-  pressure?: { time: number; buy_pct: number; rvol?: number; value_cr?: number }[];
+  /** buy_qty / sell_qty: total quantity waiting to buy / sell (Groww's bid / ask total) at that read. */
+  pressure?: { time: number; buy_pct: number; rvol?: number; value_cr?: number; buy_qty?: number; sell_qty?: number }[];
   /** Executed buy / sell shares per 1-minute candle, estimated (trade_flow.py); display only. */
   flow?: { time: number; buy: number; sell: number; src: "T" | "C" }[];
   /** "Executed volume only": what the bot decided at each window end it judged (entered / not taken and why); display only. */
