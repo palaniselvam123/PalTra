@@ -683,6 +683,8 @@ export const FEATURES: Feature[] = [
     purpose: "Enter the day target, stop loss and both Profit Arm levels as a % of the practice wallet's money instead of ₹; each box shows the other unit beside it (₹ ↔ %). The ₹ setup stays as it was. The Backtests runs list shows each run's Capital (most wallet money blocked at once) and its P&L in % in place of Max DD."},
   { id: "cmp-scatter-zoom", area: "terminal", added: "2026-11-23", pr: 511, href: "/terminal/compare/", where: "Terminal → Backtests → Compare N runs → Every trade as a dot", title: "Compare scatter plots: zoom, full page, trades and result",
     purpose: "Drag a box over any 'Every trade as a dot' chart to zoom into it (Reset zoom or double-click to go back), open a chart on the full page, and see the number of trades, won / lost and the total result for the chart and for each half."},
+  { id: "waiting-qty", area: "active", added: "2026-11-23", pr: 512, href: "/scalp/#active", where: "Scalp → Most active → Buyers % column, and the chart's reading line (Buyers / Sellers waiting)", title: "Total buy / sell quantity waiting, like Groww's market depth",
+    purpose: "Shows the total shares waiting to buy and to sell (Groww's bid total / ask total) next to the buyers / sellers %: under the Most active Buyers % bar (B 2.15L · S 2.20L) and on the chart's reading line for the read behind each candle."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */

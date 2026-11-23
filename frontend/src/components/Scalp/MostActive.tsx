@@ -26,6 +26,7 @@ import { smaApi, type ChopScanRow, type CrossScanMinutes, type FirstCandleRow, t
 import { GuideBar } from "./GuideBar";
 import { NewCountChip, NewTag } from "@/components/ui/NewTag";
 import { FIRST_PICKS, FirstCandleCells, FirstCandleControls, FirstCandleHead, firstPasses, type FirstPick } from "./FirstCandles";
+import { qtyShort } from "@/lib/qtyShort";
 
 const POLL_MS = 30_000;
 const SORT_LABEL: Record<ActiveSort, string> = {
@@ -1104,11 +1105,16 @@ function ActiveRowView({
             {share == null ? (
               <span className="text-xs text-slate-500">—</span>
             ) : (
-              <div className="flex items-center gap-1.5" title={`Buy ${row.buy_qty?.toLocaleString("en-IN")} · Sell ${row.sell_qty?.toLocaleString("en-IN")}`}>
-                <div className="flex h-1.5 w-16 overflow-hidden rounded bg-loss/60">
-                  <div className="h-full bg-profit" style={{ width: `${Math.round(share * 100)}%` }} />
+              <div title={`Waiting to buy ${row.buy_qty?.toLocaleString("en-IN")} shares · waiting to sell ${row.sell_qty?.toLocaleString("en-IN")} shares (Groww's bid / ask total)`}>
+                <div className="flex items-center gap-1.5">
+                  <div className="flex h-1.5 w-16 overflow-hidden rounded bg-loss/60">
+                    <div className="h-full bg-profit" style={{ width: `${Math.round(share * 100)}%` }} />
+                  </div>
+                  <span className="font-mono text-xs text-slate-300">{Math.round(share * 100)}%</span>
                 </div>
-                <span className="font-mono text-xs text-slate-300">{Math.round(share * 100)}%</span>
+                <div className="mt-0.5 whitespace-nowrap font-mono text-[10px] text-slate-400">
+                  B <span className="text-profit">{qtyShort(row.buy_qty)}</span> · S <span className="text-loss">{qtyShort(row.sell_qty)}</span>
+                </div>
               </div>
             )}
           </td>

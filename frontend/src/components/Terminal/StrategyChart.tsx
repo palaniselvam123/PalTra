@@ -33,6 +33,7 @@ import { PinToggle } from "@/components/ui/PinToggle";
 import { usePinned } from "@/lib/usePinned";
 import { StockNewsPanel } from "./StockNewsPanel";
 import { DrillAsk, DrillPanel, drillSizes, withSlopes, type Drill, type DrillAskAt } from "./ChartDrill";
+import { qtyShort } from "@/lib/qtyShort";
 
 type Props = {
   chart: ChartPayload | null;
@@ -2786,6 +2787,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         buyersAt={showBuyers && shownRead ? shownRead.time : null}
         rvol={showBuyers ? shownRead?.rvol ?? null : null}
         valueCr={showBuyers ? shownRead?.value_cr ?? null : null}
+        waitQty={showBuyers && shownRead?.buy_qty != null && shownRead?.sell_qty != null ? { buy: shownRead.buy_qty, sell: shownRead.sell_qty } : null}
         flow={shownFlow}
         waitOn={{ buy: showBuyWait, sell: showSellWait }}
         flowOn={{ buy: showFlowBuy, sell: showFlowSell }}
@@ -3294,6 +3296,7 @@ function OhlcLine({
   buyersAt,
   rvol,
   valueCr,
+  waitQty,
   flow,
   waitOn,
   flowOn,
@@ -3327,6 +3330,8 @@ function OhlcLine({
   /** Volume vs usual (×) and money traded (₹ crore) from that same Most active read. */
   rvol?: number | null;
   valueCr?: number | null;
+  /** Total quantity waiting to buy / sell at that read (Groww's bid / ask total). */
+  waitQty?: { buy: number; sell: number } | null;
   /** This candle's executed buy / sell split, estimated (undefined = not shown). */
   flow?: FlowRead | null;
   /** Which of the four strip lines are on (waiting buyers / sellers, executed buyers / sellers). */
@@ -3463,6 +3468,13 @@ function OhlcLine({
             </>
           ) : null}
           {buyers == null ? <span className="font-sans text-[11px] text-slate-400"> (no Most active read of this stock before this candle closed)</span> : null}
+          {buyers != null && waitQty ? (
+            <span className="text-slate-300" title={`Waiting to buy ${waitQty.buy.toLocaleString("en-IN")} shares · waiting to sell ${waitQty.sell.toLocaleString("en-IN")} shares (Groww's bid / ask total)`}>
+              {" "}
+              (buy <span className="text-emerald-300">{qtyShort(waitQty.buy)}</span> · sell <span className="text-rose-300">{qtyShort(waitQty.sell)}</span>){" "}
+              <NewTag id="waiting-qty" link={false} />
+            </span>
+          ) : null}
           {buyers != null && buyersAt ? (
             <span className="text-slate-400">
               {" "}
