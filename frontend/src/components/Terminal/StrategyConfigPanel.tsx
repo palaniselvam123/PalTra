@@ -553,6 +553,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     target_net_keep: Math.min(99, Math.max(1, Number(form.target_net_keep ?? 70) || 70)),
     target_net_keep2: Math.min(99, Math.max(1, Number(form.target_net_keep2 ?? 75) || 75)),
     target_net_at2: Math.min(20, Math.max(0, Number(form.target_net_at2 ?? 2) || 0)),
+    target_net_start: (["TARGET", "PCT", "RS", "ATR"].includes(String(form.target_net_start)) ? form.target_net_start : "TARGET") as "TARGET" | "PCT" | "RS" | "ATR",
+    target_net_start_pct: Math.min(20, Math.max(0.01, Number(form.target_net_start_pct ?? 0.25) || 0.25)),
+    target_net_start_rs: Math.min(10_000_000, Math.max(1, Number(form.target_net_start_rs ?? 500) || 500)),
+    target_net_start_atr: Math.min(20, Math.max(0.05, Number(form.target_net_start_atr ?? 1) || 1)),
     entry_candle_pct: Math.min(1, Math.max(0, Number(form.entry_candle_pct ?? 0.05) || 0)),
     entry_candle_max: Math.min(5, Math.max(1, Math.round(Number(form.entry_candle_max ?? 2)) || 2)),
     handoff_candle: (["WAIT", "FOLLOW"].includes(String(form.handoff_candle ?? "OFF").toUpperCase()) ? String(form.handoff_candle).toUpperCase() : "OFF") as "OFF" | "WAIT" | "FOLLOW",
@@ -3146,7 +3150,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </div>
             ) : null}
           </div>
-          <div id="sma-target-net" className={clsx("mt-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-white/10", !form.day_target && !(form.pivot_target === "R1" || form.pivot_target === "R2") && "opacity-60")}>
+          <div id="sma-target-net" className={clsx("mt-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-white/10", !form.day_target && !(form.pivot_target === "R1" || form.pivot_target === "R2") && (form.target_net_start ?? "TARGET") === "TARGET" && "opacity-60")}>
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input
                 type="checkbox"
@@ -3155,7 +3159,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 className="accent-[#10B981]"
               />
               {isOwn("target_net") && <OwnTag />}
-              Let the trade run past the pivot / day target with a safety net <NewTag id="target-net" />
+              Let the trade run with a safety net (keep part of the best profit) <NewTag id="target-net" />
               <InfoTip label="About the safety net after the target">
                 With this on, the pivot target and the day high / low target no longer close the trade when reached. From the
                 moment the best price since the entry reaches the target, the trade keeps the first % of its best profit: a buy
@@ -3163,9 +3167,38 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 103.50. Once the best profit is the &quot;second step&quot; times the target&apos;s distance (2 × 3 = 6 here, a run
                 to 106) it keeps the second % instead. The net only rises. With the stop on, the stop is moved up to the net too
                 (in LIVE the Groww stop is modified), so a stop hit there shows as the stop. Like the safety net on the Bots
-                page, but for each trade. Needs the pivot target or the day high / low target on.
+                page, but for each trade. &quot;Start the net&quot; picks when it begins: at the pivot / day target (needs one of them on),
+                or on any trade once it is a set profit in % of the entry price, in ₹ for the trade&apos;s quantity, or in ATRs.
+                With a profit start that distance plays the target&apos;s part (the second step is a multiple of it), and the
+                pivot / day targets still keep their own net; whichever net the price falls to first closes.
               </InfoTip>
             </label>
+            {form.target_net ? (
+              <div className="mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-4">
+                <label className="text-xs text-slate-400">
+                  <span className="flex items-center gap-1">Start the net <NewTag id="net-any-trade" /> {isOwn("target_net_start") && <OwnTag />}</span>
+                  <select
+                    value={String(form.target_net_start ?? "TARGET")}
+                    onChange={(e) => set("target_net_start", e.target.value)}
+                    className="mt-1 w-full rounded-md bg-slate-900 px-2 py-1.5 text-sm text-slate-200 ring-1 ring-inset ring-white/10"
+                  >
+                    <option value="TARGET">at the pivot / day target</option>
+                    <option value="PCT">on any trade: at a % profit</option>
+                    <option value="RS">on any trade: at a ₹ profit</option>
+                    <option value="ATR">on any trade: at N × ATR profit</option>
+                  </select>
+                </label>
+                {form.target_net_start === "PCT" ? (
+                  <Field label="Start at % profit of the entry" value={String(form.target_net_start_pct ?? 0.25)} onChange={(v) => set("target_net_start_pct", v)} own={isOwn("target_net_start_pct")} />
+                ) : form.target_net_start === "RS" ? (
+                  <Field label="Start at ₹ profit (whole trade)" value={String(form.target_net_start_rs ?? 500)} onChange={(v) => set("target_net_start_rs", v)} own={isOwn("target_net_start_rs")} />
+                ) : form.target_net_start === "ATR" ? (
+                  <Field label="Start at × ATR profit" value={String(form.target_net_start_atr ?? 1)} onChange={(v) => set("target_net_start_atr", v)} own={isOwn("target_net_start_atr")} />
+                ) : (
+                  <div />
+                )}
+              </div>
+            ) : null}
             {form.target_net ? (
               <div className="mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-3">
                 <Field label="Keep % of the best profit" value={String(form.target_net_keep ?? 70)} onChange={(v) => set("target_net_keep", v)} own={isOwn("target_net_keep")} />
@@ -4137,7 +4170,10 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
     add({ group: "stop", key: "pivot_target", text: f.pivot_target === "R1" ? "Target at the R1 / S1 pivot (else R2 / S2)" : "Target at the R2 / S2 pivot", off: { pivot_target: "OFF" } });
-  if (f.target_net && (f.day_target || f.pivot_target === "R1" || f.pivot_target === "R2"))
+  const netStart = f.target_net_start ?? "TARGET";
+  if (f.target_net && netStart !== "TARGET")
+    add({ group: "stop", key: "target_net", text: `Safety net on every trade from ${netStart === "PCT" ? `${f.target_net_start_pct ?? 0.25}%` : netStart === "RS" ? `₹${f.target_net_start_rs ?? 500}` : `${f.target_net_start_atr ?? 1}× ATR`} profit, keeping ${f.target_net_keep ?? 70}% of the best profit${Number(f.target_net_at2 ?? 2) > 0 ? ` (${f.target_net_keep2 ?? 75}% from ${f.target_net_at2 ?? 2}× that distance)` : ""}`, off: { target_net: false } });
+  else if (f.target_net && (f.day_target || f.pivot_target === "R1" || f.pivot_target === "R2"))
     add({ group: "stop", key: "target_net", text: `Past the pivot / day target the trade runs on, keeping ${f.target_net_keep ?? 70}% of its best profit${Number(f.target_net_at2 ?? 2) > 0 ? ` (${f.target_net_keep2 ?? 75}% from ${f.target_net_at2 ?? 2}× the target distance)` : ""}`, off: { target_net: false } });
   if (f.day_target)
     add({ group: "stop", key: "day_target", text: `Target at today's or yesterday's high / low, whichever comes first (at least ${f.day_target_min_pct ?? 0.2}% from the entry)`, off: { day_target: false } });

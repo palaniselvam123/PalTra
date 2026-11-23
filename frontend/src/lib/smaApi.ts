@@ -286,6 +286,11 @@ export type SmaConfig = {
   target_net_keep?: number;
   target_net_keep2?: number;
   target_net_at2?: number;
+  /** Where the net starts: TARGET (pivot / day target) or a profit on any trade. */
+  target_net_start?: "TARGET" | "PCT" | "RS" | "ATR";
+  target_net_start_pct?: number;
+  target_net_start_rs?: number;
+  target_net_start_atr?: number;
   entry_candle_pct?: number;
   entry_candle_max?: number;
   handoff_candle?: "OFF" | "WAIT" | "FOLLOW" | string;
