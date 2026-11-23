@@ -865,6 +865,11 @@ class ConfigUpdate(BaseModel):
     turn_colour_exit: bool | None = None
     uturn_run: int | None = Field(default=None, ge=2, le=turn_entry_mod.MAX_U_RUN)
     uturn_min_pct: float | None = Field(default=None, ge=0, le=turn_entry_mod.MAX_U_MIN)
+    turn_gap_on: bool | None = None
+    turn_gap_long_min: float | None = Field(default=None, ge=-turn_entry_mod.MAX_GAP, le=turn_entry_mod.MAX_GAP)
+    turn_gap_long_max: float | None = Field(default=None, ge=-turn_entry_mod.MAX_GAP, le=turn_entry_mod.MAX_GAP)
+    turn_gap_short_min: float | None = Field(default=None, ge=-turn_entry_mod.MAX_GAP, le=turn_entry_mod.MAX_GAP)
+    turn_gap_short_max: float | None = Field(default=None, ge=-turn_entry_mod.MAX_GAP, le=turn_entry_mod.MAX_GAP)
     day_extreme_guard: bool | None = None
     day_extreme_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
     day_extreme_pull_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
@@ -2022,6 +2027,11 @@ def _gap_dict(row) -> dict:
         "turn_colour_exit": turn_entry_mod.colour_exit_on(row),
         "uturn_run": turn_entry_mod.u_run(row),
         "uturn_min_pct": turn_entry_mod.u_min(row),
+        "turn_gap_on": turn_entry_mod.gap_on(row),
+        "turn_gap_long_min": turn_entry_mod.gap_range(row)["LONG"][0],
+        "turn_gap_long_max": turn_entry_mod.gap_range(row)["LONG"][1],
+        "turn_gap_short_min": turn_entry_mod.gap_range(row)["SHORT"][0],
+        "turn_gap_short_max": turn_entry_mod.gap_range(row)["SHORT"][1],
         "day_extreme_guard": day_extreme_mod.on(row),
         "day_extreme_pct": day_extreme_mod.near_pct(row),
         "day_extreme_pull_pct": day_extreme_mod.pull_pct(row),

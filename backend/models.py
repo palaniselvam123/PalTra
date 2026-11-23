@@ -503,6 +503,13 @@ class BotConfig(Base):
     # A trade opened by a turn closes on the first candle of the other colour (turn_entry.py).
     turn_colour_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     uturn_run: Mapped[int | None] = mapped_column(Integer, nullable=True, default=5)
+    # Turn entry gap range (turn_entry.py): a turn opens a trade only while the signed SMA 9 / 21 gap % is inside the
+    # range for its side; off by default.
+    turn_gap_on: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    turn_gap_long_min: Mapped[float | None] = mapped_column(Float, nullable=True, default=-0.2)
+    turn_gap_long_max: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.2)
+    turn_gap_short_min: Mapped[float | None] = mapped_column(Float, nullable=True, default=-0.2)
+    turn_gap_short_max: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.2)
     uturn_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.005)
     day_extreme_guard: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     day_extreme_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.15)
