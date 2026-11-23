@@ -305,6 +305,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   so a restart finds the same level), checked on every price by `_watch_day_target` (after the pivot target), closed via
   `_exit_now` (`DAY_LEVEL_TARGET`; LIVE stop cancelled first; a LIVE position restored without its stop id is left to that
   stop). Counts as an exit for `strategyChecks.noExitOn`. The Strategy lab does not know it.
+- `backend/target_net.py` – **Safety net after the pivot / day target** (`target_net`, off by default; `target_net_keep` 70,
+  `target_net_keep2` 75, % 1-99; `target_net_at2` 2.0 × the target's distance, 0 = no second step; per bot and per stock, PAPER
+  and LIVE, replays too; Settings → 5. Stop-loss and target, anchor `#sma-target-net`; owner's request: like the Bots page's
+  profit safety net, per trade). With it on the pivot target and the day high / low target no longer close: once the best
+  price since the entry (`pos.high` / `low`) reaches the target, `StrategyEngine._target_net` keeps that % of the best profit
+  per share (`floor`, stateless, so a restart finds the same net), closes at it (`TARGET_NET` via `_exit_now`, LIVE stop
+  cancelled first) and, with the stop on, moves the stop up to it (`_move_stop`, tighter only; a hit there shows as the stop).
 - `backend/order_gate.py` – **Simple order-flow check** (owner's request: the waiting / executed settings were hard to set
   up together; a separate plain card, the old settings untouched; `og_entry_exec` / `og_entry_exec_pct` 60, `og_entry_wait` /
   `og_entry_wait_pct` 60, `og_exit_exec` / `og_exit_exec_pct` 45, `og_exit_wait` / `og_exit_wait_pct` 45, all off, % 1-99;

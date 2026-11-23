@@ -281,6 +281,11 @@ export type SmaConfig = {
   day_target?: boolean;
   day_target_min_pct?: number;
   day_target_early_pct?: number;
+  /** Safety net after the pivot / day target (target_net.py). */
+  target_net?: boolean;
+  target_net_keep?: number;
+  target_net_keep2?: number;
+  target_net_at2?: number;
   entry_candle_pct?: number;
   entry_candle_max?: number;
   handoff_candle?: "OFF" | "WAIT" | "FOLLOW" | string;

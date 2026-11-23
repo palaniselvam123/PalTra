@@ -44,6 +44,7 @@ import scan_trade_test
 import hold_test
 import trend_rank
 import scan_arm
+import target_net as target_net_mod
 import day_target as day_target_mod
 import live_sma as live_sma_mod
 import turn_entry as turn_entry_mod
@@ -877,6 +878,10 @@ class ConfigUpdate(BaseModel):
     day_target: bool | None = None
     day_target_min_pct: float | None = Field(default=None, ge=0, le=day_target_mod.MAX_MIN_PCT)
     day_target_early_pct: float | None = Field(default=None, ge=0, le=day_target_mod.MAX_EARLY_PCT)
+    target_net: bool | None = None
+    target_net_keep: float | None = Field(default=None, ge=1, le=99)
+    target_net_keep2: float | None = Field(default=None, ge=1, le=99)
+    target_net_at2: float | None = Field(default=None, ge=0, le=target_net_mod.MAX_AT2)
     day_extreme_guard: bool | None = None
     day_extreme_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
     day_extreme_pull_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
@@ -2044,6 +2049,10 @@ def _gap_dict(row) -> dict:
         "day_target": day_target_mod.on(row),
         "day_target_min_pct": day_target_mod.min_pct(row),
         "day_target_early_pct": day_target_mod.early_pct(row),
+        "target_net": target_net_mod.on(row),
+        "target_net_keep": target_net_mod.keep(row),
+        "target_net_keep2": target_net_mod.keep2(row),
+        "target_net_at2": target_net_mod.at2(row),
         "day_extreme_guard": day_extreme_mod.on(row),
         "day_extreme_pct": day_extreme_mod.near_pct(row),
         "day_extreme_pull_pct": day_extreme_mod.pull_pct(row),
