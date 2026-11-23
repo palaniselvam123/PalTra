@@ -681,6 +681,8 @@ export const FEATURES: Feature[] = [
     purpose: "One Before charges / After charges switch for every backtest result: the runs list, each run's days, stocks, day high / low, the run PDF, the Compare page and the P&L dashboard all follow it (kept per browser)."},
   { id: "all-bots-capital-pct", area: "settings", added: "2026-11-22", pr: 510, href: "/settings/#all-bots-guard", where: "Settings → Bots → All bots: day target / stop loss and the profit safety net → Enter the levels as ₹ amount / % of capital", title: "All-bots limits in % of capital",
     purpose: "Enter the day target, stop loss and both Profit Arm levels as a % of the practice wallet's money instead of ₹; each box shows the other unit beside it (₹ ↔ %). The ₹ setup stays as it was. The Backtests runs list shows each run's Capital (most wallet money blocked at once) and its P&L in % in place of Max DD."},
+  { id: "cmp-scatter-zoom", area: "terminal", added: "2026-11-23", pr: 511, href: "/terminal/compare/", where: "Terminal → Backtests → Compare N runs → Every trade as a dot", title: "Compare scatter plots: zoom, full page, trades and result",
+    purpose: "Drag a box over any 'Every trade as a dot' chart to zoom into it (Reset zoom or double-click to go back), open a chart on the full page, and see the number of trades, won / lost and the total result for the chart and for each half."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */

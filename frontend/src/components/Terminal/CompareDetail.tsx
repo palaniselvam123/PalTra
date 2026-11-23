@@ -1000,13 +1000,18 @@ function Scatter({
 }) {
   const [ref, w] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<Dot | null>(null);
-  const h = 250;
+  // Zoom: drag a box over the chart; "Reset zoom" goes back. Full page: the same chart over the whole window.
+  const [zoom, setZoom] = useState<{ x0: number; x1: number; y0: number; y1: number } | null>(null);
+  const [drag, setDrag] = useState<{ sx: number; sy: number; ex: number; ey: number } | null>(null);
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setFull(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
+  const h = full ? Math.max(360, (typeof window !== "undefined" ? window.innerHeight : 800) - 260) : 250;
   const pad = { l: 52, r: 12, t: 10, b: 34 };
-  // At most 2,500 dots are drawn (evenly thinned); the reading under the chart uses them all.
-  const drawn = useMemo(() => {
-    const step = Math.ceil(dots.length / 2500);
-    return step <= 1 ? dots : dots.filter((_, i) => i % step === 0);
-  }, [dots]);
   if (dots.length < 3) {
     return (
       <div className="rounded-lg border border-white/10 p-3">
@@ -1017,25 +1022,109 @@ function Scatter({
   }
   const xs = dots.map((d) => d.x).sort((a, b) => a - b);
   // The x axis stops at the 98th percentile, so one all-day trade does not squeeze the rest.
-  const x0 = xDomain ? xDomain[0] : Math.min(0, xs[0]);
-  const x1 = xDomain ? xDomain[1] : xs[Math.min(xs.length - 1, Math.floor(xs.length * 0.98))] || 1;
-  const ys = dots.map((d) => d.y);
-  const yt = ticks(Math.min(...ys), Math.max(...ys), 5);
-  const lo = yt[0];
-  const hi = yt[yt.length - 1];
+  const bx0 = xDomain ? xDomain[0] : Math.min(0, xs[0]);
+  const bx1 = xDomain ? xDomain[1] : xs[Math.min(xs.length - 1, Math.floor(xs.length * 0.98))] || 1;
+  const x0 = zoom ? zoom.x0 : bx0;
+  const x1 = zoom ? zoom.x1 : bx1;
+  // The trades inside the view (all of them until zoomed): the dots drawn and the reading under the chart.
+  const shown = zoom ? dots.filter((d) => d.x >= zoom.x0 && d.x <= zoom.x1 && d.y >= zoom.y0 && d.y <= zoom.y1) : dots;
+  const ys = (shown.length ? shown : dots).map((d) => d.y);
+  const yt = zoom ? ticks(zoom.y0, zoom.y1, 5) : ticks(Math.min(...ys), Math.max(...ys), 5);
+  const lo = zoom ? zoom.y0 : yt[0];
+  const hi = zoom ? zoom.y1 : yt[yt.length - 1];
   const X = (x: number) => pad.l + ((Math.min(x1, Math.max(x0, x)) - x0) / (x1 - x0 || 1)) * (w - pad.l - pad.r);
-  const Y = (y: number) => pad.t + (1 - (y - lo) / (hi - lo || 1)) * (h - pad.t - pad.b);
+  const Y = (y: number) => pad.t + (1 - (Math.min(hi, Math.max(lo, y)) - lo) / (hi - lo || 1)) * (h - pad.t - pad.b);
+  const fromX = (px: number) => x0 + ((px - pad.l) / (w - pad.l - pad.r || 1)) * (x1 - x0);
+  const fromY = (py: number) => lo + (1 - (py - pad.t) / (h - pad.t - pad.b || 1)) * (hi - lo);
   const xt = [0, 0.25, 0.5, 0.75, 1].map((f) => x0 + f * (x1 - x0));
-  const mid = xs[Math.floor(xs.length / 2)];
-  const low = dots.filter((d) => d.x <= mid);
-  const high = dots.filter((d) => d.x > mid);
-  const avg = (list: Dot[]) => (list.length ? list.reduce((s, d) => s + d.y, 0) / list.length : null);
-  const won = (list: Dot[]) => (list.length ? (100 * list.filter((d) => d.y > 0).length) / list.length : null);
+  // At most 2,500 dots are drawn (evenly thinned); the reading under the chart uses them all.
+  const step = Math.ceil(shown.length / 2500);
+  const drawn = step <= 1 ? shown : shown.filter((_, i) => i % step === 0);
+  const sx = shown.map((d) => d.x).sort((a, b) => a - b);
+  const mid = sx[Math.floor(sx.length / 2)] ?? 0;
+  const low = shown.filter((d) => d.x <= mid);
+  const high = shown.filter((d) => d.x > mid);
+  const total = (list: Dot[]) => list.reduce((acc, d) => acc + d.y, 0);
+  const avg = (list: Dot[]) => (list.length ? total(list) / list.length : null);
+  const wins = (list: Dot[]) => list.filter((d) => d.y > 0).length;
+  const losses = (list: Dot[]) => list.filter((d) => d.y < 0).length;
+  const won = (list: Dot[]) => (list.length ? (100 * wins(list)) / list.length : null);
+  const at = (e: React.MouseEvent<SVGSVGElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    return { x: e.clientX - box.left, y: e.clientY - box.top };
+  };
+  const finish = () => {
+    if (drag && Math.abs(drag.ex - drag.sx) > 8 && Math.abs(drag.ey - drag.sy) > 8) {
+      const [ax, bx] = [fromX(Math.min(drag.sx, drag.ex)), fromX(Math.max(drag.sx, drag.ex))];
+      const [ay, by] = [fromY(Math.max(drag.sy, drag.ey)), fromY(Math.min(drag.sy, drag.ey))];
+      setZoom({ x0: ax, x1: bx, y0: ay, y1: by });
+      setHover(null);
+    }
+    setDrag(null);
+  };
+  const half = (words: string, list: Dot[]) => (
+    <>
+      {words} ({list.length} trades, {wins(list)} won / {losses(list)} lost): {won(list)?.toFixed(0) ?? "—"}% won, average{" "}
+      <span className={clsx("whitespace-nowrap font-mono", pnlTone(avg(list)))}>{money(avg(list))}</span>, result{" "}
+      <span className={clsx("whitespace-nowrap font-mono font-semibold", pnlTone(total(list)))}>{money(total(list))}</span>.
+    </>
+  );
+  const button = "cmp-noprint min-h-7 rounded border border-white/10 px-2 text-[11px] text-slate-300 hover:bg-white/5";
   return (
-    <div className="rounded-lg border border-white/10 p-3">
-      <h3 className="text-xs font-semibold text-slate-200">{title}</h3>
+    <div
+      className={clsx(
+        "rounded-lg border border-white/10 p-3",
+        full && "fixed inset-3 z-50 overflow-auto bg-surface shadow-card sm:inset-6",
+      )}
+      role={full ? "dialog" : undefined}
+      aria-modal={full ? true : undefined}
+      aria-label={full ? title : undefined}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className={clsx("font-semibold text-slate-200", full ? "text-sm" : "text-xs")}>{title}</h3>
+        <span className="text-[11px] text-slate-400">
+          {shown.length} trade{shown.length === 1 ? "" : "s"}
+          {zoom ? ` in view (of ${dots.length})` : ""} · {wins(shown)} won / {losses(shown)} lost · result{" "}
+          <span className={clsx("font-mono font-semibold", pnlTone(total(shown)))}>{money(total(shown))}</span>
+        </span>
+        <span className="ml-auto flex items-center gap-1">
+          {zoom ? (
+            <button type="button" onClick={() => setZoom(null)} className={button}>
+              Reset zoom
+            </button>
+          ) : (
+            <span className="cmp-noprint text-[11px] text-slate-500">Drag over the chart to zoom</span>
+          )}
+          <button type="button" onClick={() => setFull((f) => !f)} className={button}>
+            {full ? "Close full page" : "Open full page"}
+          </button>
+          <NewTag id="cmp-scatter-zoom" />
+        </span>
+      </div>
       <div ref={ref} className="relative mt-1">
-        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} role="img" aria-label={`${title}: one dot per trade`} onMouseLeave={() => setHover(null)}>
+        <svg
+          width={w}
+          height={h}
+          viewBox={`0 0 ${w} ${h}`}
+          role="img"
+          aria-label={`${title}: one dot per trade`}
+          className="cursor-crosshair select-none"
+          onMouseDown={(e) => {
+            const p = at(e);
+            setDrag({ sx: p.x, sy: p.y, ex: p.x, ey: p.y });
+          }}
+          onMouseMove={(e) => {
+            if (!drag) return;
+            const p = at(e);
+            setDrag((cur) => (cur ? { ...cur, ex: p.x, ey: p.y } : cur));
+          }}
+          onMouseUp={finish}
+          onMouseLeave={() => {
+            setHover(null);
+            setDrag(null);
+          }}
+          onDoubleClick={() => setZoom(null)}
+        >
           {yt.map((t) => (
             <g key={t}>
               <line x1={pad.l} x2={w - pad.r} y1={Y(t)} y2={Y(t)} stroke={t === 0 ? C.axis : C.grid} strokeWidth={t === 0 ? 1 : 0.6} strokeDasharray={t === 0 ? undefined : "3 4"} />
@@ -1057,14 +1146,26 @@ function Scatter({
               key={d.t.id}
               cx={X(d.x)}
               cy={Y(d.y)}
-              r={hover?.t.id === d.t.id ? 6 : 3.5}
+              r={hover?.t.id === d.t.id ? 6 : full ? 4.5 : 3.5}
               fill={d.color}
               fillOpacity={0.6}
               stroke={d.color}
               strokeWidth={1}
-              onMouseEnter={() => setHover(d)}
+              onMouseEnter={() => !drag && setHover(d)}
             />
           ))}
+          {drag ? (
+            <rect
+              x={Math.min(drag.sx, drag.ex)}
+              y={Math.min(drag.sy, drag.ey)}
+              width={Math.abs(drag.ex - drag.sx)}
+              height={Math.abs(drag.ey - drag.sy)}
+              fill={C.axis}
+              fillOpacity={0.12}
+              stroke={C.axis}
+              strokeDasharray="4 3"
+            />
+          ) : null}
         </svg>
         {hover ? (
           <div
@@ -1084,10 +1185,13 @@ function Scatter({
           </div>
         ) : null}
       </div>
-      <p className="mt-1 text-xs leading-5 text-slate-300">
-        {split[0]} ({low.length} trades): {won(low)?.toFixed(0)}% won, average <span className={clsx("whitespace-nowrap font-mono", pnlTone(avg(low)))}>{money(avg(low))}</span>.{" "}
-        {split[1]} ({high.length}): {won(high)?.toFixed(0) ?? "—"}% won, average <span className={clsx("whitespace-nowrap font-mono", pnlTone(avg(high)))}>{money(avg(high))}</span>.
-      </p>
+      {shown.length ? (
+        <p className="mt-1 text-xs leading-5 text-slate-300">
+          {half(split[0], low)} {half(split[1], high)}
+        </p>
+      ) : (
+        <p className="mt-1 text-xs text-slate-400">No trade in this box. Reset zoom.</p>
+      )}
     </div>
   );
 }
