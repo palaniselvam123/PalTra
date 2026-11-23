@@ -910,6 +910,40 @@ function RunningTotals({ data }: { data: Compare }) {
   );
 }
 
+const FOLD_AT = 120;
+
+/** A long value (e.g. a JSON list of picks) shown shrunk to one line, with Expand / Shrink; expanded JSON is pretty-printed. */
+function FoldValue({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  if (text.length <= FOLD_AT) return <>{text}</>;
+  let pretty = text;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object") pretty = JSON.stringify(parsed, null, 2);
+  } catch {
+    /* not JSON: shown as it is */
+  }
+  return (
+    <span className="block">
+      {open ? (
+        <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-black/20 p-2 text-[11px] leading-snug">{pretty}</pre>
+      ) : (
+        <span className="block truncate" title="Press Expand to see it all">
+          {text.slice(0, FOLD_AT)}…
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="mt-1 rounded px-1.5 py-0.5 font-sans text-[11px] text-sky-300 ring-1 ring-inset ring-white/15 hover:bg-white/5"
+      >
+        {open ? "Shrink" : `Expand (${text.length.toLocaleString("en-IN")} characters)`}
+      </button>
+    </span>
+  );
+}
+
 /** What each run changed against the base, the settings that differ, and (3+ runs) each setting's runs side by side. */
 function Differences({ data, tag }: { data: Compare; tag: (id: number | null | undefined) => ReactNode }) {
   const d = data.differences;
@@ -976,10 +1010,10 @@ function Differences({ data, tag }: { data: Compare; tag: (id: number | null | u
                           </span>
                         ) : (
                           <span
-                            className={clsx(changed && "rounded bg-amber-500/10 px-1 ring-1 ring-inset ring-amber-400/40")}
+                            className={clsx("inline-block max-w-full", changed && "rounded bg-amber-500/10 px-1 ring-1 ring-inset ring-amber-400/40")}
                             title={changed ? "Not the base's value" : undefined}
                           >
-                            {fmtValue(value)}
+                            <FoldValue text={fmtValue(value)} />
                           </span>
                         )}
                       </td>
