@@ -72,6 +72,7 @@ BASELINE_OFF = {
     "turn_entry": False,
     "uturn_on": False,
     "turn_toward_cross": False,
+    "turn_gap_on": False,
     "turn_exit_candle": False,
     "turn_colour_exit": False,
     "day_extreme_guard": False,

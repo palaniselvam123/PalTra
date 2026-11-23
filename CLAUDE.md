@@ -1081,7 +1081,12 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   turn (`_turn_last`: one alert, one order). The note says `V:` or `U:`. **Only toward the cross** (`turn_toward_cross`, off;
   `turn_entry.toward_cross`): a turn opens a trade only when it points toward the 9/21 cross (down while SMA fast > slow, up
   while below); a turn the other way opens nothing and, against an open trade, only closes it (`_turn_act` → `_exit_now`, no
-  reverse). **Close on a candle of the other colour** (`turn_exit_candle`, off; `turn_entry.candle_against`): a turn against an
+  reverse). **Gap range** (`turn_gap_on`, off; `turn_gap_long_min` / `_max`, `turn_gap_short_min` / `_max`, default
+  −0.20 / +0.20 % each, −10..10; owner's TECHM case: turn buys both under and far over SMA 21): a turn opens a trade only
+  while the signed SMA 9 / 21 gap % on the last closed candle (`turn_entry.gap_now`) is inside its side's range
+  (`gap_refusal`; unknown = no order); outside it opens nothing and against an open trade only closes it (no reverse), like a
+  turn away from the cross. Turn entries only (the SMA gap range check in step 2 reads every entry); Settings anchor
+  `#sma-turn-gap`. **Close on a candle of the other colour** (`turn_exit_candle`, off; `turn_entry.candle_against`): a turn against an
   open trade read on a candle of the trade's own colour waits in `StrategyEngine._turn_wait`; `_turn_wait_minute` closes it (and
   reverses when allowed) on the first later closed candle of the other colour, and drops the wait when the SMA 9 slope swings
   back with the trade by `vturn_turn_pct` or the trade closes; the same switch holds the SMA 9 slope / V-turn exits

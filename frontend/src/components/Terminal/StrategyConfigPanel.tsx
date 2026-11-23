@@ -426,6 +426,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     turn_entry: Boolean(form.turn_entry),
     uturn_on: Boolean(form.uturn_on),
     turn_toward_cross: Boolean(form.turn_toward_cross),
+    turn_gap_on: Boolean(form.turn_gap_on),
+    turn_gap_long_min: gapNum(form.turn_gap_long_min, -0.2),
+    turn_gap_long_max: gapNum(form.turn_gap_long_max, 0.2),
+    turn_gap_short_min: gapNum(form.turn_gap_short_min, -0.2),
+    turn_gap_short_max: gapNum(form.turn_gap_short_max, 0.2),
     turn_exit_candle: Boolean(form.turn_exit_candle),
     turn_colour_exit: Boolean(form.turn_colour_exit),
     uturn_run: Math.min(30, Math.max(2, Math.round(Number(form.uturn_run ?? 5)) || 5)),
@@ -1470,6 +1475,35 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               is against an open trade it only closes that trade, without the reverse. Every entry check still applies.
             </InfoTip>
           </label>
+          <div id="sma-turn-gap" className="mt-2">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form.turn_gap_on)}
+                disabled={!form.turn_entry}
+                onChange={(e) => set("turn_gap_on", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("turn_gap_on") && <OwnTag />}
+              Only take turns while the SMA 9 / 21 gap is inside a range <NewTag id="turn-gap-range" />
+              <InfoTip label="About the turn gap range">
+                Gap = (SMA 9 − SMA 21) ÷ SMA 21 × 100 on the candle the turn was read, minus while SMA 9 is under SMA 21. A turn up
+                buys only while the gap is inside the buy range, a turn down sells only inside the sell range. For example −0.20 to
+                +0.20 takes turns near the cross and skips turns where SMA 9 is far from SMA 21. Outside the range a turn opens
+                nothing; against an open trade it only closes it, without the reverse. Read only for SMA 9 turn entries, not the SMA
+                cross or other entries (the &quot;SMA gap range&quot; check in step 2 is read for every entry). Every entry check
+                still applies.
+              </InfoTip>
+            </label>
+            {form.turn_gap_on ? (
+              <div className="mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-4">
+                <Field label="Turn buy: gap from (%)" value={String(form.turn_gap_long_min ?? -0.2)} onChange={(v) => set("turn_gap_long_min", v)} own={isOwn("turn_gap_long_min")} />
+                <Field label="Turn buy: gap to (%)" value={String(form.turn_gap_long_max ?? 0.2)} onChange={(v) => set("turn_gap_long_max", v)} own={isOwn("turn_gap_long_max")} />
+                <Field label="Turn sell: gap from (%)" value={String(form.turn_gap_short_min ?? -0.2)} onChange={(v) => set("turn_gap_short_min", v)} own={isOwn("turn_gap_short_min")} />
+                <Field label="Turn sell: gap to (%)" value={String(form.turn_gap_short_max ?? 0.2)} onChange={(v) => set("turn_gap_short_max", v)} own={isOwn("turn_gap_short_max")} />
+              </div>
+            ) : null}
+          </div>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -3793,6 +3827,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (n(f.late_entry_min, 0) > 0) add({ group: "enter", key: "late_entry_min", text: `Late entry: a cross refused by a check is retried for ${n(f.late_entry_min, 0)} min${f.use_gap_mode ? " (ignored: gap mode is on)" : ""}`, off: { late_entry_min: "0" }, warn: Boolean(f.use_gap_mode) });
   if (f.turn_entry) add({ group: "enter", key: "turn_entry", text: `Orders at once when the SMA ${fast} line makes a sharp V (before the cross)`, off: { turn_entry: false } });
   if (f.turn_toward_cross && f.turn_entry) add({ group: "enter", key: "turn_toward_cross", text: "SMA 9 turns trade only toward the 9/21 cross (sell above, buy below)", off: { turn_toward_cross: false } });
+  if (f.turn_gap_on && f.turn_entry) add({ group: "enter", key: "turn_gap_on", text: `SMA 9 turns trade only inside the SMA 9/21 gap range (buy ${f.turn_gap_long_min ?? -0.2}% to ${f.turn_gap_long_max ?? 0.2}%, sell ${f.turn_gap_short_min ?? -0.2}% to ${f.turn_gap_short_max ?? 0.2}%)`, off: { turn_gap_on: false } });
   if (f.turn_exit_candle && f.turn_entry) add({ group: "exit", key: "turn_exit_candle", text: "SMA 9 turns and SMA 9 exits close a trade only once a candle of the other colour closes", off: { turn_exit_candle: false } });
   if (f.turn_colour_exit && f.turn_entry) add({ group: "exit", key: "turn_colour_exit", text: "A turn trade closes on the first candle of the other colour", off: { turn_colour_exit: false } });
   if (f.uturn_on && (f.turn_entry || f.turn_alert)) add({ group: "enter", key: "uturn_on", text: `Rounded U turns count too (after ${f.uturn_run ?? 5} candles one way)`, off: { uturn_on: false } });
@@ -6439,4 +6474,9 @@ function TrendTrade({
       ) : null}
     </div>
   );
+}
+
+function gapNum(v: unknown, fallback: number): number {
+  const n = Number(v ?? fallback);
+  return Number.isFinite(n) ? Math.min(10, Math.max(-10, n)) : fallback;
 }

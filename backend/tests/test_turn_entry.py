@@ -455,3 +455,60 @@ async def test_the_candle_bought_partway_into_does_not_count():
     eng2._frames["FEDERALBNK"] = frame(["r"])
     await eng2._watch_turn_colour(cfg)
     assert exits2 == [turn_entry.COLOUR_EXIT]
+
+
+# ---- gap range for turn entries ----------------------------------------------------------------------------------
+
+CFG_G = SimpleNamespace(turn_entry=True, turn_gap_on=True, sma_fast=9, cross_exit=True)
+
+
+def test_gap_range_defaults_sorting_and_refusal():
+    assert turn_entry.gap_range(SimpleNamespace()) == {"LONG": (-0.2, 0.2), "SHORT": (-0.2, 0.2)}
+    swapped = SimpleNamespace(turn_gap_long_min=0.3, turn_gap_long_max=-0.1)
+    assert turn_entry.gap_range(swapped)["LONG"] == (-0.1, 0.3)
+    near = _bars([(100, 101, 99.92, 100.0)]).iloc[:-1]  # gap -0.08 %
+    far = _bars([(100, 101, 100.45, 100.0)]).iloc[:-1]  # gap +0.45 %
+    assert abs(turn_entry.gap_now(near) + 0.08) < 1e-9
+    assert turn_entry.gap_refusal(near, "LONG", CFG_G) is None
+    assert "outside the turn buy range" in turn_entry.gap_refusal(far, "LONG", CFG_G)
+    assert turn_entry.gap_refusal(far, "LONG", SimpleNamespace()) is None  # off by default
+    assert "not known" in turn_entry.gap_refusal(pd.DataFrame({"close": [1.0]}), "SHORT", CFG_G)
+
+
+@pytest.mark.asyncio
+async def test_a_turn_inside_the_gap_range_buys_and_one_outside_does_not():
+    e = _Eng()
+    await e.eng._turn_minute("KPITTECH", (0, "LONG", "U up"), _bars([(99, 100, 99.92, 100.0)]), CFG_G, NOW)
+    assert e.calls == [("apply", "BULLISH", turn_entry.ENTRY_REASON)]
+    e2 = _Eng()
+    text = await e2.eng._turn_minute("KPITTECH", (0, "LONG", "U up"), _bars([(99, 100, 100.45, 100.0)]), CFG_G, NOW)
+    assert e2.calls == [] and "outside the turn buy range" in text
+
+
+@pytest.mark.asyncio
+async def test_a_turn_outside_the_gap_range_closes_an_open_trade_without_a_reverse():
+    e = _Eng(held="SHORT")
+    await e.eng._turn_minute("KPITTECH", (0, "LONG", "U up"), _bars([(99, 100, 100.45, 100.0)]), CFG_G, NOW)
+    assert e.calls == [("exit", turn_entry.EXIT_REASON)]
+    assert "no reverse" in e.eng._signals["KPITTECH"] and "gap" in e.eng._signals["KPITTECH"]
+
+
+def test_api_saves_the_turn_gap_range(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+
+    import main
+
+    with TestClient(main.app) as client:
+        got = client.get("/api/bots/3/config").json()
+        assert got["turn_gap_on"] is False and got["turn_gap_long_min"] == -0.2 and got["turn_gap_short_max"] == 0.2
+        body = {"turn_gap_on": True, "turn_gap_long_min": -0.15, "turn_gap_long_max": 0.05, "turn_gap_short_min": -0.05}
+        ok = client.put("/api/bots/3/config", json=body).json()
+        assert ok["turn_gap_on"] is True and ok["turn_gap_long_min"] == -0.15 and ok["turn_gap_long_max"] == 0.05
+        assert ok["turn_gap_short_min"] == -0.05
+        assert client.put("/api/bots/3/config", json={"turn_gap_long_min": 50}).status_code == 422
+    database.reset_engine()

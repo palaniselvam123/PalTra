@@ -301,6 +301,12 @@ export type SmaConfig = {
   turn_exit_candle?: boolean;
   /** A trade opened by an SMA 9 turn closes on the first candle of the other colour. */
   turn_colour_exit?: boolean;
+  /** Turn entry gap range: a turn opens a trade only while the signed SMA 9/21 gap % is inside its side's range. */
+  turn_gap_on?: boolean;
+  turn_gap_long_min?: number;
+  turn_gap_long_max?: number;
+  turn_gap_short_min?: number;
+  turn_gap_short_max?: number;
   uturn_run?: number;
   uturn_min_pct?: number;
   vturn_move_pct?: number;

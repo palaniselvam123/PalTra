@@ -440,6 +440,7 @@ SNAPSHOT_FIELDS = (
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
     "decel_confirm", "decel_pierce_atr", "decel_peak_from",
     "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct", "turn_toward_cross", "turn_exit_candle", "turn_colour_exit",
+    "turn_gap_on", "turn_gap_long_min", "turn_gap_long_max", "turn_gap_short_min", "turn_gap_short_max",
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
@@ -1089,6 +1090,7 @@ def chart_filters(cfg) -> dict:
         "decel_exit": decel_guard.on(cfg),
         "turn_entry": turn_entry.entry_on(cfg),
         "turn_toward_cross": turn_entry.entry_on(cfg) and turn_entry.toward_on(cfg),
+        "turn_gap": turn_entry.gap_range(cfg) if turn_entry.entry_on(cfg) and turn_entry.gap_on(cfg) else None,
         # What the chart's "why no trade here" line needs: when entries stop, and whether a cross orders at once.
         "entry_cutoff_time": getattr(cfg, "entry_cutoff_time", None) or "15:00",
         "square_off_time": getattr(cfg, "square_off_time", None) or "15:15",
@@ -2602,6 +2604,12 @@ class StrategyEngine:
         if held is None and not toward:
             self._turn_done[symbol] = ts
             return self._say(symbol, f"{symbol} no order on the SMA {want} turn — it points away from the 9/21 cross ({note})")
+        gap_no = turn_entry.gap_refusal(frame.iloc[:-1], want, cfg)
+        if held is None and gap_no:
+            self._turn_done[symbol] = ts
+            return self._say(symbol, f"{symbol} no order on the SMA {want} turn — {gap_no} ({note})")
+        if gap_no:
+            toward = False  # against an open trade: close it, no reverse
         if held is not None and turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(
             heikin_ashi.view(frame, cfg, "exit").iloc[-2], held.signal_direction
         ):
@@ -2631,7 +2639,8 @@ class StrategyEngine:
             if not cross_exits(cfg):
                 return self._say(symbol, f"{symbol} holding {held.direction} — SMA cross exit is off; the turn does not close it")
             await self._exit_now(cfg, self._exit_price(symbol, held), turn_entry.EXIT_REASON)
-            return self._say(symbol, f"{symbol} closed {held.direction} — SMA 9 turned {want}; no reverse, it points away from the 9/21 cross ({note})")
+            why = turn_entry.gap_refusal(frame.iloc[:-1], want, cfg) or "it points away from the 9/21 cross"
+            return self._say(symbol, f"{symbol} closed {held.direction} — SMA 9 turned {want}; no reverse, {why} ({note})")
         sig = "BULLISH" if want == "LONG" else "BEARISH"
         result = await self.apply_signal(sig, frame, cfg, now, alert=False, why=turn_entry.ENTRY_REASON)
         if result.startswith("blocked — order PENDING"):
@@ -2662,6 +2671,8 @@ class StrategyEngine:
             colour = "red" if held.signal_direction == "LONG" else "green"
             return self._say(symbol, f"{symbol} holding {held.direction} — still waiting for a {colour} candle to close (SMA 9 turned {want})")
         toward = not turn_entry.toward_on(cfg) or turn_entry.toward_cross(closed, want)
+        if turn_entry.gap_refusal(closed, want, cfg):
+            toward = False
         return await self._turn_act(symbol, want, note, toward, frame, cfg, now)
 
     async def _counter_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str | None:
