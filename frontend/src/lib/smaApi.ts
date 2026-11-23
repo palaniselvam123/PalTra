@@ -95,6 +95,11 @@ export type SmaConfig = {
   small_exit_counter?: number;
   small_exit_loss_pct?: number;
   small_exit_agree?: number;
+  /** ALWAYS, or TROUBLE = look only while in a loss or giving back profit. */
+  small_exit_when?: "ALWAYS" | "TROUBLE";
+  small_exit_giveback?: number;
+  small_exit_upper?: string;
+  small_exit_upper_must?: boolean;
   /** Patterns only with the SMA trend. */
   pattern_trend?: boolean;
   pattern_set?: "STRONG" | "ALL";
