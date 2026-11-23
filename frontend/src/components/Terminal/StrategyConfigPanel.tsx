@@ -546,6 +546,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     entry_candle_confirm: Boolean(form.entry_candle_confirm),
     live_sma_check: Boolean(form.live_sma_check),
     live_sma_min_gap: Math.min(5, Math.max(0, Number(form.live_sma_min_gap ?? 0) || 0)),
+    day_target: Boolean(form.day_target),
+    day_target_min_pct: Math.min(10, Math.max(0, Number(form.day_target_min_pct ?? 0.2) || 0)),
+    day_target_early_pct: Math.min(2, Math.max(0, Number(form.day_target_early_pct ?? 0) || 0)),
     entry_candle_pct: Math.min(1, Math.max(0, Number(form.entry_candle_pct ?? 0.05) || 0)),
     entry_candle_max: Math.min(5, Math.max(1, Math.round(Number(form.entry_candle_max ?? 2)) || 2)),
     handoff_candle: (["WAIT", "FOLLOW"].includes(String(form.handoff_candle ?? "OFF").toUpperCase()) ? String(form.handoff_candle).toUpperCase() : "OFF") as "OFF" | "WAIT" | "FOLLOW",
@@ -3103,6 +3106,42 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="R2">R2 for a buy, S2 for a sell</option>
             </select>
           </label>
+          <div id="sma-day-target" className="mt-3 scroll-mt-24">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form.day_target)}
+                onChange={(e) => set("day_target", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("day_target") && <OwnTag />}
+              Day high / low target: book the profit at today&apos;s or yesterday&apos;s high / low <NewTag id="day-hl-target" />
+              <InfoTip label="About the day high / low target">
+                A buy closes at the nearest of today&apos;s high made before the entry and yesterday&apos;s high, whichever the price
+                reaches first; a sell at the nearest of today&apos;s low before the entry and yesterday&apos;s low. Only a level at
+                least the % below beyond the entry counts, so the trade is in profit when it closes; with none, the trade has no
+                day target. &quot;Close early&quot; books it that % before the level, so a touch that just misses still counts.
+                Checked on every price; the stop, the other targets and the exits stay on, and whichever comes first closes.
+                Off by default.
+              </InfoTip>
+            </label>
+            {form.day_target ? (
+              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+                <Field
+                  label="Level at least this % beyond the entry"
+                  value={String(form.day_target_min_pct ?? 0.2)}
+                  onChange={(v) => set("day_target_min_pct", v)}
+                  own={isOwn("day_target_min_pct")}
+                />
+                <Field
+                  label="Close early by (%)"
+                  value={String(form.day_target_early_pct ?? 0)}
+                  onChange={(v) => set("day_target_early_pct", v)}
+                  own={isOwn("day_target_early_pct")}
+                />
+              </div>
+            ) : null}
+          </div>
           <div className={clsx("mt-3 rounded-md p-2 ring-1 ring-inset ring-white/10", (form.stop_type ?? "ATR") !== "ATR" && "opacity-50")}>
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input
@@ -4066,6 +4105,8 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
     add({ group: "stop", key: "pivot_target", text: f.pivot_target === "R1" ? "Target at the R1 / S1 pivot (else R2 / S2)" : "Target at the R2 / S2 pivot", off: { pivot_target: "OFF" } });
+  if (f.day_target)
+    add({ group: "stop", key: "day_target", text: `Target at today's or yesterday's high / low, whichever comes first (at least ${f.day_target_min_pct ?? 0.2}% from the entry)`, off: { day_target: false } });
 
   // 7. Advanced
   if (f.recovery_hold) add({ group: "advanced", key: "recovery_hold", text: "Recovery hold: a losing trade is held past the opposite cross", off: { recovery_hold: false }, warn: true });

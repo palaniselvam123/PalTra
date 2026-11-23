@@ -277,6 +277,10 @@ export type SmaConfig = {
   /** Live SMA re-check at execution (live_sma.py): SMA 9 vs 21 on the live price when the order goes / while it waits. */
   live_sma_check?: boolean;
   live_sma_min_gap?: number;
+  /** Day high / low target (day_target.py): today's (before the entry) or yesterday's high / low, whichever first. */
+  day_target?: boolean;
+  day_target_min_pct?: number;
+  day_target_early_pct?: number;
   entry_candle_pct?: number;
   entry_candle_max?: number;
   handoff_candle?: "OFF" | "WAIT" | "FOLLOW" | string;
