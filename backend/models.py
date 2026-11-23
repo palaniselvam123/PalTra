@@ -513,6 +513,10 @@ class BotConfig(Base):
     # Live SMA re-check at execution (live_sma.py): off by default; minimum gap % on the trade's side.
     live_sma_check: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     live_sma_min_gap: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    # Day high / low target (day_target.py): off by default; level at least min % beyond the entry; close early %.
+    day_target: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    day_target_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.2)
+    day_target_early_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     uturn_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.005)
     day_extreme_guard: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     day_extreme_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.15)

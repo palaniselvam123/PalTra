@@ -98,6 +98,7 @@ import handoff_chain
 import handoff_log
 import stop_handoff
 import stock_regime
+import day_target
 import live_sma
 import turn_entry
 import high52
@@ -442,6 +443,7 @@ SNAPSHOT_FIELDS = (
     "decel_confirm", "decel_pierce_atr", "decel_peak_from",
     "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct", "turn_toward_cross", "turn_exit_candle", "turn_colour_exit",
     "turn_gap_on", "turn_gap_long_min", "turn_gap_long_max", "turn_gap_short_min", "turn_gap_short_max",
+    "day_target", "day_target_min_pct", "day_target_early_pct",
     "live_sma_check", "live_sma_min_gap",
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
@@ -1431,6 +1433,8 @@ class StrategyEngine:
         self._tapes: dict[str, pd.DataFrame] = {}
         # Daily pivot levels per (stock, trading day) (pivots.py); the earlier session never changes.
         self._pivot_cache: dict[tuple[str, dt.date], dict] = {}
+        # Day high / low target per open trade (day_target.py): (symbol, trade id) -> (name, level, trigger) or None.
+        self._day_goal: dict[tuple[str, int], tuple[str, float, float] | None] = {}
         # Last note of the buyers / sellers fade exit per stock (pressure_exit.py), so the signal line is written once.
         self._pressure_note: dict[str, str] = {}
         # Executed volume exit (flow_exit.py): the last window judged per stock (entry time, window end) and its reading.
@@ -2117,6 +2121,7 @@ class StrategyEngine:
         await self._watch_recovery(symbol_cfg, now)
         await self._watch_gap_fade(symbol_cfg)
         await self._watch_pivot_target(symbol_cfg)
+        await self._watch_day_target(symbol_cfg)
         await self._watch_pressure_fade(symbol_cfg)
         await self._watch_trend_exit(symbol_cfg)
         self._record_trend((symbol_cfg.symbol or self._focus or "").upper(), symbol_cfg, symbol_cfg)
@@ -6109,6 +6114,33 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} pivot target {goal[0]} {goal[1]:.2f} reached"
         await self._exit_now(cfg, self.ltp, pivots.PIVOT_EXIT)
 
+    async def _watch_day_target(self, cfg: BotConfig) -> None:
+        """Every price: book the profit at today's or yesterday's high / low, whichever comes first (day_target.py)."""
+        pos = self.position
+        if pos is None or not day_target.on(cfg) or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other exits).
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        key = (symbol, int(pos.trade_id))
+        if key not in self._day_goal:
+            opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+            tape = self._tapes.get(symbol)
+            if tape is None or getattr(tape, "empty", True):
+                tape = self._frames.get(symbol)
+            lv = day_target.levels(tape, opened.timestamp())
+            if lv is None:
+                return  # candles not loaded yet: try again on the next price
+            if len(self._day_goal) > 500:
+                self._day_goal.clear()
+            self._day_goal[key] = day_target.target_for(pos.direction, float(pos.entry_price), lv, cfg)
+        goal = self._day_goal.get(key)
+        if goal is None or not day_target.reached(pos.direction, self.ltp, goal[2]):
+            return
+        self._signals[symbol] = f"{symbol} day target — {goal[0]} {goal[1]:.2f} reached"
+        await self._exit_now(cfg, self.ltp, day_target.EXIT_REASON)
+
     async def _watch_pressure_fade(self, cfg: BotConfig) -> None:
         """Most active stocks: close once the buyers (a buy) or sellers (a sell) fade to the set % (pressure_exit.py)."""
         pos = self.position
@@ -6362,6 +6394,7 @@ class StrategyEngine:
                     "CANDLE_END": "candle closed — flat",
                     "COLOUR_TURN": "candle turned the other colour — flat",
                     "PIVOT_TARGET": "pivot target reached — flat",
+                    day_target.EXIT_REASON: "day high / low target reached — flat",
                     pressure_exit.EXIT_REASON: "buyers / sellers faded — flat",
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
@@ -8172,6 +8205,7 @@ _ALERT_REASON = {
     "CANDLE_END": "end of the pattern candle",
     "COLOUR_TURN": "candle turned the other colour",
     "PIVOT_TARGET": "pivot target (R1 / S1)",
+    day_target.EXIT_REASON: "day high / low target",
     "REPLAY_STOPPED": "replay stopped",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
@@ -8657,7 +8691,7 @@ _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", cum_delta.EXIT_REASON, "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST", "SMA9_DECEL",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
-    "BREAKOUT_STOP", "PIVOT_TARGET", stop_plan.EXIT_REASON, small_candles.REASON,
+    "BREAKOUT_STOP", "PIVOT_TARGET", day_target.EXIT_REASON, stop_plan.EXIT_REASON, small_candles.REASON,
 )
 
 

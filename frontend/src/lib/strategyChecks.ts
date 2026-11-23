@@ -47,6 +47,7 @@ export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
     !cfg.vturn_exit &&
     !cfg.decel_exit &&
     !(cfg.pivot_target === "R1" || cfg.pivot_target === "R2") &&
+    !cfg.day_target &&
     !(cfg.flow_exit && String(cfg.flow_exit_mode ?? "EXIT").toUpperCase() !== "CONFIRM") &&
     !cfg.og_exit_exec &&
     !cfg.og_exit_wait &&
@@ -238,6 +239,7 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
       code: "GAP_FADE",
     });
   if (cfg.pivot_target === "R1" || cfg.pivot_target === "R2") out.push({ name: `Pivot target (${cfg.pivot_target})`, when: price, code: "PIVOT_TARGET" });
+  if (cfg.day_target) out.push({ name: "Day high / low target (today's or yesterday's)", when: price, code: "DAY_LEVEL_TARGET" });
   if (cfg.flow_exit && String(cfg.flow_exit_mode ?? "EXIT").toUpperCase() !== "CONFIRM")
     out.push({ name: `Executed volume: the other side did ${cfg.flow_exit_pct ?? 60}% of the shares traded`, when: Number(cfg.flow_exit_window ?? 3) === 0 ? candle : "each closed minute", code: "FLOW_EXIT" });
   if (cfg.og_exit_exec || cfg.og_exit_wait)

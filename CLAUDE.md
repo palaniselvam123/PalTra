@@ -296,6 +296,15 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   *closed* exit candle from 09:15 (the candle the chart draws at that size), no longer one candle's length back from the
   order; each executed volume card has a "Read the same candle as the chart" tick (`StrategyConfigPanel.SameCandle`, sets
   the window to 0).
+- `backend/day_target.py` – **Day high / low target** (`day_target`, off by default; `day_target_min_pct` 0.2, 0-10;
+  `day_target_early_pct` 0, 0-2; per bot and per stock, PAPER and LIVE, replays too; Settings → 5. Stop-loss and target, under
+  the pivot target, anchor `#sma-day-target`): a long closes at the nearest of today's high made before the entry (1-minute
+  candles that began before the entry minute) and yesterday's high (the last session before today in `_tapes`), whichever
+  comes first; a short at the nearest low (`levels`, `target_for`). Only a level at least the min % beyond the entry counts
+  (in profit); early % closes that much before it. Worked out once per trade (`StrategyEngine._day_goal`, from the candles,
+  so a restart finds the same level), checked on every price by `_watch_day_target` (after the pivot target), closed via
+  `_exit_now` (`DAY_LEVEL_TARGET`; LIVE stop cancelled first; a LIVE position restored without its stop id is left to that
+  stop). Counts as an exit for `strategyChecks.noExitOn`. The Strategy lab does not know it.
 - `backend/order_gate.py` – **Simple order-flow check** (owner's request: the waiting / executed settings were hard to set
   up together; a separate plain card, the old settings untouched; `og_entry_exec` / `og_entry_exec_pct` 60, `og_entry_wait` /
   `og_entry_wait_pct` 60, `og_exit_exec` / `og_exit_exec_pct` 45, `og_exit_wait` / `og_exit_wait_pct` 45, all off, % 1-99;
