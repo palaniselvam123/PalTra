@@ -691,7 +691,7 @@ export const FEATURES: Feature[] = [
     purpose: "Works SMA 9 and SMA 21 out again on the live price at the moment the order goes (and on every price while a waiting order waits), so a buy is not placed after SMA 9 has slipped under SMA 21 inside the new candle. Optional smallest gap between the two."},
   { id: "day-hl-target", area: "settings", added: "2026-11-23", pr: 515, href: "/settings/#sma-day-target", where: "Settings → Strategy → 5. Stop-loss and target, under the pivot target", title: "Day high / low target",
     purpose: "Books a trade's profit at today's high / low made before the entry or yesterday's high / low, whichever the price reaches first, as long as the level is at least a set % away from the entry. Optional: close a little before the level."},
-  { id: "target-net", area: "settings", added: "2026-11-23", pr: 0, href: "/settings/#sma-target-net", where: "Settings → Strategy → 5. Stop-loss and target, under the day high / low target", title: "Safety net after the pivot / day target",
+  { id: "target-net", area: "settings", added: "2026-11-23", pr: 516, href: "/settings/#sma-target-net", where: "Settings → Strategy → 5. Stop-loss and target, under the day high / low target", title: "Safety net after the pivot / day target",
     purpose: "Once a trade reaches its pivot or day high / low target it is not closed: it runs on and keeps 70% of its best profit (75% after a bigger run), like the safety net on the Bots page but for each trade. The stop is moved up to the net too."},
 ];
 
