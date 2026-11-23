@@ -639,6 +639,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Tall-candle pullback", (s) => (s.tall_pullback ? `On (${s.tall_atr_mult ?? 1.5}× ATR, wait ${s.tall_expiry_candles ?? 2} candles)` : "Off")],
   ["Day high/low guard", (s) => (s.day_extreme_guard ? `On (within ${s.day_extreme_pct ?? 0.15}%, wait ${s.day_extreme_pull_pct ?? 0.15}% back or the fast SMA, ${s.day_extreme_candles ?? 3} candles)` : "Off")],
   ["Entry candle must go the trade's way", (s) => (s.entry_candle_confirm ? `On (${s.entry_candle_pct ?? 0.05}% past its open, wait ${s.entry_candle_max ?? 2} candles)` : "Off")],
+  ["Live SMA re-check at the order", (s) => (s.live_sma_check ? `On${Number(s.live_sma_min_gap ?? 0) > 0 ? ` (SMA 9 at least ${s.live_sma_min_gap}% beyond SMA 21)` : ""}` : "Off")],
   ["Candle-extreme limit", (s) => (s.extreme_entry ? `On (${s.extreme_anchor === "SMA_9" ? "low/high or fast SMA" : "low/high"}, cancel beyond ${s.extreme_invalid_pct ?? 0.05}%, wait ${s.extreme_expiry_candles ?? 2} candles${s.extreme_cancel_on_cross === false ? "" : ", cancel on a cross against"})` : "Off")],
   ["Late entry", (s) => (Number(s.late_entry_min ?? 0) > 0 ? `${s.late_entry_min} min after a refused cross` : "Off")],
   ["Quantity", (s) => String(s.qty)],

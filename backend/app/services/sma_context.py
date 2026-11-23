@@ -316,6 +316,8 @@ FIELD_HELP = {
     "turn_gap_on": "turn entry only while the signed SMA 9/21 gap % is inside the side's range",
     "turn_gap_long_min": "turn buy: lowest SMA 9/21 gap %", "turn_gap_long_max": "turn buy: highest SMA 9/21 gap %",
     "turn_gap_short_min": "turn sell: lowest SMA 9/21 gap %", "turn_gap_short_max": "turn sell: highest SMA 9/21 gap %",
+    "live_sma_check": "re-check SMA 9 vs SMA 21 on the live price when the order goes and while it waits",
+    "live_sma_min_gap": "live re-check: SMA 9 must be at least this % beyond SMA 21 on the trade's side",
     "tall_pullback": "tall signal candle: wait for a pullback", "tall_atr_mult": "tall = height >= this x ATR",
     "extreme_entry": "wait at the signal candle's extreme (limit entry)", "entry_candle_confirm": "wait for the entry candle to go the trade's way",
     "day_extreme_guard": "no buy at the day's high / sell at the day's low without a pullback",

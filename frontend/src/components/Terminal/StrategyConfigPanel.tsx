@@ -544,6 +544,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     extreme_expiry_candles: Math.min(10, Math.max(1, Math.round(Number(form.extreme_expiry_candles ?? 2) || 2))),
     extreme_cancel_on_cross: form.extreme_cancel_on_cross !== false,
     entry_candle_confirm: Boolean(form.entry_candle_confirm),
+    live_sma_check: Boolean(form.live_sma_check),
+    live_sma_min_gap: Math.min(5, Math.max(0, Number(form.live_sma_min_gap ?? 0) || 0)),
     entry_candle_pct: Math.min(1, Math.max(0, Number(form.entry_candle_pct ?? 0.05) || 0)),
     entry_candle_max: Math.min(5, Math.max(1, Math.round(Number(form.entry_candle_max ?? 2)) || 2)),
     handoff_candle: (["WAIT", "FOLLOW"].includes(String(form.handoff_candle ?? "OFF").toUpperCase()) ? String(form.handoff_candle).toUpperCase() : "OFF") as "OFF" | "WAIT" | "FOLLOW",
@@ -1721,6 +1723,50 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </div>
           ) : null}
           </Only>
+          <div id="sma-live-sma" className="mt-4 scroll-mt-24">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form.live_sma_check)}
+                onChange={(e) => set("live_sma_check", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("live_sma_check") && <OwnTag />}
+              Re-check SMA 9 vs SMA 21 on the live price when the order goes <NewTag id="live-sma-check" />
+              <InfoTip label="About the live SMA re-check">
+                The entry checks read the candle that just closed, and the order goes at the next candle&apos;s open. With this
+                on, SMA 9 and SMA 21 are worked out again as if the forming candle closed at the live price now: a buy goes only
+                while SMA 9 is above SMA 21 (a sell only while it is below), by at least the gap below. An order that goes at once
+                is refused when they disagree (late entry can try again on a later candle). An order that waits (the entry
+                candle below, a pullback or a candle-extreme limit) is judged on every price while it waits and once more when it
+                fills, and is dropped the moment they turn against it. A flipped stock follows its signal. Force, news and
+                hand-off orders do not read it.
+              </InfoTip>
+            </label>
+            {form.live_sma_check ? (
+              <div className="mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-2">
+                <Field
+                  label="SMA 9 beyond SMA 21 by at least (%)"
+                  value={String(form.live_sma_min_gap ?? 0)}
+                  onChange={(v) => set("live_sma_min_gap", v)}
+                  own={isOwn("live_sma_min_gap")}
+                />
+                {!form.entry_candle_confirm ? (
+                  <button
+                    type="button"
+                    onClick={() => set("entry_candle_confirm", true)}
+                    className="min-h-9 rounded-md border border-white/15 px-3 text-left text-xs text-slate-300 hover:border-white/30"
+                  >
+                    Also wait inside the entry candle (so the re-check runs on every price until it fills)
+                  </button>
+                ) : (
+                  <span className="text-xs text-slate-400">
+                    The entry candle wait is on: the re-check runs on every price until the order fills.
+                  </span>
+                )}
+              </div>
+            ) : null}
+          </div>
           <Only s="trend">
           <label id="sma-day-extreme" className="mt-4 flex scroll-mt-24 items-center gap-2 text-sm text-slate-300">
             <input
@@ -3838,6 +3884,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (String(f.handoff_candle ?? "OFF").toUpperCase() === "WAIT") add({ group: "enter", key: "handoff_candle", text: "Hand-off orders wait for a candle going their way, else skip", off: { handoff_candle: "OFF" } });
   if (String(f.handoff_candle ?? "OFF").toUpperCase() === "FOLLOW") add({ group: "enter", key: "handoff_candle", text: "Hand-off orders follow the forming candle: green buys, red sells", off: { handoff_candle: "OFF" } });
   if (f.entry_candle_confirm) add({ group: "enter", key: "entry_candle_confirm", text: `Orders only while the entry candle goes the trade's way (${n(f.entry_candle_pct, 0.05)}% past its open, up to ${n(f.entry_candle_max, 2)} candles)`, off: { entry_candle_confirm: false } });
+  if (f.live_sma_check) add({ group: "enter", key: "live_sma_check", text: `Re-checks SMA 9 vs SMA 21 on the live price when the order goes${Number(f.live_sma_min_gap ?? 0) > 0 ? ` (at least ${f.live_sma_min_gap}% apart)` : ""}`, off: { live_sma_check: false } });
   if (f.extreme_entry) add({ group: "enter", key: "extreme_entry", text: "Waits to enter at the signal candle's low (buy) / high (sell); may miss the trade", off: { extreme_entry: false } });
 
   // 2. Checks before entering

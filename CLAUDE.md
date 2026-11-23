@@ -1138,6 +1138,14 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   candles, when the SMAs cross against the signal, at the cut-off or trade cap. The tall-candle pullback, the
   candle-extreme limit and a breakout arrival take over from it. Entry reason suffix `:CANDLE_CONFIRM`. Settings → 1.
   When to enter (How the entry order is placed). The stock research baseline keeps it off.
+- `backend/live_sma.py` – **Live SMA re-check at execution** (`live_sma_check`, off by default; `live_sma_min_gap` %, 0-5, 0 =
+  SMA 9 only has to be on the trade's side; per bot and per stock, PAPER and LIVE, replays too; owner's SHREECEM case of 23 Nov:
+  bought at the 09:45 open on the 09:40 close's checks, SMA 9 fell under SMA 21 inside that candle): SMA fast / slow worked out
+  with the forming candle's close set to the live price (`live_gap`), judged on the signal's side (`refusal`). An entry that
+  `apply_signal` orders at once is refused when they disagree (joins `entry_block`, so late entry can retry); a waiting
+  `PullbackOrder` (entry-candle confirm, pullbacks, candle-extreme limit) is judged on every price in `_watch_pullbacks` and
+  dropped the first time they turn against it. Direct orders never read it. Settings → 1. When to enter, anchor
+  `#sma-live-sma` (with a one-click "also wait inside the entry candle").
 - `backend/handoff_candle.py` – hand-off orders wait for the forming candle (`handoff_candle` `OFF` default | `WAIT` |
   `FOLLOW`, set on the **receiving** bot, per bot and per stock, PAPER and LIVE, replays too; Settings → 1. When to enter,
   "Hand-off orders to this bot"): a `HANDOFF` order through `StrategyEngine.direct_order` (a trend hand-off's

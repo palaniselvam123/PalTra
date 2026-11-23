@@ -44,6 +44,7 @@ import scan_trade_test
 import hold_test
 import trend_rank
 import scan_arm
+import live_sma as live_sma_mod
 import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
 import backtest_compare
@@ -870,6 +871,8 @@ class ConfigUpdate(BaseModel):
     turn_gap_long_max: float | None = Field(default=None, ge=-turn_entry_mod.MAX_GAP, le=turn_entry_mod.MAX_GAP)
     turn_gap_short_min: float | None = Field(default=None, ge=-turn_entry_mod.MAX_GAP, le=turn_entry_mod.MAX_GAP)
     turn_gap_short_max: float | None = Field(default=None, ge=-turn_entry_mod.MAX_GAP, le=turn_entry_mod.MAX_GAP)
+    live_sma_check: bool | None = None
+    live_sma_min_gap: float | None = Field(default=None, ge=0, le=5)
     day_extreme_guard: bool | None = None
     day_extreme_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
     day_extreme_pull_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
@@ -2032,6 +2035,8 @@ def _gap_dict(row) -> dict:
         "turn_gap_long_max": turn_entry_mod.gap_range(row)["LONG"][1],
         "turn_gap_short_min": turn_entry_mod.gap_range(row)["SHORT"][0],
         "turn_gap_short_max": turn_entry_mod.gap_range(row)["SHORT"][1],
+        "live_sma_check": live_sma_mod.on(row),
+        "live_sma_min_gap": live_sma_mod.min_gap(row),
         "day_extreme_guard": day_extreme_mod.on(row),
         "day_extreme_pct": day_extreme_mod.near_pct(row),
         "day_extreme_pull_pct": day_extreme_mod.pull_pct(row),
