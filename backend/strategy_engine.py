@@ -98,6 +98,7 @@ import handoff_chain
 import handoff_log
 import stop_handoff
 import stock_regime
+import live_sma
 import turn_entry
 import high52
 import fresh_entry
@@ -441,6 +442,7 @@ SNAPSHOT_FIELDS = (
     "decel_confirm", "decel_pierce_atr", "decel_peak_from",
     "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct", "turn_toward_cross", "turn_exit_candle", "turn_colour_exit",
     "turn_gap_on", "turn_gap_long_min", "turn_gap_long_max", "turn_gap_short_min", "turn_gap_short_max",
+    "live_sma_check", "live_sma_min_gap",
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
@@ -3392,6 +3394,12 @@ class StrategyEngine:
             if not allowed:
                 gate = f"order-flow check: {note}"
                 entry_block = f"{entry_block}; {gate}" if entry_block else gate
+        if pullback is None and live_sma.on(cfg):
+            # Live SMA re-check (live_sma.py): the order goes now, so the SMAs must agree on the live price too.
+            # A waiting order is judged on every price instead (_watch_pullbacks).
+            live = live_sma.refusal(frame, self._market_price(self._focus, cross_price), want, cfg)
+            if live:
+                entry_block = f"{entry_block}; {live}" if entry_block else live
         # Waiting orders are never read in "Executed volume only" mode (as its label says).
         if not only_flow and pressure_exit.entry_mode(cfg) != "OFF" and pressure_exit.from_most_active(
             trade_sources(cfg).get((self._focus or "").upper())
@@ -4139,6 +4147,8 @@ class StrategyEngine:
                 )
             ):
                 why = f"{extreme_entry.SMA_CROSS}: the SMAs crossed against the {order.direction.lower()} signal"
+            elif (live := live_sma.refusal(frame, price, order.direction, symbol_cfg)) and price is not None:
+                why = live
             elif (expired := tall_pullback.expired(order.signal_ts, closed_ts, order.span_sec, order.candles)) and not (
                 order.market_after and price is not None and price > 0
             ):

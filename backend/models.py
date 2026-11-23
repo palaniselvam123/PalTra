@@ -510,6 +510,9 @@ class BotConfig(Base):
     turn_gap_long_max: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.2)
     turn_gap_short_min: Mapped[float | None] = mapped_column(Float, nullable=True, default=-0.2)
     turn_gap_short_max: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.2)
+    # Live SMA re-check at execution (live_sma.py): off by default; minimum gap % on the trade's side.
+    live_sma_check: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    live_sma_min_gap: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     uturn_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.005)
     day_extreme_guard: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     day_extreme_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.15)

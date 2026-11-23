@@ -227,6 +227,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "turn_gap_long_max": "FLOAT DEFAULT 0.2",
             "turn_gap_short_min": "FLOAT DEFAULT -0.2",
             "turn_gap_short_max": "FLOAT DEFAULT 0.2",
+            "live_sma_check": "BOOLEAN DEFAULT 0",
+            "live_sma_min_gap": "FLOAT DEFAULT 0",
             "day_extreme_guard": "BOOLEAN DEFAULT 0",
             "day_extreme_pct": "FLOAT DEFAULT 0.15",
             "day_extreme_pull_pct": "FLOAT DEFAULT 0.15",

@@ -274,6 +274,9 @@ export type SmaConfig = {
   extreme_cancel_on_cross?: boolean;
   /** Entry-candle check: the order waits until its own candle is past its open the trade's way (entry_candle.py). */
   entry_candle_confirm?: boolean;
+  /** Live SMA re-check at execution (live_sma.py): SMA 9 vs 21 on the live price when the order goes / while it waits. */
+  live_sma_check?: boolean;
+  live_sma_min_gap?: number;
   entry_candle_pct?: number;
   entry_candle_max?: number;
   handoff_candle?: "OFF" | "WAIT" | "FOLLOW" | string;
