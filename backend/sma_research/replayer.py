@@ -75,6 +75,7 @@ BASELINE_OFF = {
     "turn_gap_on": False,
     "live_sma_check": False,
     "day_target": False,
+    "target_net": False,
     "turn_exit_candle": False,
     "turn_colour_exit": False,
     "day_extreme_guard": False,

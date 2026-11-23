@@ -691,6 +691,8 @@ export const FEATURES: Feature[] = [
     purpose: "Works SMA 9 and SMA 21 out again on the live price at the moment the order goes (and on every price while a waiting order waits), so a buy is not placed after SMA 9 has slipped under SMA 21 inside the new candle. Optional smallest gap between the two."},
   { id: "day-hl-target", area: "settings", added: "2026-11-23", pr: 515, href: "/settings/#sma-day-target", where: "Settings → Strategy → 5. Stop-loss and target, under the pivot target", title: "Day high / low target",
     purpose: "Books a trade's profit at today's high / low made before the entry or yesterday's high / low, whichever the price reaches first, as long as the level is at least a set % away from the entry. Optional: close a little before the level."},
+  { id: "target-net", area: "settings", added: "2026-11-23", pr: 516, href: "/settings/#sma-target-net", where: "Settings → Strategy → 5. Stop-loss and target, under the day high / low target", title: "Safety net after the pivot / day target",
+    purpose: "Once a trade reaches its pivot or day high / low target it is not closed: it runs on and keeps 70% of its best profit (75% after a bigger run), like the safety net on the Bots page but for each trade. The stop is moved up to the net too."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */
@@ -721,7 +723,7 @@ export function featureById(id: string): Feature | undefined {
 const ANCHOR_GROUP: Record<string, string> = {
   "sma-candle-interval": "enter", "sma-day-extreme": "enter", "sma-colour-exit": "enter", "sma-colour-force": "enter",
   "sma-fresh": "check", "sma-exit-candle": "exit", "sma-slope-candle": "exit", "sma-small-colour": "exit",
-  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced", "sma-order-flow": "enter", "sma-flatten-exit": "exit", "sma-trend-trade": "enter", "sma-ha-scope": "check", "sma-turn-gap": "enter", "sma-live-sma": "enter", "sma-day-target": "stop",
+  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced", "sma-order-flow": "enter", "sma-flatten-exit": "exit", "sma-trend-trade": "enter", "sma-ha-scope": "check", "sma-turn-gap": "enter", "sma-live-sma": "enter", "sma-day-target": "stop", "sma-target-net": "stop",
 };
 
 /** The strategy form's group (enter, check, exit, gap, stop, risk, advanced) a Settings link opens, or null. */
