@@ -16,8 +16,9 @@ first. No interest is charged.
 
 **Locked** (``locked``, off by default): no more loans. A PAPER entry whose
 margin the free balance cannot cover is refused (``WalletLocked``, the bot's
-signal line says why) and no order is placed. Replays still borrow, so a
-backtest plays the same trades whatever the wallet holds.
+signal line says why) and no order is placed. Replays too (the owner's choice):
+a backtest then shows what the money could really trade, so its trades depend
+on the balance it starts with (the run notes ``wallet_locked``).
 
 **Auto quantity** (``auto_qty``, off by default; ``auto_qty_pct`` % of the
 free balance per stock, 10 by default): arming a stock on a PAPER bot sets
@@ -210,7 +211,7 @@ def cover(symbol: str, qty: int, price: float, bot: int = 1, replay: bool = Fals
 
     Returns None when the wallet is off or the free balance covers it, else
     the loan just taken (and the total now owed), for the screens to show.
-    A locked wallet takes no loan: it raises ``WalletLocked`` instead (replays still borrow).
+    A locked wallet takes no loan: it raises ``WalletLocked`` instead (replays too).
     """
     global LAST_LOAN
     with session_factory()() as db:
@@ -223,7 +224,7 @@ def cover(symbol: str, qty: int, price: float, bot: int = 1, replay: bool = Fals
         short = round(need - max(free, 0.0), 2)
         if short <= 0.005:
             return None
-        if getattr(row, "locked", False) and not replay:
+        if getattr(row, "locked", False):
             raise WalletLocked(
                 f"Wallet is locked: {symbol.upper()} x{int(qty)} needs {_money(need)} margin and only "
                 f"{_money(max(free, 0.0))} is free. No loan taken, so no order was placed."

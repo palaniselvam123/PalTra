@@ -282,16 +282,17 @@ async def test_a_locked_wallet_refuses_instead_of_borrowing(eng):
 
 
 @pytest.mark.asyncio
-async def test_unlocking_borrows_again_and_replays_borrow_while_locked(eng):
+async def test_replays_are_locked_too_and_unlocking_borrows_again(eng):
     import paper_wallet
 
     _load(100)
     paper_wallet.set_lock(True)
-    loan = paper_wallet.cover("SBIN", 100, 10.0, replay=True)  # a replay plays the same trades whatever the wallet
-    assert loan is not None and loan["borrowed"] == pytest.approx(100.0)
+    with pytest.raises(paper_wallet.WalletLocked):
+        paper_wallet.cover("SBIN", 100, 10.0, replay=True)  # a backtest trades only the money there is
+    assert paper_wallet.summary()["loan"] == 0
     paper_wallet.set_lock(False)
     assert paper_wallet.summary()["locked"] is False
-    await _buy(eng, _cfg(eng, qty=300), 10.0)  # Rs 600 margin, Rs 200 free: borrows again
+    await _buy(eng, _cfg(eng, qty=300), 10.0)  # Rs 600 margin, Rs 100 free: borrows again
     assert "RELIANCE" in eng.positions and paper_wallet.summary()["loan"] == pytest.approx(500.0)
 
 

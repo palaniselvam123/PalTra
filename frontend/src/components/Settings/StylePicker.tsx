@@ -68,7 +68,7 @@ export const STYLES: TradeStyle[] = [
     shows: "Candle direction check, Heikin Ashi colours, smaller-candle rules, counter candles, entry-candle check",
     on: (f) =>
       ["COLOUR", "PATTERN", "NTH_CANDLE"].includes(txt(f.entry_mode)) || yes(f.use_candle_dir) || yes(f.ha_colours) ||
-      txt(f.sc_minutes) !== "" || txt(f.small_exit_minutes) !== "" || num(f.counter_exit_count) > 0 || yes(f.entry_candle_confirm) || yes(f.extreme_entry),
+      txt(f.sc_minutes) !== "" || txt(f.small_exit_minutes) !== "" || txt(f.small_exit_upper) !== "" || num(f.counter_exit_count) > 0 || yes(f.entry_candle_confirm) || yes(f.extreme_entry),
   },
   {
     id: "turn",

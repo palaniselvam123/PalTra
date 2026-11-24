@@ -33,6 +33,7 @@ import { PinToggle } from "@/components/ui/PinToggle";
 import { usePinned } from "@/lib/usePinned";
 import { StockNewsPanel } from "./StockNewsPanel";
 import { DrillAsk, DrillPanel, drillSizes, withSlopes, type Drill, type DrillAskAt } from "./ChartDrill";
+import { qtyShort } from "@/lib/qtyShort";
 
 type Props = {
   chart: ChartPayload | null;
@@ -1656,13 +1657,25 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   // after the range was asked (the first load sees 1 minute, then the state says 5), and merging
   // 1-minute candles here would rebuild SMA 21 from that one day only, so it would start late.
   // Ask the server again at the size on screen: it adds the days before and draws every line.
+  // `loadingPast` is a dependency too: the size usually arrives while the first range is still
+  // loading, and the load's candles and its "done" land in two renders, so without it the check
+  // ran only while loading and never once the load had finished (owner's BLUESTARCO case: a past
+  // day on 5-minute candles with no SMA lines or "SMA gap at entry" for the first hour or so).
+  // Each range and size is asked once, so a failed reload is not asked again in a loop.
+  const resizedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!past || loadingPast) return;
-    if (bar === (past.interval ?? 1)) return;
+    if (bar === (past.interval ?? 1)) {
+      resizedRef.current = null; // drawn at the right size: a later mismatch may ask again
+      return;
+    }
+    const key = `${past.symbol}|${past.from}|${past.to}|${bar}`;
+    if (resizedRef.current === key) return;
+    resizedRef.current = key;
     loadPast({ from: past.from.replace(" ", "T"), to: past.to.replace(" ", "T") }, bar, pastRunRef.current, past.symbol);
-    // Only a size change reloads; loadPast reads the current refs and state.
+    // Only a size change (or the end of a load) reloads; loadPast reads the current refs and state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bar, past]);
+  }, [bar, past, loadingPast]);
 
   useEffect(() => {
     if (!rootRef.current) return;
@@ -2786,6 +2799,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         buyersAt={showBuyers && shownRead ? shownRead.time : null}
         rvol={showBuyers ? shownRead?.rvol ?? null : null}
         valueCr={showBuyers ? shownRead?.value_cr ?? null : null}
+        waitQty={showBuyers && shownRead?.buy_qty != null && shownRead?.sell_qty != null ? { buy: shownRead.buy_qty, sell: shownRead.sell_qty } : null}
         flow={shownFlow}
         waitOn={{ buy: showBuyWait, sell: showSellWait }}
         flowOn={{ buy: showFlowBuy, sell: showFlowSell }}
@@ -3294,6 +3308,7 @@ function OhlcLine({
   buyersAt,
   rvol,
   valueCr,
+  waitQty,
   flow,
   waitOn,
   flowOn,
@@ -3327,6 +3342,8 @@ function OhlcLine({
   /** Volume vs usual (×) and money traded (₹ crore) from that same Most active read. */
   rvol?: number | null;
   valueCr?: number | null;
+  /** Total quantity waiting to buy / sell at that read (Groww's bid / ask total). */
+  waitQty?: { buy: number; sell: number } | null;
   /** This candle's executed buy / sell split, estimated (undefined = not shown). */
   flow?: FlowRead | null;
   /** Which of the four strip lines are on (waiting buyers / sellers, executed buyers / sellers). */
@@ -3463,6 +3480,13 @@ function OhlcLine({
             </>
           ) : null}
           {buyers == null ? <span className="font-sans text-[11px] text-slate-400"> (no Most active read of this stock before this candle closed)</span> : null}
+          {buyers != null && waitQty ? (
+            <span className="text-slate-300" title={`Waiting to buy ${waitQty.buy.toLocaleString("en-IN")} shares · waiting to sell ${waitQty.sell.toLocaleString("en-IN")} shares (Groww's bid / ask total)`}>
+              {" "}
+              (buy <span className="text-emerald-300">{qtyShort(waitQty.buy)}</span> · sell <span className="text-rose-300">{qtyShort(waitQty.sell)}</span>){" "}
+              <NewTag id="waiting-qty" link={false} />
+            </span>
+          ) : null}
           {buyers != null && buyersAt ? (
             <span className="text-slate-400">
               {" "}

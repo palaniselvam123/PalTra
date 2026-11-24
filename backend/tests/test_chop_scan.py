@@ -452,3 +452,73 @@ def test_colour_mode_reads_the_real_candles_by_colour():
     assert normal.trend_mode != chop_scan.COLOUR_MODE
     assert colour.crosses_today >= 5 and colour.score == chop_scan.CHOPPY  # colour flips, not SMA crosses
     assert colour.crosses_by_minutes[5] == colour.crosses_today
+
+
+def test_a_holiday_scan_reads_the_last_session_not_an_empty_day():
+    """Owner's case (24 Nov holiday): with no candles on the calendar day every stock read TRENDING with 0 crosses.
+    The read now uses the session of the last closed candle."""
+    tape = [100 + ((i // 10) % 2) * 2 for i in range(360)]  # a choppy session, 09:15 to 15:15
+    frame = _minutes(tape)
+    same_day = chop_scan.analyze(frame, 9, 21, 5, _at(15, 20), symbol="CHOP")
+    holiday = chop_scan.analyze(frame, 9, 21, 5, _at(13, 30, DAY + dt.timedelta(days=1)), symbol="CHOP")
+    assert holiday is not None and same_day is not None
+    assert holiday.crosses_today == same_day.crosses_today >= chop_scan.CHOP_MIN_CROSSES
+    assert holiday.score == chop_scan.CHOPPY
+    assert holiday.crosses_by_minutes[5] == same_day.crosses_by_minutes[5]
+    # Minutes since the last cross count to the session's last candle, not across the night.
+    assert holiday.minutes_since_last_cross is not None and holiday.minutes_since_last_cross < 60
+
+
+def _drop_then_flat() -> pd.DataFrame:
+    """Yesterday quiet at 100; today a 6-point fall in the first 15 minutes, then flat around 94."""
+    import math
+
+    def day(d, closes):
+        start = dt.datetime.combine(d, dt.time(9, 15), tzinfo=IST)
+        rows, prev, run = [], closes[0], 0
+        for i, c in enumerate(closes):
+            run += 1000 * (5 if i < 15 else 1)
+            rows.append({"ts": int((start + dt.timedelta(minutes=i)).timestamp()), "open": prev,
+                         "high": max(prev, c) + 0.05, "low": min(prev, c) - 0.05, "close": c, "volume": run})
+            prev = c
+        return rows
+
+    rows = day(DAY - dt.timedelta(days=1), [100 + 0.05 * math.sin(i / 7) for i in range(375)])
+    rows += day(DAY, [100 - 6 * i / 15 for i in range(15)] + [94 + 0.1 * ((i // 3) % 2) for i in range(120)])
+    return pd.DataFrame(rows)
+
+
+def test_skipping_the_opening_candles_drops_a_trend_made_only_by_them():
+    frame = _drop_then_flat()
+    plain = chop_scan.analyze(frame, 9, 21, 5, _at(9, 55), symbol="GAP")
+    skipped = chop_scan.analyze(frame, 9, 21, 5, _at(9, 55), symbol="GAP", skip=chop_scan.skip_minutes(3, 5))
+    assert plain.trend == "STRONG_BEARISH"  # the opening fall alone reads as a strong down trend
+    assert skipped.trend is None and skipped.trend_skip_min == 15
+    assert "not a trend" in skipped.trend_notes["skip"]
+    assert skipped.vwap is not None and plain.vwap is not None and skipped.vwap < plain.vwap  # VWAP after the skip
+    assert skipped.trend_by_minutes[5] is None
+    assert chop_scan.skip_minutes(99, 5) == chop_scan.MAX_SKIP_CANDLES * 5 and chop_scan.skip_minutes(None, 5) == 0
+
+
+def test_the_pick_backtests_read_the_trend_with_the_opening_candles_skipped():
+    """Old days can be backtested with the skip: the strong-trend pick read and the auto-arm read follow the card."""
+    import auto_arm
+    import trend_picks
+
+    frame = _drop_then_flat()
+    at = dt.time(9, 55)
+    plain = trend_picks.read_at(frame, DAY, trend_picks.TrendPickRule(pick_time=at, minutes=5), "GAP")
+    skipped = trend_picks.read_at(frame, DAY, trend_picks.TrendPickRule(pick_time=at, minutes=5, skip_candles=3), "GAP")
+    assert plain["trend"] == "STRONG_BEARISH" and skipped["trend"] is None
+    assert trend_picks.TrendPickRule(skip_candles=3).as_dict()["skip_candles"] == 3
+
+    read = auto_arm.strong_read(frame, DAY, at, 5, 9, 21)
+    read_skip = auto_arm.strong_read(frame, DAY, at, 5, 9, 21, skip=15)
+    assert read["trend"] == "STRONG_BEARISH"
+    assert read_skip["trend"] is None and read_skip["trend_skip_min"] == 15 and "skip" in read_skip["trend_notes"]
+
+    import scalp_picks
+
+    rule = scalp_picks.rule_from_dict({"kind": "AUTOARM", "skip_candles": 3, "candles": "NORMAL"})
+    assert rule.skip_candles == 3
+    assert scalp_picks.rule_from_dict({"kind": "TREND", "skip_candles": 2}).skip_candles == 2

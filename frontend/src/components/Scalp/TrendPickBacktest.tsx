@@ -1,5 +1,6 @@
 "use client";
 
+import { SKIP_FIRST_CHOICES, SKIP_FIRST_HELP, skipFirstLabel } from "@/lib/skipFirst";
 import { NewTag } from "@/components/ui/NewTag";
 import { DAY_CLOSE, PICK_TIMES, fitUntil, untilAfter } from "@/lib/pickWindow";
 import Link from "next/link";
@@ -38,6 +39,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
   const [direction, setDirection] = useState<TrendPickDirection>("BOTH");
   const [minutes, setMinutes] = useState(5);
   const [candles, setCandles] = useState<"NORMAL" | "HA">("NORMAL");
+  const [skipFirst, setSkipFirst] = useState(0);
   const [bot, setBot] = useState(1);
   const [playHandoffs, setPlayHandoffs] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -73,6 +75,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
         direction,
         minutes,
         candles,
+        skip_candles: skipFirst,
         bot,
         play_handoffs: playHandoffs,
       });
@@ -190,6 +193,18 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
             <option value="HA">Heikin Ashi</option>
           </select>
         </label>
+        <label className="flex flex-col gap-1" title={SKIP_FIRST_HELP}>
+          <span>
+            Skip today&apos;s first candles <NewTag id="tq-skip-backtest" />
+          </span>
+          <select value={skipFirst} onChange={(e) => setSkipFirst(Number(e.target.value))} className={select}>
+            {SKIP_FIRST_CHOICES.map((n) => (
+              <option key={n} value={n}>
+                {skipFirstLabel(n, minutes)}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="flex flex-col gap-1">
           Trade them on
           <select value={bot} onChange={(e) => setBot(Number(e.target.value))} className={select}>
@@ -235,6 +250,7 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
         direction={direction}
         minutes={minutes}
         candles={candles}
+        skipCandles={skipFirst}
         until={fitUntil(until, pickTime)}
         bot={bot}
         playHandoffs={playHandoffs}
@@ -326,6 +342,18 @@ export function TrendPickBacktest({ armed }: { armed: Map<string, string[]> }) {
                 <option value="HA">Heikin Ashi</option>
               </select>
             </label>
+            <label className="flex flex-col gap-1" title={SKIP_FIRST_HELP}>
+          <span>
+            Skip today&apos;s first candles <NewTag id="tq-skip-backtest" />
+          </span>
+          <select value={auto.skip_candles ?? 0} onChange={(e) => void saveAuto({ skip_candles: Number(e.target.value) })} className={select}>
+            {SKIP_FIRST_CHOICES.map((n) => (
+              <option key={n} value={n}>
+                {skipFirstLabel(n, auto.minutes)}
+              </option>
+            ))}
+          </select>
+        </label>
             <label className="flex flex-col gap-1">
               Trade them on
               <select value={auto.bot} onChange={(e) => void saveAuto({ bot: Number(e.target.value) })} className={select}>

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import { SettingsCard } from "@/components/Settings/SettingsCard";
 import { inr, smaApi, type AllBotsGuard as Guard } from "@/lib/smaApi";
+import { NewTag } from "@/components/ui/NewTag";
+import { LevelBox, UnitSwitch, type LevelUnit } from "@/components/Settings/CapitalLevel";
 
 /**
  * All-bots day target / stop loss / square-off time: when today's P&L of bots 1-4 together
@@ -16,6 +18,9 @@ export function AllBotsGuard() {
   const [target, setTarget] = useState("");
   const [stop, setStop] = useState("");
   const [squareoff, setSquareoff] = useState("");
+  const [unit, setUnit] = useState<LevelUnit>("RS");
+  const [targetPct, setTargetPct] = useState("");
+  const [stopPct, setStopPct] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -28,6 +33,9 @@ export function AllBotsGuard() {
           setTarget(String(g.target || 0));
           setStop(String(g.stop || 0));
           setSquareoff(g.squareoff || "");
+          setUnit(g.unit ?? "RS");
+          setTargetPct(String(g.target_pct || 0));
+          setStopPct(String(g.stop_pct || 0));
         }
       })
       .catch(() => undefined);
@@ -50,12 +58,17 @@ export function AllBotsGuard() {
       return;
     setSaving(true);
     try {
-      const g = await smaApi.saveAllBotsGuard(t, s, squareoff.trim());
+      const g = await smaApi.saveAllBotsGuard(t, s, squareoff.trim(), {
+        unit,
+        target_pct: Math.max(0, Number(targetPct) || 0),
+        stop_pct: Math.max(0, Number(stopPct) || 0),
+      });
       setGuard(g);
       setTarget(String(g.target));
       setStop(String(g.stop));
       setSquareoff(g.squareoff || "");
-      setNote(t || s || g.squareoff ? "Saved. Watched every 5 s while NSE is open." : "Saved: off.");
+      const on = g.effective.target || g.effective.stop || g.squareoff;
+      setNote(on ? "Saved. Watched every 5 s while NSE is open." : "Saved: off.");
     } catch (err: unknown) {
       setNote(err instanceof Error ? err.message : "Could not save");
     } finally {
@@ -69,7 +82,7 @@ export function AllBotsGuard() {
       id="all-bots-guard"
       title="All bots: day target, stop loss and square-off time"
       tier="start"
-      status={guard ? { on: Boolean(guard.target || guard.stop || guard.squareoff) } : null}
+      status={guard ? { on: Boolean(guard.effective?.target || guard.effective?.stop || guard.squareoff) } : null}
       summary="One safety net over every bot together: when today's total profit reaches the target, or the loss reaches the stop loss, or the clock reaches the square-off time, every bot closes everything and stays stopped for the day. To trade again after it trips, raise the limit (or set it to 0) and press Start on the bots; the next hit squares off and alerts again."
       help={
         <>
@@ -85,25 +98,10 @@ export function AllBotsGuard() {
         </>
       }
     >
+      <UnitSwitch unit={unit} onChange={setUnit} capital={guard?.capital ?? 0} badge={<NewTag id="all-bots-capital-pct" />} />
       <div className="mt-3 flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs text-slate-400">
-          Day target (₹)
-          <input
-            inputMode="decimal"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            className="min-h-9 w-36 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-slate-400">
-          Day stop loss (₹)
-          <input
-            inputMode="decimal"
-            value={stop}
-            onChange={(e) => setStop(e.target.value)}
-            className="min-h-9 w-36 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
-          />
-        </label>
+        <LevelBox label="Day target" unit={unit} rs={target} pct={targetPct} onRs={setTarget} onPct={setTargetPct} capital={guard?.capital ?? 0} />
+        <LevelBox label="Day stop loss" unit={unit} rs={stop} pct={stopPct} onRs={setStop} onPct={setStopPct} capital={guard?.capital ?? 0} />
         <label className="flex flex-col gap-1 text-xs text-slate-400">
           Square off all at (IST)
           <span className="flex items-center gap-1">

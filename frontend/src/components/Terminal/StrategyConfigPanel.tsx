@@ -338,6 +338,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     small_exit_counter: Math.min(10, Math.max(0, Math.round(Number(form.small_exit_counter ?? 0)) || 0)),
     small_exit_loss_pct: Math.min(50, Math.max(0, Number(form.small_exit_loss_pct ?? 0) || 0)),
     small_exit_agree: Math.min(5, Math.max(1, Math.round(Number(form.small_exit_agree ?? 1)) || 1)),
+    small_exit_when: (form.small_exit_when === "TROUBLE" ? "TROUBLE" : "ALWAYS") as "ALWAYS" | "TROUBLE",
+    small_exit_giveback: Math.min(100, Math.max(1, Number(form.small_exit_giveback ?? 30) || 30)),
+    small_exit_upper: String(form.small_exit_upper ?? ""),
+    small_exit_upper_must: Boolean(form.small_exit_upper_must),
     sc_minutes: String(form.sc_minutes ?? ""),
     sc_count: Math.min(5, Math.max(1, Math.round(Number(form.sc_count ?? 2)) || 2)),
     sc_join: form.sc_join === "ANY" || form.sc_join === "AT_LEAST" ? form.sc_join : "ALL",
@@ -426,6 +430,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     turn_entry: Boolean(form.turn_entry),
     uturn_on: Boolean(form.uturn_on),
     turn_toward_cross: Boolean(form.turn_toward_cross),
+    turn_gap_on: Boolean(form.turn_gap_on),
+    turn_gap_long_min: gapNum(form.turn_gap_long_min, -0.2),
+    turn_gap_long_max: gapNum(form.turn_gap_long_max, 0.2),
+    turn_gap_short_min: gapNum(form.turn_gap_short_min, -0.2),
+    turn_gap_short_max: gapNum(form.turn_gap_short_max, 0.2),
     turn_exit_candle: Boolean(form.turn_exit_candle),
     turn_colour_exit: Boolean(form.turn_colour_exit),
     uturn_run: Math.min(30, Math.max(2, Math.round(Number(form.uturn_run ?? 5)) || 5)),
@@ -539,6 +548,20 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     extreme_expiry_candles: Math.min(10, Math.max(1, Math.round(Number(form.extreme_expiry_candles ?? 2) || 2))),
     extreme_cancel_on_cross: form.extreme_cancel_on_cross !== false,
     entry_candle_confirm: Boolean(form.entry_candle_confirm),
+    live_sma_check: Boolean(form.live_sma_check),
+    live_sma_min_gap: Math.min(5, Math.max(0, Number(form.live_sma_min_gap ?? 0) || 0)),
+    day_target: Boolean(form.day_target),
+    day_target_min_pct: Math.min(10, Math.max(0, Number(form.day_target_min_pct ?? 0.2) || 0)),
+    day_target_early_pct: Math.min(2, Math.max(0, Number(form.day_target_early_pct ?? 0) || 0)),
+    day_target_skip_min: Math.min(180, Math.max(0, Math.round(Number(form.day_target_skip_min ?? 0)) || 0)),
+    target_net: Boolean(form.target_net),
+    target_net_keep: Math.min(99, Math.max(1, Number(form.target_net_keep ?? 70) || 70)),
+    target_net_keep2: Math.min(99, Math.max(1, Number(form.target_net_keep2 ?? 75) || 75)),
+    target_net_at2: Math.min(20, Math.max(0, Number(form.target_net_at2 ?? 2) || 0)),
+    target_net_start: netStartOf(form.target_net_start),
+    target_net_start_pct: Math.min(20, Math.max(0.01, Number(form.target_net_start_pct ?? 0.25) || 0.25)),
+    target_net_start_rs: Math.min(10_000_000, Math.max(1, Number(form.target_net_start_rs ?? 500) || 500)),
+    target_net_start_atr: Math.min(20, Math.max(0.05, Number(form.target_net_start_atr ?? 1) || 1)),
     entry_candle_pct: Math.min(1, Math.max(0, Number(form.entry_candle_pct ?? 0.05) || 0)),
     entry_candle_max: Math.min(5, Math.max(1, Math.round(Number(form.entry_candle_max ?? 2)) || 2)),
     handoff_candle: (["WAIT", "FOLLOW"].includes(String(form.handoff_candle ?? "OFF").toUpperCase()) ? String(form.handoff_candle).toUpperCase() : "OFF") as "OFF" | "WAIT" | "FOLLOW",
@@ -1470,6 +1493,35 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               is against an open trade it only closes that trade, without the reverse. Every entry check still applies.
             </InfoTip>
           </label>
+          <div id="sma-turn-gap" className="mt-2">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form.turn_gap_on)}
+                disabled={!form.turn_entry}
+                onChange={(e) => set("turn_gap_on", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("turn_gap_on") && <OwnTag />}
+              Only take turns while the SMA 9 / 21 gap is inside a range <NewTag id="turn-gap-range" />
+              <InfoTip label="About the turn gap range">
+                Gap = (SMA 9 − SMA 21) ÷ SMA 21 × 100 on the candle the turn was read, minus while SMA 9 is under SMA 21. A turn up
+                buys only while the gap is inside the buy range, a turn down sells only inside the sell range. For example −0.20 to
+                +0.20 takes turns near the cross and skips turns where SMA 9 is far from SMA 21. Outside the range a turn opens
+                nothing; against an open trade it only closes it, without the reverse. Read only for SMA 9 turn entries, not the SMA
+                cross or other entries (the &quot;SMA gap range&quot; check in step 2 is read for every entry). Every entry check
+                still applies.
+              </InfoTip>
+            </label>
+            {form.turn_gap_on ? (
+              <div className="mt-2 grid grid-cols-2 items-end gap-2 sm:grid-cols-4">
+                <Field label="Turn buy: gap from (%)" value={String(form.turn_gap_long_min ?? -0.2)} onChange={(v) => set("turn_gap_long_min", v)} own={isOwn("turn_gap_long_min")} />
+                <Field label="Turn buy: gap to (%)" value={String(form.turn_gap_long_max ?? 0.2)} onChange={(v) => set("turn_gap_long_max", v)} own={isOwn("turn_gap_long_max")} />
+                <Field label="Turn sell: gap from (%)" value={String(form.turn_gap_short_min ?? -0.2)} onChange={(v) => set("turn_gap_short_min", v)} own={isOwn("turn_gap_short_min")} />
+                <Field label="Turn sell: gap to (%)" value={String(form.turn_gap_short_max ?? 0.2)} onChange={(v) => set("turn_gap_short_max", v)} own={isOwn("turn_gap_short_max")} />
+              </div>
+            ) : null}
+          </div>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -1687,6 +1739,50 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             </div>
           ) : null}
           </Only>
+          <div id="sma-live-sma" className="mt-4 scroll-mt-24">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form.live_sma_check)}
+                onChange={(e) => set("live_sma_check", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("live_sma_check") && <OwnTag />}
+              Re-check SMA 9 vs SMA 21 on the live price when the order goes <NewTag id="live-sma-check" />
+              <InfoTip label="About the live SMA re-check">
+                The entry checks read the candle that just closed, and the order goes at the next candle&apos;s open. With this
+                on, SMA 9 and SMA 21 are worked out again as if the forming candle closed at the live price now: a buy goes only
+                while SMA 9 is above SMA 21 (a sell only while it is below), by at least the gap below. An order that goes at once
+                is refused when they disagree (late entry can try again on a later candle). An order that waits (the entry
+                candle below, a pullback or a candle-extreme limit) is judged on every price while it waits and once more when it
+                fills, and is dropped the moment they turn against it. A flipped stock follows its signal. Force, news and
+                hand-off orders do not read it.
+              </InfoTip>
+            </label>
+            {form.live_sma_check ? (
+              <div className="mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-2">
+                <Field
+                  label="SMA 9 beyond SMA 21 by at least (%)"
+                  value={String(form.live_sma_min_gap ?? 0)}
+                  onChange={(v) => set("live_sma_min_gap", v)}
+                  own={isOwn("live_sma_min_gap")}
+                />
+                {!form.entry_candle_confirm ? (
+                  <button
+                    type="button"
+                    onClick={() => set("entry_candle_confirm", true)}
+                    className="min-h-9 rounded-md border border-white/15 px-3 text-left text-xs text-slate-300 hover:border-white/30"
+                  >
+                    Also wait inside the entry candle (so the re-check runs on every price until it fills)
+                  </button>
+                ) : (
+                  <span className="text-xs text-slate-400">
+                    The entry candle wait is on: the re-check runs on every price until the order fills.
+                  </span>
+                )}
+              </div>
+            ) : null}
+          </div>
           <Only s="trend">
           <label id="sma-day-extreme" className="mt-4 flex scroll-mt-24 items-center gap-2 text-sm text-slate-300">
             <input
@@ -3023,6 +3119,102 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <option value="R2">R2 for a buy, S2 for a sell</option>
             </select>
           </label>
+          <div id="sma-day-target" className="mt-3 scroll-mt-24">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form.day_target)}
+                onChange={(e) => set("day_target", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("day_target") && <OwnTag />}
+              Day high / low target: book the profit at today&apos;s or yesterday&apos;s high / low <NewTag id="day-hl-target" />
+              <InfoTip label="About the day high / low target">
+                A buy closes at the nearest of today&apos;s high made before the entry and yesterday&apos;s high, whichever the price
+                reaches first; a sell at the nearest of today&apos;s low before the entry and yesterday&apos;s low. Only a level at
+                least the % below beyond the entry counts, so the trade is in profit when it closes; with none, the trade has no
+                day target. &quot;Close early&quot; books it that % before the level, so a touch that just misses still counts.
+                Checked on every price; the stop, the other targets and the exits stay on, and whichever comes first closes.
+                &quot;Ignore today&apos;s high / low from the first N minutes&quot; leaves out the opening run on a gap day: with 15, a
+                buy at 09:30 no longer aims at the 09:28 top of the first rush (yesterday&apos;s high still counts). Off by default.
+              </InfoTip>
+            </label>
+            {form.day_target ? (
+              <div className="mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-3">
+                <Field
+                  label="Level at least this % beyond the entry"
+                  value={String(form.day_target_min_pct ?? 0.2)}
+                  onChange={(v) => set("day_target_min_pct", v)}
+                  own={isOwn("day_target_min_pct")}
+                />
+                <Field
+                  label="Close early by (%)"
+                  value={String(form.day_target_early_pct ?? 0)}
+                  onChange={(v) => set("day_target_early_pct", v)}
+                  own={isOwn("day_target_early_pct")}
+                />
+                <Field
+                  label="Ignore today's high / low from the first N min (0 = off)"
+                  value={String(form.day_target_skip_min ?? 0)}
+                  onChange={(v) => set("day_target_skip_min", v)}
+                  own={isOwn("day_target_skip_min")}
+                  suffix="min"
+                  fresh="day-target-skip"
+                />
+              </div>
+            ) : null}
+          </div>
+          <div id="sma-target-net" className="mt-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-white/10">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form.target_net)}
+                onChange={(e) => set("target_net", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("target_net") && <OwnTag />}
+              Profit safety net on every trade (keep part of the best profit) <NewTag id="net-any-profit" />
+              <InfoTip label="About the profit safety net">
+                Works on any trade, no target needed. Once the trade is in profit by the start distance (a % of the entry price,
+                a ₹ amount for the whole trade, or N × the ATR at entry), it keeps the first % of its best profit: a buy at 1590
+                with a 0.25% start (about 4 points, 1594) that runs to 1597 keeps 70% of 7 = 4.90, so it closes if the price falls
+                back to 1594.90. Once the best profit is the &quot;second step&quot; times the start distance (2 × 4 = 8 here, a run to
+                1598) it keeps the second % instead. The net only rises. With the stop on, the stop is moved up to the net too (in
+                LIVE the Groww stop is modified), so a stop hit there shows as the stop. Like the profit safety net on the Bots
+                page, but for each trade. The pivot and day high / low targets are separate: they close the trade when reached.
+              </InfoTip>
+            </label>
+            {form.target_net ? (
+              <div className="mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-4">
+                <label className="text-xs text-slate-400">
+                  <span className="flex items-center gap-1">Start the net at {isOwn("target_net_start") && <OwnTag />}</span>
+                  <select
+                    value={netStartOf(form.target_net_start)}
+                    onChange={(e) => set("target_net_start", e.target.value)}
+                    className="mt-1 w-full rounded-md bg-slate-900 px-2 py-1.5 text-sm text-slate-200 ring-1 ring-inset ring-white/10"
+                  >
+                    <option value="PCT">a % profit of the entry</option>
+                    <option value="RS">a ₹ profit (whole trade)</option>
+                    <option value="ATR">N × ATR profit</option>
+                  </select>
+                </label>
+                {netStartOf(form.target_net_start) === "PCT" ? (
+                  <Field label="Start at % profit of the entry" value={String(form.target_net_start_pct ?? 0.25)} onChange={(v) => set("target_net_start_pct", v)} own={isOwn("target_net_start_pct")} />
+                ) : netStartOf(form.target_net_start) === "RS" ? (
+                  <Field label="Start at ₹ profit (whole trade)" value={String(form.target_net_start_rs ?? 500)} onChange={(v) => set("target_net_start_rs", v)} own={isOwn("target_net_start_rs")} />
+                ) : (
+                  <Field label="Start at × ATR profit" value={String(form.target_net_start_atr ?? 1)} onChange={(v) => set("target_net_start_atr", v)} own={isOwn("target_net_start_atr")} />
+                )}
+              </div>
+            ) : null}
+            {form.target_net ? (
+              <div className="mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-3">
+                <Field label="Keep % of the best profit" value={String(form.target_net_keep ?? 70)} onChange={(v) => set("target_net_keep", v)} own={isOwn("target_net_keep")} />
+                <Field label="Second step at × start distance (0 = none)" value={String(form.target_net_at2 ?? 2)} onChange={(v) => set("target_net_at2", v)} own={isOwn("target_net_at2")} />
+                <Field label="Then keep %" value={String(form.target_net_keep2 ?? 75)} onChange={(v) => set("target_net_keep2", v)} own={isOwn("target_net_keep2")} />
+              </div>
+            ) : null}
+          </div>
           <div className={clsx("mt-3 rounded-md p-2 ring-1 ring-inset ring-white/10", (form.stop_type ?? "ATR") !== "ATR" && "opacity-50")}>
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input
@@ -3793,6 +3985,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (n(f.late_entry_min, 0) > 0) add({ group: "enter", key: "late_entry_min", text: `Late entry: a cross refused by a check is retried for ${n(f.late_entry_min, 0)} min${f.use_gap_mode ? " (ignored: gap mode is on)" : ""}`, off: { late_entry_min: "0" }, warn: Boolean(f.use_gap_mode) });
   if (f.turn_entry) add({ group: "enter", key: "turn_entry", text: `Orders at once when the SMA ${fast} line makes a sharp V (before the cross)`, off: { turn_entry: false } });
   if (f.turn_toward_cross && f.turn_entry) add({ group: "enter", key: "turn_toward_cross", text: "SMA 9 turns trade only toward the 9/21 cross (sell above, buy below)", off: { turn_toward_cross: false } });
+  if (f.turn_gap_on && f.turn_entry) add({ group: "enter", key: "turn_gap_on", text: `SMA 9 turns trade only inside the SMA 9/21 gap range (buy ${f.turn_gap_long_min ?? -0.2}% to ${f.turn_gap_long_max ?? 0.2}%, sell ${f.turn_gap_short_min ?? -0.2}% to ${f.turn_gap_short_max ?? 0.2}%)`, off: { turn_gap_on: false } });
   if (f.turn_exit_candle && f.turn_entry) add({ group: "exit", key: "turn_exit_candle", text: "SMA 9 turns and SMA 9 exits close a trade only once a candle of the other colour closes", off: { turn_exit_candle: false } });
   if (f.turn_colour_exit && f.turn_entry) add({ group: "exit", key: "turn_colour_exit", text: "A turn trade closes on the first candle of the other colour", off: { turn_colour_exit: false } });
   if (f.uturn_on && (f.turn_entry || f.turn_alert)) add({ group: "enter", key: "uturn_on", text: `Rounded U turns count too (after ${f.uturn_run ?? 5} candles one way)`, off: { uturn_on: false } });
@@ -3803,6 +3996,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (String(f.handoff_candle ?? "OFF").toUpperCase() === "WAIT") add({ group: "enter", key: "handoff_candle", text: "Hand-off orders wait for a candle going their way, else skip", off: { handoff_candle: "OFF" } });
   if (String(f.handoff_candle ?? "OFF").toUpperCase() === "FOLLOW") add({ group: "enter", key: "handoff_candle", text: "Hand-off orders follow the forming candle: green buys, red sells", off: { handoff_candle: "OFF" } });
   if (f.entry_candle_confirm) add({ group: "enter", key: "entry_candle_confirm", text: `Orders only while the entry candle goes the trade's way (${n(f.entry_candle_pct, 0.05)}% past its open, up to ${n(f.entry_candle_max, 2)} candles)`, off: { entry_candle_confirm: false } });
+  if (f.live_sma_check) add({ group: "enter", key: "live_sma_check", text: `Re-checks SMA 9 vs SMA 21 on the live price when the order goes${Number(f.live_sma_min_gap ?? 0) > 0 ? ` (at least ${f.live_sma_min_gap}% apart)` : ""}`, off: { live_sma_check: false } });
   if (f.extreme_entry) add({ group: "enter", key: "extreme_entry", text: "Waits to enter at the signal candle's low (buy) / high (sell); may miss the trade", off: { extreme_entry: false } });
 
   // 2. Checks before entering
@@ -3876,9 +4070,12 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "check", key: "sc_entry", text: `Before entering, the last ${n(f.sc_count, 2)} ${scSizes.join(" / ")}-min candles must be green to buy / red to sell (${f.sc_join === "ANY" ? "any one size" : f.sc_join === "AT_LEAST" ? `at least ${n(f.sc_need, 1)} sizes` : "every size"})`, off: { sc_entry: false } });
   if (scSizes.length && f.sc_confirm)
     add({ group: "exit", key: "sc_confirm", text: `A colour-turn exit waits until the last ${n(f.sc_count, 2)} ${scSizes.join(" / ")}-min candles agree`, off: { sc_confirm: false } });
-  const smallSizes = String(f.small_exit_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < Number(f.candle_minutes ?? 1));
+  const smallSizes = [
+    ...String(f.small_exit_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < Number(f.candle_minutes ?? 1)),
+    ...String(f.small_exit_upper ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > Number(f.candle_minutes ?? 1)),
+  ];
   if (smallSizes.length)
-    add({ group: "exit", key: "small_exit_minutes", text: `Watches ${smallSizes.join(" / ")}-min candles while in a trade: exits on their SMA cross / SMA 9 turn against it${Number(f.small_exit_loss_pct ?? 0) > 0 ? ` (only when ${f.small_exit_loss_pct}% under water)` : ""}`, off: { small_exit_minutes: "" } });
+    add({ group: "exit", key: "small_exit_minutes", text: `Watches ${smallSizes.join(" / ")}-min candles while in a trade: exits on their SMA cross / SMA 9 turn against it${Number(f.small_exit_loss_pct ?? 0) > 0 ? ` (only when ${f.small_exit_loss_pct}% under water)` : ""}${f.small_exit_when === "TROUBLE" ? ` (only when in a loss or ${f.small_exit_giveback ?? 30}% of the best profit given back)` : ""}${f.small_exit_upper_must ? " (a bigger size must agree)" : ""}`, off: { small_exit_minutes: "", small_exit_upper: "" } });
   if (n(f.counter_exit_count, 0) > 0) add({ group: "exit", key: "counter_exit_count", text: `Close after ${n(f.counter_exit_count, 0)} candles in a row against the trade`, off: { counter_exit_count: "0" } });
   if (n(f.counter_exit_count, 0) > 0 && f.counter_reenter) add({ group: "enter", key: "counter_reenter", text: `Re-enter after a counter-candle exit when a candle breaks the exit candle (up to ${n(f.counter_reenter_max, 3)} per SMA run)`, off: { counter_reenter: false } });
   if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
@@ -3984,6 +4181,11 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
     add({ group: "stop", key: "pivot_target", text: f.pivot_target === "R1" ? "Target at the R1 / S1 pivot (else R2 / S2)" : "Target at the R2 / S2 pivot", off: { pivot_target: "OFF" } });
+  const netStart = netStartOf(f.target_net_start);
+  if (f.target_net)
+    add({ group: "stop", key: "target_net", text: `Profit safety net on every trade from ${netStart === "PCT" ? `${f.target_net_start_pct ?? 0.25}%` : netStart === "RS" ? `₹${f.target_net_start_rs ?? 500}` : `${f.target_net_start_atr ?? 1}× ATR`} profit, keeping ${f.target_net_keep ?? 70}% of the best profit${Number(f.target_net_at2 ?? 2) > 0 ? ` (${f.target_net_keep2 ?? 75}% from ${f.target_net_at2 ?? 2}× that distance)` : ""}`, off: { target_net: false } });
+  if (f.day_target)
+    add({ group: "stop", key: "day_target", text: `Target at today's or yesterday's high / low, whichever comes first (at least ${f.day_target_min_pct ?? 0.2}% from the entry)${Number(f.day_target_skip_min ?? 0) > 0 ? `; today's levels from 09:15 + ${f.day_target_skip_min} min only` : ""}`, off: { day_target: false } });
 
   // 7. Advanced
   if (f.recovery_hold) add({ group: "advanced", key: "recovery_hold", text: "Recovery hold: a losing trade is held past the opposite cross", off: { recovery_hold: false }, warn: true });
@@ -4320,7 +4522,13 @@ function Hint({ children, label }: { children: ReactNode; label: string }) {
 }
 
 
+/** Where the profit safety net starts; an old "TARGET" reads as PCT (backend target_net.start). */
+function netStartOf(v: unknown): "PCT" | "RS" | "ATR" {
+  return v === "RS" || v === "ATR" ? v : "PCT";
+}
+
 const SMALL_SIZES = [1, 2, 3, 5, 10] as const;
+const UPPER_SIZES = [5, 10, 15, 30, 60] as const;
 
 /** Watch smaller candles while in a trade (small_candles.py): exit on a 1 / 3 / 5-minute turn before the bot's own candle can. */
 function SmallCandlesCard({
@@ -4337,15 +4545,25 @@ function SmallCandlesCard({
     .split(",")
     .map((s) => Number(s.trim()))
     .filter((n) => (SMALL_SIZES as readonly number[]).includes(n));
-  const watched = picked.filter((n) => n < own);
+  const upperPicked = String(form.small_exit_upper ?? "")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => (UPPER_SIZES as readonly number[]).includes(n));
+  const upperWatched = upperPicked.filter((n) => n > own);
+  const watched = [...picked.filter((n) => n < own), ...upperWatched];
   const on = watched.length > 0;
   const toggle = (m: number, next: boolean) => {
     const list = next ? Array.from(new Set([...picked, m])) : picked.filter((n) => n !== m);
     set("small_exit_minutes", list.sort((a, b) => a - b).join(","));
   };
+  const toggleUpper = (m: number, next: boolean) => {
+    const list = next ? Array.from(new Set([...upperPicked, m])) : upperPicked.filter((n) => n !== m);
+    set("small_exit_upper", list.sort((a, b) => a - b).join(","));
+  };
+  const trouble = form.small_exit_when === "TROUBLE";
   const counter = Number(form.small_exit_counter ?? 0) || 0;
   return (
-    <div className={clsx("mt-3 rounded-md p-2 ring-1 ring-inset", on ? "ring-emerald-400/40 bg-emerald-500/[0.05]" : "ring-white/10")}>
+    <div id="sma-small-candles" className={clsx("mt-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset", on ? "ring-emerald-400/40 bg-emerald-500/[0.05]" : "ring-white/10")}>
       <div className="flex flex-wrap items-center gap-1 text-sm text-slate-300">
         {isOwn("small_exit_minutes") && <OwnTag />}
         <b className="text-slate-100">Watch smaller candles while in a trade</b>
@@ -4357,7 +4575,11 @@ function SmallCandlesCard({
           row against it. One size saying so closes the trade (SMALL_CANDLE_EXIT), or set how many sizes must agree. &quot;Only
           when under water&quot; keeps a winning trade with the bot&apos;s own exits and lets the small candles cut only a losing
           one. No reverse: the next entry waits for the bot&apos;s own signal. Entries are unchanged. Sizes at or above the
-          bot&apos;s candle are ignored.
+          bot&apos;s candle are ignored. &quot;Look only when in a loss or falling from profit&quot; skips the candles while the price
+          keeps going the trade&apos;s way: they are read only while the trade is in a loss or has given back the set % of its
+          best profit (a buy at 100 that ran to 104 and is back at 102.50 gave back 38%). &quot;Bigger candles too&quot; reads the
+          same three things on candles bigger than the bot&apos;s; they count toward &quot;sizes that must agree&quot;, and with
+          &quot;a bigger size must agree&quot; the trade closes only while one of them says so too.
         </InfoTip>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300" role="group" aria-label="Smaller candle sizes to watch">
@@ -4390,6 +4612,45 @@ function SmallCandlesCard({
         <Field label="Candles in a row against (0 = off)" value={String(counter)} onChange={(v) => set("small_exit_counter", v)} own={isOwn("small_exit_counter")} />
         <Field label="Only when under water by (%, 0 = always)" value={String(form.small_exit_loss_pct ?? 0)} onChange={(v) => set("small_exit_loss_pct", v)} own={isOwn("small_exit_loss_pct")} />
         <Field label="Sizes that must agree (1 = any)" value={String(form.small_exit_agree ?? 1)} onChange={(v) => set("small_exit_agree", v)} own={isOwn("small_exit_agree")} />
+      </div>
+      <div className={clsx("mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-2", !on && "opacity-50")}>
+        <label className="text-xs text-slate-400">
+          <span className="flex items-center gap-1">When to look <NewTag id="small-trouble" /> {isOwn("small_exit_when") && <OwnTag />}</span>
+          <select
+            value={trouble ? "TROUBLE" : "ALWAYS"}
+            onChange={(e) => set("small_exit_when", e.target.value)}
+            className="mt-1 w-full rounded-md bg-slate-900 px-2 py-1.5 text-sm text-slate-200 ring-1 ring-inset ring-white/10"
+          >
+            <option value="ALWAYS">always while in a trade</option>
+            <option value="TROUBLE">only when in a loss or falling from profit</option>
+          </select>
+        </label>
+        {trouble ? (
+          <Field label="Falling from profit = gave back % of the best profit" value={String(form.small_exit_giveback ?? 30)} onChange={(v) => set("small_exit_giveback", v)} own={isOwn("small_exit_giveback")} />
+        ) : (
+          <div />
+        )}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300" role="group" aria-label="Bigger candle sizes to watch">
+        <span className="flex items-center gap-1 text-slate-400">Bigger candles too: <NewTag id="small-trouble" /> {isOwn("small_exit_upper") && <OwnTag />}</span>
+        {UPPER_SIZES.map((m) => (
+          <label
+            key={m}
+            className={clsx(
+              "flex items-center gap-1 rounded-full px-2.5 py-1 ring-1 ring-inset",
+              m <= own ? "opacity-40" : upperPicked.includes(m) ? "bg-emerald-500/15 text-slate-100 ring-emerald-400/50" : "ring-white/15 hover:bg-white/5"
+            )}
+            title={m <= own ? `Not bigger than the bot's ${own}-minute candle` : undefined}
+          >
+            <input type="checkbox" checked={upperPicked.includes(m)} disabled={m <= own} onChange={(e) => toggleUpper(m, e.target.checked)} className="accent-emerald-400" aria-label={`Also watch ${m}-minute candles`} />
+            {m} min
+          </label>
+        ))}
+        <label className={clsx("ml-2 flex items-center gap-1", !upperWatched.length && "opacity-50")}>
+          <input type="checkbox" checked={Boolean(form.small_exit_upper_must)} onChange={(e) => set("small_exit_upper_must", e.target.checked)} className="accent-[#10B981]" />
+          {isOwn("small_exit_upper_must") && <OwnTag />}
+          a bigger size must agree
+        </label>
       </div>
     </div>
   );
@@ -4565,9 +4826,10 @@ const REVERSE_KEYS = [
     label: "smaller-candle",
     on: (f: SmaConfig) => {
       const own = Number(f.candle_minutes ?? 1) || 1;
-      return String(f.small_exit_minutes ?? "")
-        .split(",")
-        .some((s) => Number(s.trim()) > 0 && Number(s.trim()) < own);
+      return (
+        String(f.small_exit_minutes ?? "").split(",").some((s) => Number(s.trim()) > 0 && Number(s.trim()) < own) ||
+        String(f.small_exit_upper ?? "").split(",").some((s) => Number(s.trim()) > own)
+      );
     },
   },
 ] as const;
@@ -6439,4 +6701,9 @@ function TrendTrade({
       ) : null}
     </div>
   );
+}
+
+function gapNum(v: unknown, fallback: number): number {
+  const n = Number(v ?? fallback);
+  return Number.isFinite(n) ? Math.min(10, Math.max(-10, n)) : fallback;
 }

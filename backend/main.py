@@ -39,10 +39,14 @@ import order_gate as order_gate_mod
 import auto_start
 import scalp_alerts
 import auto_arm
+import saved_picks
 import scan_trade_test
 import hold_test
 import trend_rank
 import scan_arm
+import target_net as target_net_mod
+import day_target as day_target_mod
+import live_sma as live_sma_mod
 import turn_entry as turn_entry_mod
 import day_extreme as day_extreme_mod
 import backtest_compare
@@ -864,6 +868,25 @@ class ConfigUpdate(BaseModel):
     turn_colour_exit: bool | None = None
     uturn_run: int | None = Field(default=None, ge=2, le=turn_entry_mod.MAX_U_RUN)
     uturn_min_pct: float | None = Field(default=None, ge=0, le=turn_entry_mod.MAX_U_MIN)
+    turn_gap_on: bool | None = None
+    turn_gap_long_min: float | None = Field(default=None, ge=-turn_entry_mod.MAX_GAP, le=turn_entry_mod.MAX_GAP)
+    turn_gap_long_max: float | None = Field(default=None, ge=-turn_entry_mod.MAX_GAP, le=turn_entry_mod.MAX_GAP)
+    turn_gap_short_min: float | None = Field(default=None, ge=-turn_entry_mod.MAX_GAP, le=turn_entry_mod.MAX_GAP)
+    turn_gap_short_max: float | None = Field(default=None, ge=-turn_entry_mod.MAX_GAP, le=turn_entry_mod.MAX_GAP)
+    live_sma_check: bool | None = None
+    live_sma_min_gap: float | None = Field(default=None, ge=0, le=5)
+    day_target: bool | None = None
+    day_target_min_pct: float | None = Field(default=None, ge=0, le=day_target_mod.MAX_MIN_PCT)
+    day_target_early_pct: float | None = Field(default=None, ge=0, le=day_target_mod.MAX_EARLY_PCT)
+    day_target_skip_min: int | None = Field(default=None, ge=0, le=day_target_mod.MAX_SKIP_MIN)
+    target_net: bool | None = None
+    target_net_keep: float | None = Field(default=None, ge=1, le=99)
+    target_net_keep2: float | None = Field(default=None, ge=1, le=99)
+    target_net_at2: float | None = Field(default=None, ge=0, le=target_net_mod.MAX_AT2)
+    target_net_start: Literal["TARGET", "PCT", "RS", "ATR"] | None = None
+    target_net_start_pct: float | None = Field(default=None, ge=0.01, le=20)
+    target_net_start_rs: float | None = Field(default=None, ge=1, le=10_000_000)
+    target_net_start_atr: float | None = Field(default=None, ge=0.05, le=20)
     day_extreme_guard: bool | None = None
     day_extreme_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
     day_extreme_pull_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
@@ -981,6 +1004,10 @@ class ConfigUpdate(BaseModel):
     small_exit_counter: int | None = Field(default=None, ge=0, le=small_candles.MAX_COUNTER)
     small_exit_loss_pct: float | None = Field(default=None, ge=0, le=50)
     small_exit_agree: int | None = Field(default=None, ge=1, le=small_candles.MAX_AGREE)
+    small_exit_when: Literal["ALWAYS", "TROUBLE"] | None = None
+    small_exit_giveback: float | None = Field(default=None, ge=1, le=100)
+    small_exit_upper: str | None = Field(default=None, max_length=32)
+    small_exit_upper_must: bool | None = None
     # Smaller-candle colours (small_colour.py): sizes (CSV, "" = off), N in a row, how sizes combine, and the two uses.
     sc_minutes: str | None = Field(default=None, max_length=32)
     sc_count: int | None = Field(default=None, ge=1, le=small_colour.MAX_COUNT)
@@ -1446,6 +1473,8 @@ COPY_SKIP = frozenset({
     "id", "symbol", "trade_symbols", "trade_sources", "trading_mode", "bot_name", "stock_settings",
     "second_ticks", "trade_count_reset_id", "trade_count_reset_date", "max_trades_bumped",
     "all_bots_target", "all_bots_stop", "all_bots_squareoff",
+    "all_bots_trail", "all_bots_trail_start", "all_bots_trail_keep", "all_bots_trail_start2", "all_bots_trail_keep2",
+    "all_bots_unit", "all_bots_target_pct", "all_bots_stop_pct", "all_bots_trail_start_pct", "all_bots_trail_start2_pct",
     "pnl_alert_profit", "pnl_alert_loss", "pnl_alert_telegram", "pnl_alert_call", "pnl_alert_basis",
     "news_entry_bot", "news_entry_impact", "news_entry_scope", "news_entry_max_age_min", "news_entry_max_day",
     "auto_start",
@@ -1582,6 +1611,8 @@ def _import_desk(desk: str, data: dict, body: SettingsImport, dry: bool = False)
         checked["review_check_minutes"] = _as_check_minutes_csv(checked["review_check_minutes"])
     if "small_exit_minutes" in checked:
         checked["small_exit_minutes"] = small_candles.clean_sizes(checked["small_exit_minutes"])
+    if "small_exit_upper" in checked:
+        checked["small_exit_upper"] = small_candles.clean_upper(checked["small_exit_upper"])
     notes: list[str] = []
     with session_factory()() as db:
         row = db.get(BotConfig, eng.config_id)
@@ -1615,6 +1646,8 @@ def _import_desk(desk: str, data: dict, body: SettingsImport, dry: bool = False)
                         values["review_check_minutes"] = _as_check_minutes_csv(probe["review_check_minutes"])
                     if "small_exit_minutes" in values:
                         values["small_exit_minutes"] = small_candles.clean_sizes(values["small_exit_minutes"])
+                    if "small_exit_upper" in values:
+                        values["small_exit_upper"] = small_candles.clean_upper(values["small_exit_upper"])
                 except (ValidationError, ValueError, TypeError) as exc:
                     if not isinstance(exc, ValidationError):
                         raise HTTPException(400, f"{_desk_label(desk)}: {symbol} has a setting that is not valid") from exc
@@ -1743,6 +1776,8 @@ async def _put_config(eng: StrategyEngine, body: ConfigUpdate):
             data["review_check_minutes"] = _as_check_minutes_csv(data["review_check_minutes"])
         if "small_exit_minutes" in data:
             data["small_exit_minutes"] = small_candles.clean_sizes(data["small_exit_minutes"])
+        if "small_exit_upper" in data:
+            data["small_exit_upper"] = small_candles.clean_upper(data["small_exit_upper"])
         if "sma_fast" in data and "sma_slow" in data and data["sma_fast"] >= data["sma_slow"]:
             raise HTTPException(400, "Fast SMA period must be shorter than the slow period")
         for key, value in data.items():
@@ -2019,6 +2054,25 @@ def _gap_dict(row) -> dict:
         "turn_colour_exit": turn_entry_mod.colour_exit_on(row),
         "uturn_run": turn_entry_mod.u_run(row),
         "uturn_min_pct": turn_entry_mod.u_min(row),
+        "turn_gap_on": turn_entry_mod.gap_on(row),
+        "turn_gap_long_min": turn_entry_mod.gap_range(row)["LONG"][0],
+        "turn_gap_long_max": turn_entry_mod.gap_range(row)["LONG"][1],
+        "turn_gap_short_min": turn_entry_mod.gap_range(row)["SHORT"][0],
+        "turn_gap_short_max": turn_entry_mod.gap_range(row)["SHORT"][1],
+        "live_sma_check": live_sma_mod.on(row),
+        "live_sma_min_gap": live_sma_mod.min_gap(row),
+        "day_target": day_target_mod.on(row),
+        "day_target_min_pct": day_target_mod.min_pct(row),
+        "day_target_early_pct": day_target_mod.early_pct(row),
+        "day_target_skip_min": day_target_mod.skip_min(row),
+        "target_net": target_net_mod.on(row),
+        "target_net_keep": target_net_mod.keep(row),
+        "target_net_keep2": target_net_mod.keep2(row),
+        "target_net_at2": target_net_mod.at2(row),
+        "target_net_start": target_net_mod.start(row),
+        "target_net_start_pct": target_net_mod.start_pct(row),
+        "target_net_start_rs": target_net_mod.start_rs(row),
+        "target_net_start_atr": target_net_mod.start_atr(row),
         "day_extreme_guard": day_extreme_mod.on(row),
         "day_extreme_pct": day_extreme_mod.near_pct(row),
         "day_extreme_pull_pct": day_extreme_mod.pull_pct(row),
@@ -2117,6 +2171,10 @@ def _gap_dict(row) -> dict:
         "small_exit_counter": small_candles.counter(row),
         "small_exit_loss_pct": small_candles.loss_pct(row),
         "small_exit_agree": small_candles.agree(row),
+        "small_exit_when": small_candles.when(row),
+        "small_exit_giveback": small_candles.giveback(row),
+        "small_exit_upper": ",".join(str(s) for s in small_candles.upper_sizes(row)),
+        "small_exit_upper_must": small_candles.upper_must(row),
         "sc_minutes": ",".join(str(s) for s in small_colour.sizes(row)),
         "sc_count": small_colour.count(row),
         "sc_join": small_colour.join(row),
@@ -2198,6 +2256,8 @@ async def _put_stock_config(eng: StrategyEngine, symbol: str, body: StockConfigU
             data["review_check_minutes"] = _as_check_minutes_csv(data["review_check_minutes"])
         if "small_exit_minutes" in data:
             data["small_exit_minutes"] = small_candles.clean_sizes(data["small_exit_minutes"])
+        if "small_exit_upper" in data:
+            data["small_exit_upper"] = small_candles.clean_upper(data["small_exit_upper"])
         for key, value in data.items():
             if value == getattr(row, key):
                 own.pop(key, None)
@@ -2386,7 +2446,10 @@ async def _start_bot(eng: StrategyEngine):
         cfg = engine.load_config()
         target, stop = all_bots_guard.limits(cfg)
         amount = closed + all_bots_guard.open_total(_all_bots())
-        if all_bots_guard.verdict(amount, target, stop, engine._now(), all_bots_guard.squareoff_at(cfg)) is None:
+        now = engine._now()
+        peak = all_bots_guard.peak_today(now.date())
+        floor = all_bots_guard.trail_floor(max(peak if peak is not None else amount, amount), all_bots_guard.trail_rule(cfg))
+        if all_bots_guard.verdict(amount, target, stop, now, all_bots_guard.squareoff_at(cfg), floor) is None:
             eng.status, eng.halt_reason = "STOPPED", ""
     if eng.status == "HALTED":
         raise HTTPException(423, eng.halt_reason or "Halted for the day")
@@ -2831,6 +2894,8 @@ class TrendPickStart(BaseModel):
     minutes: Literal[1, 3, 5, 10, 15] = 5
     #: NORMAL = real candles, HA = the Trend quality read on Heikin Ashi candles (as the card's "Candles" menu).
     candles: Literal["NORMAL", "HA"] = "NORMAL"
+    #: Today's first N candles left out of the trend read (the Trend quality card's "Skip today's first candles").
+    skip_candles: int = Field(default=0, ge=0, le=chop_scan.MAX_SKIP_CANDLES)
     #: Trade until this time each day ("HH:MM", 09:20-15:30; positions squared off there); None = 15:30.
     until: str | None = None
     bot: int = Field(default=1, ge=1, le=4)
@@ -2842,7 +2907,7 @@ class TrendPickStart(BaseModel):
 async def _start_trend_picks(
     bot: int, universe: list[str], day: dt.date, end_day: dt.date, pick_time: dt.time, top_n: int, direction: str,
     minutes: int, speed: int, play_handoffs: bool = True, active: dict | None = None, rule=None,
-    candles: str = "NORMAL", until: dt.time | None = None,
+    candles: str = "NORMAL", until: dt.time | None = None, cap: int | None = None, skip_candles: int = 0,
 ) -> dict:
     """Start a strong-trend pick backtest on `bot`'s replay player, or with `active` (rank, bias, min_value_cr) a Most
     active pick backtest (active_picks.py). Raises HTTPException on a refusal."""
@@ -2860,7 +2925,7 @@ async def _start_trend_picks(
             names.append(name)
     if not names:
         raise HTTPException(400, "Give at least one stock to pick from.")
-    names = names[: trend_picks.MAX_UNIVERSE]
+    names = names[: cap or trend_picks.MAX_UNIVERSE]
     if not engine.broker.token:
         engine.broker.adopt_saved_session()
     if not engine.broker.token:
@@ -2876,7 +2941,7 @@ async def _start_trend_picks(
         rule = trend_picks.TrendPickRule(
             pick_time=pick_time, top_n=top_n, direction=direction, minutes=minutes,
             sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow), candles=candles,
-            until=until,
+            skip_candles=skip_candles, until=until,
         )
     session = replays[bot]
     await session.begin(
@@ -2915,7 +2980,7 @@ async def replay_trend_picks(body: TrendPickStart):
         raise HTTPException(400, str(exc)) from exc
     return await _start_trend_picks(
         body.bot, body.universe, day, end_day, pick_time, body.top_n, body.direction, body.minutes, body.speed,
-        play_handoffs=body.play_handoffs, candles=body.candles, until=until,
+        play_handoffs=body.play_handoffs, candles=body.candles, until=until, skip_candles=body.skip_candles,
     )
 
 
@@ -2931,6 +2996,8 @@ class AutoArmStart(BaseModel):
     minutes: Literal[1, 3, 5, 10, 15] = 5
     #: NORMAL = real candles, HA = the Trend quality read on Heikin Ashi candles (as the card's "Candles" menu).
     candles: Literal["NORMAL", "HA"] = "NORMAL"
+    #: Today's first N candles left out of the trend read (the Trend quality card's "Skip today's first candles").
+    skip_candles: int = Field(default=0, ge=0, le=chop_scan.MAX_SKIP_CANDLES)
     #: None = the Scalp alerts' own thresholds (scalp_alerts.json), as the live auto-arm reads them.
     min_checks: int | None = Field(default=None, ge=5, le=7)
     side: Literal["BOTH", "UP", "DOWN"] | None = None
@@ -3000,10 +3067,13 @@ async def replay_auto_arm(body: AutoArmStart):
     eng = engine if body.bot == 1 else bot_engines.get(body.bot)
     if eng is None:
         raise HTTPException(404, f"No bot {body.bot}")
-    cfg = eng.load_config()
+    # The Trend quality scan (and so its History and the live auto-arm) reads the main desk's SMA periods whichever
+    # bot it arms: read the same ones here, not the replayed bot's (a bot 2-5 on other periods read other trends).
+    scan_cfg = engine.load_config()
     rule = auto_arm.AutoArmRule(
         source=body.source, first=first, last=last, every_min=body.every_min, minutes=body.minutes, until=until,
-        sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow), candles=body.candles,
+        sma_fast=int(scan_cfg.sma_fast), sma_slow=int(scan_cfg.sma_slow), candles=body.candles,
+        skip_candles=body.skip_candles,
         min_checks=body.min_checks or alerts.strong_min_checks, side=body.side or alerts.strong_side,
         pct=body.pct or alerts.pressure_pct, pressure_side=body.pressure_side or alerts.pressure_side,
         min_value_cr=alerts.pressure_min_value_cr if body.min_value_cr is None else body.min_value_cr,
@@ -3038,6 +3108,88 @@ async def replay_auto_arm(body: AutoArmStart):
         play_handoffs=body.play_handoffs, rule=rule,
     )
     return {**info, "notes": notes[:10]}
+
+
+class SavedScanStart(BaseModel):
+    date: str
+    end_date: str | None = None
+    #: The asked time: each day's first saved Most active scan at or after it with enough usable stocks.
+    at: str = "09:15"
+    #: One or more ranking columns (saved_picks.COLUMNS); several = average place.
+    rank_by: list[str] = Field(default_factory=lambda: ["rvol"])
+    top_n: int = Field(default=24, ge=1, le=saved_picks.MAX_TOP_N)
+    #: Shares per picked stock, 0 = the bot's own quantity.
+    qty: int = Field(default=0, ge=0, le=1_000_000)
+    side: Literal["ANY", "BUYERS", "SELLERS"] = "ANY"
+    min_value_cr: float = Field(default=0.0, ge=0, le=100000)
+    min_rvol: float = Field(default=0.0, ge=0, le=100)
+    price_min: float = Field(default=0.0, ge=0, le=1_000_000)
+    price_max: float = Field(default=0.0, ge=0, le=1_000_000)
+    until: str | None = None
+    bot: int = Field(default=1, ge=1, le=4)
+    speed: int = 300
+    play_handoffs: bool = True
+
+
+async def _saved_scan_picks(day: dt.date, rule: "saved_picks.SavedScanRule") -> tuple[list[dict], str]:
+    """One day's saved-scan picks: this server's saved Most active scans, else (on the backtest server) the desk's."""
+    scans = await asyncio.to_thread(auto_arm.saved_scans, day)
+    if scans:
+        return await asyncio.to_thread(saved_picks.choose_for_day, scans, rule)
+    if server_role.is_backtest() and server_role.backtest_link_token():
+        from urllib.parse import urlencode
+
+        query = urlencode({"day": day.isoformat(), "rule": json.dumps(rule.query())})
+        try:
+            body = await backtest_server._desk_get(f"/api/link/backtest/saved-picks?{query}")
+        except Exception as exc:  # noqa: BLE001
+            return [], f"the desk's saved Most active scans could not be read ({exc})"
+        return [p for p in body.get("picks") or [] if isinstance(p, dict)], str(body.get("note") or "")
+    return [], "no saved Most active scans"
+
+
+@app.post("/api/replay/saved-scans")
+async def replay_saved_scans(body: SavedScanStart):
+    """Saved-scan backtest (saved_picks.py): each day's first saved Most active scan at or after the asked time, the
+    top N by the chosen columns, traded by the bot from the minute after the scan read them. Practice money; never
+    sends an order, never changes a Trade list."""
+    _refuse_desk_replay_in_market()
+    if body.speed not in SPEEDS:
+        raise HTTPException(400, f"Speed must be one of {', '.join(str(s) for s in SPEEDS)}.")
+    bad = [k for k in body.rank_by if k not in saved_picks.COLUMNS]
+    if bad or not body.rank_by:
+        raise HTTPException(400, f"Rank by one or more of: {', '.join(saved_picks.COLUMNS)}.")
+    try:
+        day, end_day = parse_replay_range(body.date, body.end_date, allow_today=_replay_today_ok())
+        at = parse_start(body.at)
+        _, until = trend_picks.parse_window(body.at, body.until)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not (dt.time(9, 15) <= at <= dt.time(15, 0)):
+        raise HTTPException(400, "Pick a time between 09:15 and 15:00 IST.")
+    lo, hi = sorted((body.price_min, body.price_max)) if body.price_min and body.price_max else (body.price_min, body.price_max)
+    rule = saved_picks.SavedScanRule(
+        pick_time=at, top_n=body.top_n, rank_by=saved_picks.clean_rank(body.rank_by), qty=body.qty, side=body.side,
+        min_value_cr=body.min_value_cr, min_rvol=body.min_rvol, price_min=lo, price_max=hi, until=until,
+    )
+    names: list[str] = []
+    d = day
+    while d <= end_day:
+        if d.weekday() < 5:
+            picks, note = await _saved_scan_picks(d, rule)
+            rule.notes[d.isoformat()] = note
+            if picks:
+                rule.chosen[d.isoformat()] = picks
+                names += [p["symbol"] for p in picks if p["symbol"] not in names]
+        d += dt.timedelta(days=1)
+    notes = [f"{k}: {v}" for k, v in rule.notes.items()]
+    if not rule.chosen:
+        raise HTTPException(400, " · ".join(notes[:5]) or "No saved Most active scans for those days.")
+    info = await _start_trend_picks(
+        body.bot, names[: saved_picks.MAX_UNIVERSE], day, end_day, at, body.top_n, "BOTH", 5, body.speed,
+        play_handoffs=body.play_handoffs, rule=rule, cap=saved_picks.MAX_UNIVERSE,
+    )
+    return {**info, "notes": notes, "days_with_picks": len(rule.chosen)}
 
 
 # ---- Backtest queue and schedule (backtest_queue.py): auto-arm backtests one after another, practice money ----
@@ -3226,6 +3378,7 @@ class TrendPicksAuto(BaseModel):
     top_n: int | None = Field(default=None, ge=1, le=trend_picks.MAX_TOP_N)
     minutes: Literal[1, 3, 5, 10, 15] | None = None
     candles: Literal["NORMAL", "HA"] | None = None
+    skip_candles: int | None = Field(default=None, ge=0, le=12)
     until: str | None = None
     bot: int | None = Field(default=None, ge=1, le=4)
     lists: list[Literal["armed", "fno", "nifty50", "nifty100", "niftybank"]] | None = Field(default=None, max_length=5)
@@ -3260,7 +3413,7 @@ async def _trend_picks_daily(s: trend_picks.AutoSettings, day: dt.date) -> tuple
         start, until = trend_picks.parse_window(s.pick_time, s.until)
         await _start_trend_picks(
             s.bot, names, day, day, start, s.top_n, s.direction, s.minutes, max(SPEEDS),
-            play_handoffs=s.play_handoffs, candles=s.candles, until=until,
+            play_handoffs=s.play_handoffs, candles=s.candles, until=until, skip_candles=s.skip_candles,
         )
     except HTTPException as exc:
         return None, f"not started: {exc.detail}"
@@ -3281,6 +3434,8 @@ class TrendCompareStart(BaseModel):
     minutes: Literal[1, 3, 5, 10, 15] = 5
     #: NORMAL = real candles, HA = the Trend quality read on Heikin Ashi candles (as the card's "Candles" menu).
     candles: Literal["NORMAL", "HA"] = "NORMAL"
+    #: Today's first N candles left out of the trend read (the Trend quality card's "Skip today's first candles").
+    skip_candles: int = Field(default=0, ge=0, le=chop_scan.MAX_SKIP_CANDLES)
     bot: int = Field(default=1, ge=1, le=4)
     lists: list[str] = Field(default_factory=list, max_length=5)
     play_handoffs: bool = True
@@ -3332,6 +3487,7 @@ async def trend_compare_start(body: TrendCompareStart):
     )
     item["play_handoffs"] = body.play_handoffs
     item["candles"] = body.candles
+    item["skip_candles"] = body.skip_candles
     item["until"] = until.strftime("%H:%M") if until else None
     active = (
         {"rank": body.rank, "bias": body.bias, "min_value_cr": body.min_value_cr} if body.source == "ACTIVE" else None
@@ -3347,7 +3503,7 @@ async def trend_compare_start(body: TrendCompareStart):
         await _start_trend_picks(
             body.bot, names, day, end_day, dt.time(int(h), int(m)), body.top_n, body.direction, body.minutes,
             max(SPEEDS), play_handoffs=body.play_handoffs, active=active, candles=body.candles,
-            until=until,
+            until=until, skip_candles=body.skip_candles,
         )
         # The run id is known once the candles are in; wait for it (or for the load to fail).
         while session.run_id is None and session.status == "LOADING":
@@ -3784,6 +3940,19 @@ class RunApply(BaseModel):
     stock_settings: bool = True
     # The bot trades real money: the page asked first.
     confirm_live: bool = False
+    # Which settings of the run: "run" = the replayed bot's strategy; "bot5" = the Bot 5 settings the run's
+    # fast-mover hand-off played with (its `fast_bot` snapshot: Bot 5's strategy fields and per-stock settings).
+    source: Literal["run", "bot5"] = "run"
+
+
+def bot5_saved(saved: dict) -> dict | None:
+    """A run's Bot 5 snapshot (fast_bot.replay_snapshot) in the shape `run_apply_data` reads, or None when the run
+    did not play the fast-mover hand-off."""
+    snap = saved.get("fast_bot")
+    if not isinstance(snap, dict) or not isinstance(snap.get("bot5"), dict) or not snap["bot5"]:
+        return None
+    stocks = snap.get("bot5_stocks")
+    return {**snap["bot5"], "stock_settings": stocks if isinstance(stocks, dict) else {}}
 
 
 def run_apply_data(saved: dict, reset: bool, with_stocks: bool) -> tuple[dict, list[str]]:
@@ -3838,6 +4007,10 @@ async def replay_run_apply(run_id: int, body: RunApply):
     saved = await asyncio.to_thread(_saved)
     if saved is None:
         raise HTTPException(404, "No such replay run")
+    if body.source == "bot5":
+        saved = bot5_saved(saved)
+        if saved is None:
+            raise HTTPException(400, f"Run #{run_id} did not play the fast-mover hand-off, so it kept no Bot 5 settings")
     if not any(k in saved for k in ConfigUpdate.model_fields):
         raise HTTPException(400, f"Run #{run_id} did not save its strategy settings")
     if body.to_desk != "research":
@@ -4075,6 +4248,8 @@ class ChopScanStart(BaseModel):
     # NORMAL = the real candles (SMA cross); COLOUR = the real candles read by colour; HA = Heikin Ashi candles
     # (read by colour too). Prices shown stay real.
     candles: Literal["NORMAL", "COLOUR", "HA"] = "NORMAL"
+    # Today's first N candles of the chosen size left out of the trend read (0 = off; chop_scan.analyze `skip`).
+    skip_candles: int = Field(default=0, ge=0, le=chop_scan.MAX_SKIP_CANDLES)
     force: bool = False
 
 
@@ -4107,6 +4282,7 @@ def _start_chop(
     force: bool,
     source: str = "manual",
     candles: str = chop_scan.NORMAL,
+    skip_candles: int = 0,
 ):
     cfg = engine.load_config()
     return chop_scanner.start(
@@ -4121,12 +4297,14 @@ def _start_chop(
         force=force,
         price_min=price_min,
         price_max=price_max,
-        job=_scan_job(scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), minutes, extra=(quiet_min, chop_scan.candle_kind(candles)), cached=True),
+        job=_scan_job(scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), minutes, extra=(quiet_min, chop_scan.candle_kind(candles), chop_scan.skip_minutes(skip_candles, minutes)), cached=True),
         candles=candles,
+        skip_candles=skip_candles,
         meta={
             "stocks": len(symbols),
             "source": source,
             "candles": candles,
+            "skip_candles": skip_candles,
             "alert_on_quiet": alert_on_quiet,
             "price_min": price_min,
             "price_max": price_max,
@@ -4155,6 +4333,7 @@ async def chop_scan_start(body: ChopScanStart):
             price_max=body.price_max,
             force=body.force,
             candles=body.candles,
+            skip_candles=body.skip_candles,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -4218,6 +4397,7 @@ async def _chop_auto_start(s: chop_auto.AutoSettings) -> None:
         force=True,
         source="auto",
         candles=s.candles,
+        skip_candles=s.skip_candles,
     )
 
 
@@ -4232,6 +4412,7 @@ class ChopAutoUpdate(BaseModel):
     price_max: float | None = Field(default=None, ge=0)
     lists: list[Literal["armed", "fno", "nifty50", "nifty100", "niftybank"]] | None = None
     candles: Literal["NORMAL", "COLOUR", "HA"] | None = None
+    skip_candles: int | None = Field(default=None, ge=0, le=chop_scan.MAX_SKIP_CANDLES)
 
 
 @app.put("/api/chop-scan/auto")
@@ -6181,22 +6362,65 @@ class AllBotsGuard(BaseModel):
     stop: float = Field(ge=0, le=all_bots_guard.MAX_AMOUNT)
     # "HH:MM" IST between 09:15 and 15:30; empty = off. Left out = unchanged.
     squareoff: str | None = None
+    # The profit safety net (all_bots_guard.trail_rule). Left out = unchanged.
+    trail: bool | None = None
+    trail_start: float | None = Field(default=None, ge=0, le=all_bots_guard.MAX_AMOUNT)
+    trail_keep: float | None = Field(default=None, ge=1, le=99)
+    trail_start2: float | None = Field(default=None, ge=0, le=all_bots_guard.MAX_AMOUNT)
+    trail_keep2: float | None = Field(default=None, ge=1, le=99)
+    # Save only the safety net (its own card): target / stop / square-off left as they are.
+    trail_only: bool = False
+    # Levels as % of the wallet's money (all_bots_guard.in_pct): "RS" / "PCT", and the % fields. Left out = unchanged.
+    unit: Literal["RS", "PCT"] | None = None
+    target_pct: float | None = Field(default=None, ge=0, le=1000)
+    stop_pct: float | None = Field(default=None, ge=0, le=1000)
+    trail_start_pct: float | None = Field(default=None, ge=0, le=1000)
+    trail_start2_pct: float | None = Field(default=None, ge=0, le=1000)
 
 
 async def _guard_view() -> dict:
     bots = _all_bots()
     cfg = engine.load_config()
-    target, stop = all_bots_guard.limits(cfg)
+    cap = await asyncio.to_thread(all_bots_guard.capital)
+    target, stop = all_bots_guard.limits(cfg, cap)
     at = all_bots_guard.squareoff_at(cfg)
     closed = await asyncio.to_thread(all_bots_guard.closed_total, bots)
     amount = round(closed + all_bots_guard.open_total(bots), 2)
     halted = [eng.bot_id for eng in bots if all_bots_guard.is_guard_halt(eng)]
+    rule = all_bots_guard.trail_rule(cfg, cap)
+    now = engine._now()
+    peak = all_bots_guard.peak_today(now.date())
+    if peak is None:
+        peak = await asyncio.to_thread(all_bots_guard.seed_peak, now.date())
+    best = max(peak if peak is not None else amount, amount)
+    floor = all_bots_guard.trail_floor(best, rule)
     return {
-        "target": target,
-        "stop": stop,
+        # The ₹ fields as saved (the levels in force are under "effective": ₹ or % of capital).
+        "target": all_bots_guard._amount(getattr(cfg, "all_bots_target", 0)),  # noqa: SLF001
+        "stop": all_bots_guard._amount(getattr(cfg, "all_bots_stop", 0)),  # noqa: SLF001
         "squareoff": at.strftime("%H:%M") if at else "",
+        "trail": bool(getattr(cfg, "all_bots_trail", False)),
+        "trail_start": float(getattr(cfg, "all_bots_trail_start", None) or 5000.0),
+        "trail_keep": float(getattr(cfg, "all_bots_trail_keep", None) or 70.0),
+        "trail_start2": float(getattr(cfg, "all_bots_trail_start2", None) or 0.0),
+        "trail_keep2": float(getattr(cfg, "all_bots_trail_keep2", None) or 75.0),
+        # Capital (the wallet's money loaded) and the levels both ways: the ₹ each one is now, the % fields.
+        "capital": round(cap, 2),
+        "unit": "PCT" if all_bots_guard.in_pct(cfg) else "RS",
+        "target_pct": float(getattr(cfg, "all_bots_target_pct", 0) or 0),
+        "stop_pct": float(getattr(cfg, "all_bots_stop_pct", 0) or 0),
+        "trail_start_pct": float(getattr(cfg, "all_bots_trail_start_pct", 0) or 0),
+        "trail_start2_pct": float(getattr(cfg, "all_bots_trail_start2_pct", 0) or 0),
+        "effective": {
+            "target": target,
+            "stop": stop,
+            "trail_start": rule[0] if rule else all_bots_guard.level(cfg, "all_bots_trail_start", cap),
+            "trail_start2": rule[2] if rule else all_bots_guard.level(cfg, "all_bots_trail_start2", cap),
+        },
+        "peak": round(best, 2),
+        "floor": floor,
         "total": amount,
-        "hit": all_bots_guard.verdict(amount, target, stop, engine._now(), at),
+        "hit": all_bots_guard.verdict(amount, target, stop, now, at, floor),
         "halted_bots": halted,
         "reason": next((eng.halt_reason for eng in bots if all_bots_guard.is_guard_halt(eng)), ""),
     }
@@ -6215,9 +6439,26 @@ async def all_bots_guard_put(body: AllBotsGuard):
         row = db.get(BotConfig, 1)
         if row is None:
             raise HTTPException(500, "BotConfig missing")
-        row.all_bots_target = float(body.target)
+        if not body.trail_only:
+            row.all_bots_target = float(body.target)
         row.all_bots_stop = float(body.stop)
-        if body.squareoff is not None:
+        if body.trail is not None:
+            row.all_bots_trail = bool(body.trail)
+        for field in ("trail_start", "trail_keep", "trail_start2", "trail_keep2"):
+            value = getattr(body, field)
+            if value is not None:
+                setattr(row, f"all_bots_{field}", float(value))
+        if body.unit is not None:
+            row.all_bots_unit = body.unit
+        for field in ("target_pct", "stop_pct", "trail_start_pct", "trail_start2_pct"):
+            value = getattr(body, field)
+            if value is not None:
+                setattr(row, f"all_bots_{field}", float(value))
+        if (body.trail_start2_pct or 0) and body.trail_start_pct is not None and body.trail_start2_pct <= body.trail_start_pct:
+            raise HTTPException(422, "The second step must start above the first (or 0 for none).")
+        if (body.trail_start2 or 0) and body.trail_start is not None and body.trail_start2 <= body.trail_start:
+            raise HTTPException(422, "The second step must start above the first (or 0 for none).")
+        if body.squareoff is not None and not body.trail_only:
             text = body.squareoff.strip()
             if text and all_bots_guard.parse_time(text) is None:
                 raise HTTPException(422, "Square-off time must be HH:MM between 09:15 and 15:30, or empty for off.")

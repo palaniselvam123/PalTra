@@ -347,6 +347,56 @@ def replay_points(run_id: int, day: str) -> list[dict]:
     return [_point(r, "REPLAY") for r in out]
 
 
+def replay_swings(run_id: int) -> dict[str, dict]:
+    """Each replayed day's highest and lowest P&L (closed + open, at each logged minute), with when and which came
+    first: the run detail's day rows. Before charges (`high` / `low`) and after (`high_net` / `low_net`). Never raises."""
+    try:
+        with _lock, _connect() as con:
+            rows = con.execute(
+                "SELECT day, minute, gross, net, closed_gross, closed_net FROM replay_pnl WHERE run_id = ?"
+                " ORDER BY day, minute",
+                (int(run_id),),
+            ).fetchall()
+    except Exception:  # noqa: BLE001
+        log.exception("could not read replay %s's P&L log", run_id)
+        return {}
+    out: dict[str, dict] = {}
+    for r in rows:
+        g = round(float(r["closed_gross"] or 0.0) + float(r["gross"] or 0.0), 2)
+        n = round(float(r["closed_net"] or 0.0) + float(r["net"] or 0.0), 2)
+        t = str(r["minute"])[11:16]
+        d = out.get(r["day"])
+        if d is None:
+            out[r["day"]] = {"high": g, "high_at": t, "low": g, "low_at": t, "high_net": n, "high_net_at": t,
+                             "low_net": n, "low_net_at": t, "last": g, "last_at": t, "points": 1}
+            continue
+        d["points"] += 1
+        d["last"], d["last_at"] = g, t
+        if g > d["high"]:
+            d["high"], d["high_at"] = g, t
+        if g < d["low"]:
+            d["low"], d["low_at"] = g, t
+        if n > d["high_net"]:
+            d["high_net"], d["high_net_at"] = n, t
+        if n < d["low_net"]:
+            d["low_net"], d["low_net_at"] = n, t
+    for d in out.values():
+        d["first"] = _first(d["high"], d["high_at"], d["low"], d["low_at"])
+        d["first_net"] = _first(d["high_net"], d["high_net_at"], d["low_net"], d["low_net_at"])
+    return out
+
+
+def _first(high: float, high_at: str, low: float, low_at: str) -> str | None:
+    """HIGH / LOW: which of the day's extremes came first (None when the P&L never left 0)."""
+    if high <= 0 and low >= 0:
+        return None
+    if high <= 0:
+        return "LOW"
+    if low >= 0:
+        return "HIGH"
+    return "HIGH" if high_at < low_at else "LOW" if low_at < high_at else None
+
+
 class ReplayRecorder:
     """Collects one point per replayed minute and saves them in batches, off the event loop."""
 

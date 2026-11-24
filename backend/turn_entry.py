@@ -44,6 +44,13 @@ own colour is held, and the next closed candle is judged again.
 candle that opens with or after its entry (one bought partway into is not counted) and goes the other way (red for a long, green for a short; `COLOUR_TURN`, no reverse;
 `StrategyEngine._watch_turn_colour`).
 
+**Gap range** (`turn_gap_on`, off): a turn opens a trade only while the signed SMA 9 / 21 gap
+% = (SMA fast − SMA slow) ÷ SMA slow × 100 on the last closed candle is inside the range for the
+turn's side (`turn_gap_long_min..max` for a buy, `turn_gap_short_min..max` for a sell, default
+−0.20..+0.20; negative = SMA 9 under SMA 21). Read only for turn entries, not crosses or other
+entries. A turn outside the range opens nothing; against an open trade it only closes it (no
+reverse), like a turn away from the cross. Gap not known = no order.
+
 A trade closed by a turn is saved as `SMA9_TURN_AGAINST` ("SMA 9 turned against").
 """
 from __future__ import annotations
@@ -60,6 +67,8 @@ MAX_U_RUN = 30
 DEFAULT_U_MIN = 0.005
 MAX_U_MIN = 1.0
 U_MAX_FLAT = 10  # near-flat candles allowed between the old run and the new side
+DEFAULT_GAP = (-0.2, 0.2)
+MAX_GAP = 10.0
 # A turn the same way within this many candles of the last one is the same turn (no second alert or order).
 SAME_TURN_CANDLES = 6
 
@@ -78,6 +87,56 @@ def watched(cfg) -> bool:
 
 def toward_on(cfg) -> bool:
     return bool(getattr(cfg, "turn_toward_cross", False))
+
+
+def gap_on(cfg) -> bool:
+    return bool(getattr(cfg, "turn_gap_on", False))
+
+
+def _num(cfg, name: str, default: float) -> float:
+    try:
+        raw = getattr(cfg, name, None)
+        value = float(default if raw is None else raw)
+    except (TypeError, ValueError):
+        return default
+    if value != value:
+        return default
+    return max(-MAX_GAP, min(MAX_GAP, value))
+
+
+def gap_range(cfg) -> dict[str, tuple[float, float]]:
+    """{"LONG": (lo, hi), "SHORT": (lo, hi)} in signed gap %, each pair sorted."""
+    out = {}
+    for side, key in (("LONG", "long"), ("SHORT", "short")):
+        lo = _num(cfg, f"turn_gap_{key}_min", DEFAULT_GAP[0])
+        hi = _num(cfg, f"turn_gap_{key}_max", DEFAULT_GAP[1])
+        out[side] = (min(lo, hi), max(lo, hi))
+    return out
+
+
+def gap_now(closed: pd.DataFrame) -> float | None:
+    """Signed SMA fast / slow gap % on the last closed candle, None when not known."""
+    if closed is None or getattr(closed, "empty", True) or not {"sma_fast", "sma_slow"} <= set(closed.columns):
+        return None
+    fast = pd.to_numeric(pd.Series([closed["sma_fast"].iloc[-1]]), errors="coerce").iloc[0]
+    slow = pd.to_numeric(pd.Series([closed["sma_slow"].iloc[-1]]), errors="coerce").iloc[0]
+    if pd.isna(fast) or pd.isna(slow) or float(slow) == 0:
+        return None
+    return (float(fast) - float(slow)) / float(slow) * 100.0
+
+
+def gap_refusal(closed: pd.DataFrame, direction: str, cfg) -> str | None:
+    """None when the gap range is off or the gap is inside the turn side's range, else why not."""
+    if not gap_on(cfg):
+        return None
+    lo, hi = gap_range(cfg)[direction]
+    gap = gap_now(closed)
+    word = "buy" if direction == "LONG" else "sell"
+    if gap is None:
+        return f"SMA 9/21 gap not known yet (turn {word} needs {lo:+.2f}% to {hi:+.2f}%)"
+    if lo <= gap <= hi:
+        return None
+    return f"SMA 9/21 gap {gap:+.3f}% is outside the turn {word} range {lo:+.2f}% to {hi:+.2f}%"
 
 
 def exit_candle_on(cfg) -> bool:

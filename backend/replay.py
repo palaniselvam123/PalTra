@@ -50,6 +50,7 @@ from tick_sizes import round_price
 import all_bots_guard
 import fast_bot
 import handoff_chain
+import paper_wallet
 import handoff_log
 import open_pnl_log
 import trend_log
@@ -57,6 +58,7 @@ import recovery
 import server_role
 import strategy_lab
 import auto_arm
+import saved_picks
 from scalp_picks import PickRule, picks_for_day, resumable as pick_resumable, rule_from_dict
 
 SPEEDS = (1, 10, 60, 300)
@@ -304,8 +306,11 @@ class ReplayEngine(StrategyEngine):
         chain: dict | None = None,
         on_bot: dict[str, int] | None = None,
         sources: dict[str, str] | None = None,
+        pick_qty: int = 0,
     ):
         self.feed = feed
+        # A saved-scan backtest's own quantity for every picked stock (saved_picks.py), 0 = the bot's own.
+        self.pick_qty = max(0, int(pick_qty or 0))
         # Trade list source chips of a pick run's stocks ({symbol: "Auto-arm: Most active"}), merged over the live
         # bot's own in load_config, so the Most active rules (pressure_exit.py) see a replayed pick as Most active.
         self.pick_sources = dict(sources or {})
@@ -398,12 +403,17 @@ class ReplayEngine(StrategyEngine):
                 return
             target, stop = all_bots_guard.limits(row)
             at = all_bots_guard.squareoff_at(row)
-        if not (target or stop or at):
+            rule = all_bots_guard.trail_rule(row)
+        if not (target or stop or at or rule):
             return
         amount = all_bots_guard.total([self])
-        kind = all_bots_guard.verdict(amount, target, stop, now, at)
+        # The profit safety net follows this replayed day's own best P&L (a fresh engine each day).
+        prev = getattr(self, "_day_peak", None)
+        self._day_peak = amount if prev is None else max(prev, amount)
+        floor = all_bots_guard.trail_floor(self._day_peak, rule)
+        kind = all_bots_guard.verdict(amount, target, stop, now, at, floor)
         if kind:
-            await all_bots_guard.trip([self], kind, amount, target, stop, at)
+            await all_bots_guard.trip([self], kind, amount, target, stop, at, floor, self._day_peak)
 
     async def _fast_replay(self, now: dt.datetime) -> None:
         """The fast-mover hand-off on a replayed day (fast_bot.py): a held stock moving fast its way is cut
@@ -626,6 +636,12 @@ class ReplayEngine(StrategyEngine):
                     data[name] = value if isinstance(value, str) else json.dumps(value or {})
                 elif name in data and name not in ("id", "symbol", "trade_symbols", "trading_mode"):
                     data[name] = value
+        if self.pick_qty:
+            # Saved-scan backtest: every picked stock at the run's quantity (saved_picks.py).
+            own = stock_settings(SimpleNamespace(stock_settings=data.get("stock_settings")))
+            for name in self.replay_symbols:
+                own[name] = {**own.get(name, {}), "qty": self.pick_qty}
+            data["stock_settings"] = json.dumps(own)
         if self._chain_fields:
             # A stock handed to Bot 2 / Bot 3 in this backtest plays with that bot's settings (handoff_chain.py).
             own = stock_settings(SimpleNamespace(stock_settings=data.get("stock_settings")))
@@ -680,6 +696,8 @@ def pick_sources(rule, picked: list[dict]) -> dict[str, str]:
         if not name:
             continue
         if kind == "ACTIVE":
+            out[name] = "Most active pick"
+        elif kind == saved_picks.KIND:
             out[name] = "Most active pick"
         elif kind == auto_arm.KIND and p.get("source"):
             out[name] = f"Auto-arm: {p['source']}"
@@ -1087,7 +1105,9 @@ def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
         out["stocks"] = _stock_rows(trades, out["symbols"])
         # Choppy / trending at each trade's entry, and where each stock was handed (handoff_log.py; display only).
         out["by_regime"] = handoff_log.by_regime(trades)
-        out["handoff_trail"] = handoff_log.rows(run_id=run.id)
+        out["handoff_trail"] = handoff_log.with_pnl(handoff_log.rows(run_id=run.id), trades)
+        # Each day's highest / lowest P&L on the run's own P&L log, with when and which came first (display only).
+        out["day_swings"] = open_pnl_log.replay_swings(run.id)
     return out
 
 
@@ -1517,6 +1537,14 @@ class ReplaySession:
                 settings = {**settings, "chain": handoff_chain.replay_snapshot(self.bot)}
             # What a stock that ends a day handed off does the next day (UNARM / BACK); runs saved before: carried on.
             settings = {**settings, "handoff_eod": handoff_chain.backtest_eod()}
+            # Shown on the run: a locked practice wallet refuses entries it cannot pay for, so the trades depend on
+            # the balance the run started with.
+            try:
+                w = paper_wallet.summary()
+                if w["active"] and w.get("locked"):
+                    settings = {**settings, "wallet_locked": True, "wallet_free": w["available"]}
+            except Exception:  # noqa: BLE001 - a note only
+                pass
         self._settings = settings
         if resume is not None:
             self.run_id = resume[0]
@@ -1614,6 +1642,10 @@ class ReplaySession:
                     auto_windows = auto_arm.arm_windows(day, picked)
                     first = min(p["at"] for p in picked)
                     start = dt.time(int(first[:2]), int(first[3:5]))
+                elif getattr(self.rule, "kind", None) == saved_picks.KIND and picked:
+                    # Saved-scan backtest: from the minute after the scan read the picked stocks (saved_picks.py).
+                    first = min(p["at"] for p in picked)
+                    start = dt.time(int(first[:2]), int(first[3:5]))
                 if not symbols:
                     self._mark_run(days_done=index + 1)
                     continue
@@ -1643,6 +1675,7 @@ class ReplaySession:
                 engine = ReplayEngine(
                     feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved, arm_windows=windows, fast=fast_snap,
                     chain=chain_snap, on_bot=day_on, sources=day_sources,
+                    pick_qty=int(getattr(self.rule, "qty", 0) or 0),
                 )
                 engine.handoff = engine._hand_off
                 engine.on_handoff = lambda name: self.handed_off.append(name)
@@ -1755,7 +1788,7 @@ class ReplaySession:
                     eng.last_error = str(exc)
                 self._note_pnl(eng)
                 used += time.perf_counter() - began
-                if eng.feed.clock >= end:
+                if eng.feed.clock >= end or self._halted_flat(eng):
                     self._seek = None
                     await self._finish_day()
                     return True
@@ -1808,7 +1841,7 @@ class ReplaySession:
                     eng.last_error = str(exc)
                 self._note_pnl(eng)
                 used += time.perf_counter() - began
-                if eng.feed.clock >= end:
+                if eng.feed.clock >= end or self._halted_flat(eng):
                     await self._finish_day()
                     return
                 # Let the live engine and the API run between ticks.
@@ -1855,6 +1888,19 @@ class ReplaySession:
         task = loop.create_task(asyncio.to_thread(trend_log.save, run_id, bot, rows))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
+
+    @staticmethod
+    def _halted_flat(eng) -> bool:
+        """The day is over for this bot: halted (all-bots day target / stop loss / square-off time, the daily loss
+        limit, a panic) with nothing held, so it cannot trade again that day. The rest of the day is not played
+        (owner's request: it used to tick empty minutes to 15:30); the day finishes and the next one starts. A halted
+        bot still holding a stock plays on, so its square-off is retried as live."""
+        if getattr(eng, "status", None) != "HALTED" or getattr(eng, "positions", None):
+            return False
+        reason = getattr(eng, "halt_reason", "") or ""
+        if "rest of the replayed day skipped" not in reason:
+            eng.halt_reason = f"{reason} — rest of the replayed day skipped at {eng.feed.clock:%H:%M}".lstrip(" —")
+        return True
 
     def _day_end(self) -> dt.datetime:
         assert self.day is not None

@@ -19,10 +19,56 @@ export function grossOf(t: Pick<TradeRow, "exit_price" | "gross_pnl" | "points" 
   return t.points != null ? round2(t.points * (t.qty || 0)) : null;
 }
 
-/** One trade with its P&L before charges in `net_pnl`. */
+/** One trade with its P&L before charges in `net_pnl` (the server's after-charges figure kept in `net_after`). */
 export function tradeBeforeCharges<T extends TradeRow>(t: T): T {
   const gross = grossOf(t);
-  return gross == null ? t : { ...t, net_pnl: gross };
+  return gross == null ? t : { ...t, net_pnl: gross, net_after: t.net_after ?? t.net_pnl };
+}
+
+// ---- Backtest results: before or after charges, one switch for every backtest screen (per browser) ----
+
+export type BacktestBasis = "gross" | "net";
+const BASIS_KEY = "sma.backtest.basis";
+const BASIS_EVENT = "paltra:backtest-basis";
+
+/** The backtest screens' basis: "gross" (before charges, the default) or "net" (after charges). */
+export function backtestBasis(): BacktestBasis {
+  try {
+    return typeof window !== "undefined" && window.localStorage.getItem(BASIS_KEY) === "net" ? "net" : "gross";
+  } catch {
+    return "gross";
+  }
+}
+
+export function setBacktestBasis(basis: BacktestBasis): void {
+  try {
+    window.localStorage.setItem(BASIS_KEY, basis);
+  } catch {
+    /* private window: this page only */
+  }
+  window.dispatchEvent(new CustomEvent(BASIS_EVENT, { detail: basis }));
+}
+
+export function onBacktestBasis(fn: (basis: BacktestBasis) => void): () => void {
+  const handler = () => fn(backtestBasis());
+  window.addEventListener(BASIS_EVENT, handler);
+  window.addEventListener("storage", handler);
+  return () => {
+    window.removeEventListener(BASIS_EVENT, handler);
+    window.removeEventListener("storage", handler);
+  };
+}
+
+export const basisWords = (basis: BacktestBasis) => (basis === "net" ? "after charges" : "before charges");
+
+/** A backtest run on the chosen basis: the server's figures are after charges, so "net" leaves it as sent. */
+export function runOnBasis(run: ReplayRun): ReplayRun {
+  return backtestBasis() === "net" ? run : runBeforeCharges(run);
+}
+
+/** Backtest trades (already turned before charges where loaded) on the chosen basis. */
+export function tradesOnBasis<T extends TradeRow>(rows: T[], basis: BacktestBasis = backtestBasis()): T[] {
+  return basis === "net" ? rows.map((t) => (t.net_after !== undefined ? { ...t, net_pnl: t.net_after } : t)) : rows;
 }
 
 /** Day rows on P&L before charges: the running total follows the gross. */

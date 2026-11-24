@@ -6,7 +6,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { readReverse } from "@/components/Terminal/ReverseOwnSettings";
-import { inr, smaApi, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
+import { inr, smaApi, type DaySwing, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { SortTh, useSort } from "./sortable";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import { Badge, Skeleton, pnlTone } from "./ui";
@@ -14,6 +14,8 @@ import { REASON_SHORT } from "./TradeHistoryTable";
 import { chartHref } from "./StockTabs";
 import { runName } from "@/lib/liveBook";
 import { NewTag } from "@/components/ui/NewTag";
+import { BacktestBasisSwitch, useBacktestBasis } from "@/components/ui/BacktestBasisSwitch";
+import { backtestBasis as backtestBasisNow, basisWords, tradesOnBasis } from "@/lib/pnlBasis";
 import { ApplyRunStrategy } from "./ApplyRunStrategy";
 
 // The runs list and the open run's detail are re-read this often (they were every 5 s; owner's case: replays slowed).
@@ -61,7 +63,7 @@ function dayLabel(iso: string): string {
   }).format(d);
 }
 
-type ScalpPickInfo = ScalpPickRule & { universe?: number; candles?: string; until?: string | null; picks?: Record<string, ScalpPick[]> };
+type ScalpPickInfo = ScalpPickRule & { universe?: number; candles?: string; skip_candles?: number; until?: string | null; picks?: Record<string, ScalpPick[]> };
 
 /** The pick rule and picks a run recorded (scalp, strong-trend or Most active picks), or null for a plain replay. */
 export function scalpPickOf(s: Settings): ScalpPickInfo | null {
@@ -70,10 +72,18 @@ export function scalpPickOf(s: Settings): ScalpPickInfo | null {
 }
 
 /** Which backtest made the picks, in words. */
+const SAVED_COLUMN_LABEL: Record<string, string> = {
+  rvol: "Vol vs usual", value: "Money traded", buyers: "Buyers % (waiting)", sellers: "Sellers % (waiting)",
+  imbalance: "Buyer/seller imbalance", exec_buyers: "Executed buy %", exec_sellers: "Executed sell %",
+  move: "Day move (either way)", up: "Day move up", down: "Day move down", speed: "Speed", vwap: "Distance from average price",
+  range: "Day range",
+};
+
 function pickKindLabel(pick: ScalpPickRule): string {
   if (pick.kind === "TREND") return "Strong-trend";
   if (pick.kind === "ACTIVE") return "Most active";
   if (pick.kind === "AUTOARM") return "Auto-arm";
+  if (pick.kind === "SAVED") return "Saved Most active scan";
   return "Scalp";
 }
 
@@ -107,6 +117,7 @@ export function pickRuleRows(run: { settings: Settings; days_total?: number; sta
     if (src !== "ACTIVE") {
       rows.push(["Trend read every", `${n("every_min") ?? "-"} min`]);
       rows.push(["Trend candle", `${n("minutes") ?? "-"} min${s("candles") === "HA" ? ", Heikin Ashi" : ""}`]);
+      if (n("skip_candles")) rows.push(["Skip today's first candles", `${n("skip_candles")}`]);
       rows.push(["Strong trend", `${n("min_checks") ?? 6} of 7 checks or more, ${s("side") === "UP" ? "up only" : s("side") === "DOWN" ? "down only" : "up or down"}`]);
     }
     if (src !== "TREND") {
@@ -124,12 +135,28 @@ export function pickRuleRows(run: { settings: Settings; days_total?: number; sta
     rows.push(["At most", `${n("max_day") ?? 10} stocks a day`]);
     return rows;
   }
+  if (pick.kind === "SAVED") {
+    rows.push(["Scan time", `the first saved Most active scan at or after ${pick.pick_time} IST each day`]);
+    const by = Array.isArray(r.rank_by) ? (r.rank_by as string[]).map((k) => SAVED_COLUMN_LABEL[k] ?? k).join(" + ") : "-";
+    rows.push(["Ranked by", by]);
+    rows.push(["Top", String(pick.top_n)]);
+    rows.push(["Quantity", n("qty") ? `${n("qty")} shares a stock` : "the bot's own"]);
+    rows.push(["Which", s("side") === "BUYERS" ? "buyers lead the waiting orders" : s("side") === "SELLERS" ? "sellers lead the waiting orders" : "any"]);
+    rows.push(["Money traded at least", n("min_value_cr") ? `Rs ${n("min_value_cr")} cr` : "any"]);
+    if (n("min_rvol")) rows.push(["Vol vs usual at least", `${n("min_rvol")}x`]);
+    if (n("price_min") || n("price_max")) rows.push(["Price range", `${rupee(n("price_min"))} to ${rupee(n("price_max"))}`]);
+    if (pick.until) rows.push(["Trade until", `${pick.until} IST (squared off there)`]);
+    const notes = r.notes && typeof r.notes === "object" ? (r.notes as Record<string, string>) : {};
+    for (const d of Object.keys(notes).sort()) rows.push([`Scan used ${d}`, notes[d]]);
+    return rows;
+  }
   rows.push(["Pick time", `${pick.pick_time} IST`]);
   if (pick.until) rows.push(["Trade until", `${pick.until} IST (squared off there)`]);
   rows.push(["Top", String(pick.top_n)]);
   if (pick.kind === "TREND") {
     rows.push(["Direction", String(pick.direction ?? "BOTH").toLowerCase()]);
     rows.push(["Trend candle", `${pick.minutes ?? "-"} min${String(pick.candles ?? "") === "HA" ? ", Heikin Ashi" : ""}`]);
+    if (Number(pick.skip_candles)) rows.push(["Skip today's first candles", String(pick.skip_candles)]);
   } else if (pick.kind === "ACTIVE") {
     rows.push(["Ranked by", ACTIVE_RANK_LABEL[String(pick.rank ?? "rvol")] ?? String(pick.rank ?? "-")]);
     rows.push(["Bias", String(pick.bias ?? "BOTH").toLowerCase()]);
@@ -360,6 +387,7 @@ export function strategyLabel(s: Settings): string {
     if (s.vturn_exit) parts.push("SMA 9 V-turn exit");
     if (s.as_armed) parts.push("as armed live");
     if (s.play_handoffs) parts.push("hand-offs played as Bot 2 / Bot 3");
+    if (s.wallet_locked) parts.push(`wallet locked (₹${Math.round(Number(s.wallet_free ?? 0)).toLocaleString("en-IN")} free at start)`);
     if (s.slow_sma_exit) parts.push("slow SMA exit");
     if (s.recovery_hold) parts.push(`recovery hold (${s.recovery_tolerance_pct ?? 0.15}%, ${s.recovery_max_candles ?? 6} candles)`);
     if (s.breakout_handoff) parts.push(`breakout hand-off to Bot 3 (${s.breakout_atr_mult ?? 1.8}× ATR)`);
@@ -448,10 +476,51 @@ export function gapModeText(s: Settings): string {
 }
 
 const BB_EXIT_TEXT: Record<string, string> = { BAND: "band target", MIDDLE: "middle band", BOTH: "band + middle" };
-type RunFilters = { text: string; bot: string; result: string; status: string; from: string; to: string };
-const NO_FILTERS: RunFilters = { text: "", bot: "ALL", result: "ALL", status: "ALL", from: "", to: "" };
+type RunFilters = {
+  text: string;
+  bot: string;
+  result: string;
+  status: string;
+  from: string;
+  to: string;
+  /** P&L range in ₹ (on the switch's basis, before / after charges), "" = no bound. */
+  pnlMin: string;
+  pnlMax: string;
+  /** Fewest closed trades a run needs, "" = any. */
+  minTrades: string;
+  /** NEW = newest first (the server's order), BEST / WORST = by P&L, PER_TRADE = best P&L per trade. */
+  order: string;
+};
+const NO_FILTERS: RunFilters = {
+  text: "", bot: "ALL", result: "ALL", status: "ALL", from: "", to: "", pnlMin: "", pnlMax: "", minTrades: "", order: "NEW",
+};
 
-/** Does a run pass the Backtests filters? Stock / run # search, bot, result, status and replayed dates. */
+/** A typed ₹ / count box as a number, or null when blank or not a number. */
+function boxNumber(raw: string): number | null {
+  const text = raw.replace(/[,₹\s]/g, "");
+  if (!text || text === "-") return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** The runs in the order the Backtests "Order" menu asks for (a clicked column header still sorts on top). */
+function orderRuns(runs: ReplayRun[], order: string): ReplayRun[] {
+  if (order === "NEW") return runs;
+  const perTrade = (r: ReplayRun) => (r.totals.trades ? r.totals.net / r.totals.trades : null);
+  const key = (r: ReplayRun) => (order === "PER_TRADE" ? perTrade(r) : r.totals.trades ? r.totals.net : null);
+  const sign = order === "WORST" ? 1 : -1;
+  return [...runs].sort((a, b) => {
+    const x = key(a);
+    const y = key(b);
+    if (x == null && y == null) return b.id - a.id;
+    if (x == null) return 1; // runs without trades last either way
+    if (y == null) return -1;
+    return (x - y) * sign || b.id - a.id;
+  });
+}
+
+/** Does a run pass the Backtests filters? Stock / run # search, bot, result, status, replayed dates, P&L range and
+ * fewest trades. */
 function runMatches(run: ReplayRun, f: RunFilters): boolean {
   const text = f.text.trim().toUpperCase();
   if (text) {
@@ -466,6 +535,16 @@ function runMatches(run: ReplayRun, f: RunFilters): boolean {
   if (f.status !== "ALL" && run.status !== f.status) return false;
   if (f.from && run.end_date < f.from) return false;
   if (f.to && run.start_date > f.to) return false;
+  const lo = boxNumber(f.pnlMin);
+  const hi = boxNumber(f.pnlMax);
+  if (lo != null || hi != null) {
+    // A swapped range (min above max) is read the right way round.
+    const [a, b] = lo != null && hi != null && lo > hi ? [hi, lo] : [lo, hi];
+    if (a != null && t.net < a) return false;
+    if (b != null && t.net > b) return false;
+  }
+  const fewest = boxNumber(f.minTrades);
+  if (fewest != null && t.trades < fewest) return false;
   return true;
 }
 
@@ -497,8 +576,38 @@ export function filtersShort(s: Settings): string {
 // Column keys of the three Backtests tables; their order is dragged and kept per browser (columnOrder.tsx).
 type RunColKey = "run" | "days" | "strategy" | "trades" | "win" | "profit" | "loss" | "net" | "dd" | "actions";
 const RUN_COLS: RunColKey[] = ["run", "days", "strategy", "trades", "win", "profit", "loss", "net", "dd", "actions"];
-type DayColKey = "date" | "trades" | "wl" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative";
-const DAY_COLS: DayColKey[] = ["date", "trades", "wl", "profit", "loss", "gross", "charges", "net", "cumulative"];
+type DayColKey = "date" | "trades" | "wl" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative" | "swing";
+const DAY_COLS: DayColKey[] = ["date", "trades", "wl", "profit", "loss", "gross", "charges", "net", "cumulative", "swing"];
+
+/** A day's highest and lowest P&L with times and which came first (display only; on the backtest basis switch). */
+function SwingText({ s: raw, compact = false }: { s?: DaySwing | null; compact?: boolean }) {
+  const basis = useBacktestBasis();
+  if (!raw) return <span className="text-slate-500">—</span>;
+  const s =
+    basis === "net"
+      ? { ...raw, high: raw.high_net, high_at: raw.high_net_at, low: raw.low_net, low_at: raw.low_net_at, first: raw.first_net }
+      : raw;
+  const first = s.first === "HIGH" ? "high first" : s.first === "LOW" ? "low first" : null;
+  return (
+    <span
+      className="whitespace-nowrap font-mono"
+      title={`Day's P&L (closed + open trades, ${basisWords(basis)}) at each replayed minute. Highest ${signed(s.high)} at ${s.high_at}, lowest ${signed(s.low)} at ${s.low_at}${first ? `; the ${first.replace(" first", "")} came first` : ""}.${basis === "gross" ? ` Ended ${signed(s.last)} at ${s.last_at}.` : ""}`}
+    >
+      <span className="text-slate-500">{compact ? "Hi " : "High "}</span>
+      <span className={pnlTone(s.high)}>{signed(s.high)}</span>
+      <span className="text-slate-500"> @{s.high_at}</span>
+      <span className="text-slate-600"> · </span>
+      <span className="text-slate-500">{compact ? "Lo " : "Low "}</span>
+      <span className={pnlTone(s.low)}>{signed(s.low)}</span>
+      <span className="text-slate-500"> @{s.low_at}</span>
+      {first ? (
+        <span className={clsx("ml-1.5 rounded px-1 text-[10px] font-sans font-semibold", s.first === "HIGH" ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300")}>
+          {first}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 type StockColKey = "symbol" | "trades" | "wl" | "win" | "profit" | "loss" | "gross" | "charges" | "net" | "dd";
 const STOCK_COLS: StockColKey[] = ["symbol", "trades", "wl", "win", "profit", "loss", "gross", "charges", "net", "dd"];
 
@@ -534,7 +643,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Join morning trend", (s) => (s.join_trend ? `On, from ${s.join_after_min ?? 15} min after 09:15` : "Off")],
   ["Counter-candle exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 ? `${s.counter_exit_count} candles against (${s.counter_rule ?? "COLOUR"}${s.counter_need_fast === false ? "" : ", past fast SMA"}${Number(s.counter_min_body ?? 0) > 0 ? `, body ≥ ${s.counter_min_body} × ATR` : ""})` : "Off")],
   ["Early reversal entry", (s) => (s.counter_entry ? "On" : "Off")],
-  ["SMA 9 turn entry", (s) => (s.turn_entry ? `On (V-turn numbers below${s.uturn_on ? `; rounded U after ${s.uturn_run ?? 5} candles, ${s.uturn_min_pct ?? 0.005}%/candle` : ""}${s.turn_toward_cross ? "; only toward the 9/21 cross" : ""}${s.turn_exit_candle ? "; closes on a candle of the other colour" : ""}${s.turn_colour_exit ? "; turn trades exit on the other colour" : ""})` : "Off")],
+  ["SMA 9 turn entry", (s) => (s.turn_entry ? `On (V-turn numbers below${s.uturn_on ? `; rounded U after ${s.uturn_run ?? 5} candles, ${s.uturn_min_pct ?? 0.005}%/candle` : ""}${s.turn_toward_cross ? "; only toward the 9/21 cross" : ""}${s.turn_gap_on ? `; gap range buy ${s.turn_gap_long_min ?? -0.2}…${s.turn_gap_long_max ?? 0.2}%, sell ${s.turn_gap_short_min ?? -0.2}…${s.turn_gap_short_max ?? 0.2}%` : ""}${s.turn_exit_candle ? "; closes on a candle of the other colour" : ""}${s.turn_colour_exit ? "; turn trades exit on the other colour" : ""})` : "Off")],
   ["Re-enter after counter exit", (s) => (Number(s.counter_exit_count ?? 0) > 0 && s.counter_reenter ? `Up to ${s.counter_reenter_max ?? 3} per SMA run` : "Off")],
   ["EMA entry", (s) => (s.use_ema ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],
   ["EMA cross exit", (s) => (s.ema_exit ? `On (EMA ${s.ema_fast ?? 9} vs ${s.ema_slow ?? 200})` : "Off")],
@@ -583,6 +692,10 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["Tall-candle pullback", (s) => (s.tall_pullback ? `On (${s.tall_atr_mult ?? 1.5}× ATR, wait ${s.tall_expiry_candles ?? 2} candles)` : "Off")],
   ["Day high/low guard", (s) => (s.day_extreme_guard ? `On (within ${s.day_extreme_pct ?? 0.15}%, wait ${s.day_extreme_pull_pct ?? 0.15}% back or the fast SMA, ${s.day_extreme_candles ?? 3} candles)` : "Off")],
   ["Entry candle must go the trade's way", (s) => (s.entry_candle_confirm ? `On (${s.entry_candle_pct ?? 0.05}% past its open, wait ${s.entry_candle_max ?? 2} candles)` : "Off")],
+  ["Day high / low target", (s) => (s.day_target ? `On (today's or yesterday's, whichever first; at least ${s.day_target_min_pct ?? 0.2}% from the entry${Number(s.day_target_skip_min ?? 0) > 0 ? `, today's from 09:15 + ${s.day_target_skip_min} min` : ""}${Number(s.day_target_early_pct ?? 0) > 0 ? `, ${s.day_target_early_pct}% early` : ""})` : "Off")],
+  ["Safety net starts", (s) => (!s.target_net ? "Off" : s.target_net_start === "RS" ? `Any trade at ₹${s.target_net_start_rs ?? 500} profit` : s.target_net_start === "ATR" ? `Any trade at ${s.target_net_start_atr ?? 1}× ATR profit` : s.target_net_start === "PCT" || !s.target_net_start ? `Any trade at ${s.target_net_start_pct ?? 0.25}% profit` : "At the pivot / day target (old runs)")],
+  ["Profit safety net", (s) => (s.target_net ? `On (keep ${s.target_net_keep ?? 70}% of the best profit${Number(s.target_net_at2 ?? 2) > 0 ? `, ${s.target_net_keep2 ?? 75}% from ${s.target_net_at2 ?? 2}× the start distance` : ""})` : "Off")],
+  ["Live SMA re-check at the order", (s) => (s.live_sma_check ? `On${Number(s.live_sma_min_gap ?? 0) > 0 ? ` (SMA 9 at least ${s.live_sma_min_gap}% beyond SMA 21)` : ""}` : "Off")],
   ["Candle-extreme limit", (s) => (s.extreme_entry ? `On (${s.extreme_anchor === "SMA_9" ? "low/high or fast SMA" : "low/high"}, cancel beyond ${s.extreme_invalid_pct ?? 0.05}%, wait ${s.extreme_expiry_candles ?? 2} candles${s.extreme_cancel_on_cross === false ? "" : ", cancel on a cross against"})` : "Off")],
   ["Late entry", (s) => (Number(s.late_entry_min ?? 0) > 0 ? `${s.late_entry_min} min after a refused cross` : "Off")],
   ["Quantity", (s) => String(s.qty)],
@@ -659,6 +772,17 @@ export function bot5Rows(settings: Settings): [string, string][] {
 
 /** Replay runs side by side, and one run's day-wise P&L. */
 export function BacktestRuns() {
+  // Before / after charges for every figure here (BacktestBasisSwitch); a change reloads the runs on that basis.
+  const basis = useBacktestBasis();
+  // The practice wallet's margin share (20 % = 5x): a run's capital = the most money it had in open trades × that.
+  const [marginPct, setMarginPct] = useState(20);
+  useEffect(() => {
+    smaApi
+      .wallet()
+      .then((w) => setMarginPct(w?.margin_pct || 20))
+      .catch(() => undefined);
+  }, []);
+  const capitalOf = (run: ReplayRun) => ((run.capital?.peak_value ?? 0) * marginPct) / 100;
   const [runs, setRuns] = useState<ReplayRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -715,7 +839,8 @@ export function BacktestRuns() {
       const { downloadBacktestPdf } = await import("@/lib/backtestPdf");
       await downloadBacktestPdf({
         run: full,
-        trades: book.rows.filter((trade) => trade.run_id === run.id),
+        trades: tradesOnBasis(book.rows.filter((trade) => trade.run_id === run.id)),
+        basis: backtestBasisNow(),
         marginPct: wallet?.margin_pct ?? 20,
         strategy: strategyLabel(full.settings),
         settings: [...SETTING_ROWS.map(([label, value]) => [label, value(full.settings)] as [string, string]), ...bot5Rows(full.settings)],
@@ -748,7 +873,8 @@ export function BacktestRuns() {
         }
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : "Runs did not load"));
-  }, [limit]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [limit, basis]);
 
   useEffect(() => {
     load();
@@ -780,10 +906,13 @@ export function BacktestRuns() {
       stop = true;
       clearInterval(poll);
     };
-  }, [openId]);
+  }, [openId, basis]);
 
   type RunKey = "id" | "days" | "strategy" | "trades" | "win" | "profit" | "loss" | "net" | "dd";
-  const shownRuns = useMemo(() => (runs ?? []).filter((run) => runMatches(run, filters)), [runs, filters]);
+  const shownRuns = useMemo(
+    () => orderRuns((runs ?? []).filter((run) => runMatches(run, filters)), filters.order),
+    [runs, filters]
+  );
   const filtering = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
   const runCols = useColumnOrder<RunColKey>("backtests.cols.runs", RUN_COLS);
   const { sorted: sortedRuns, sort: runSort, onSort: onRunSort } = useSort<ReplayRun, RunKey>(shownRuns, (r, k) =>
@@ -805,7 +934,7 @@ export function BacktestRuns() {
                   ? r.totals.loss
                   : k === "net"
                     ? r.totals.net
-                    : r.totals.max_drawdown
+                    : capitalOf(r)
   );
 
   const remove = (run: ReplayRun) => {
@@ -838,7 +967,8 @@ export function BacktestRuns() {
     <div className="border-t border-white/10">
       <p className="px-4 pt-3 text-xs text-slate-400">
         Each replay run with the strategy settings it used. Run the same days again with other settings to compare. P&amp;L
-        is practice money on Groww&apos;s past candles.
+        is practice money on Groww&apos;s past candles, shown {basisWords(basis)}.{" "}
+        <BacktestBasisSwitch className="ml-1 align-middle" /> <NewTag id="bt-charges-switch" />
       </p>
       {error ? (
         <p role="alert" className="px-4 pt-2 text-xs text-rose-300">
@@ -924,8 +1054,18 @@ export function BacktestRuns() {
                   win: <SortTh label="Win %" k="win" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("win")} />,
                   profit: <SortTh label="Profit" k="profit" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("profit")} />,
                   loss: <SortTh label="Loss" k="loss" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("loss")} />,
-                  net: <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={runSort} onSort={onRunSort} drag={runCols.dragProps("net")} />,
-                  dd: <SortTh label="Max DD" k="dd" num sort={runSort} onSort={onRunSort} drag={runCols.dragProps("dd")} />,
+                  net: <SortTh label="P&L" k="net" num title={`Profit + loss, ${basisWords(basis)}`} sort={runSort} onSort={onRunSort} drag={runCols.dragProps("net")} />,
+                  dd: (
+                    <SortTh
+                      label="Capital"
+                      k="dd"
+                      num
+                      title={`Wallet money the run used: the most it had blocked at one moment (open trades' value × ${marginPct} % margin), with its P&L as % of it`}
+                      sort={runSort}
+                      onSort={onRunSort}
+                      drag={runCols.dragProps("dd")}
+                    />
+                  ),
                   actions: <th {...runCols.dragProps("actions")} className={clsx("px-2 py-2", runCols.dragProps("actions").className)} />,
                 })}
               </tr>
@@ -1007,7 +1147,18 @@ loss: <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{si
 net: <td className={clsx("px-2 py-2 text-right align-top font-mono font-semibold", pnlTone(t.net))}>
                         {signed(t.net)}
                       </td>,
-dd: <td className="px-2 py-2 text-right align-top font-mono text-rose-300">{signed(t.max_drawdown)}</td>,
+dd: (() => {
+                        const cap = capitalOf(run);
+                        return (
+                          <td
+                            className="px-2 py-2 text-right align-top font-mono"
+                            title={`Most in open trades at once: ${inr(run.capital?.peak_value ?? 0)} of shares (${run.capital?.peak_positions ?? 0} positions) × ${marginPct} % margin = ${inr(cap)}. Max drawdown ${signed(t.max_drawdown)}${cap > 0 ? ` (${((t.max_drawdown / cap) * 100).toFixed(1)} %)` : ""}.`}
+                          >
+                            <div className="text-slate-200">{cap > 0 ? inr(cap) : "—"}</div>
+                            {cap > 0 ? <div className={clsx("text-[11px]", pnlTone(t.net))}>{`${t.net >= 0 ? "+" : ""}${((t.net / cap) * 100).toFixed(1)} %`}</div> : null}
+                          </td>
+                        );
+                      })(),
 actions: <td className="px-2 py-2 text-right align-top">
                         {(run.status === "INTERRUPTED" || run.status === "STOPPED") &&
                         run.days_done < run.days_total &&
@@ -1175,6 +1326,52 @@ function RunFilterBar({
         </select>
       </label>
       <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <span className="flex items-center gap-1">
+          Order <NewTag id="bt-runs-pnl-filters" />
+        </span>
+        <select value={filters.order} onChange={(e) => set("order", e.target.value)} className={box}>
+          <option value="NEW">Newest first</option>
+          <option value="BEST">Best P&amp;L first</option>
+          <option value="WORST">Worst P&amp;L first</option>
+          <option value="PER_TRADE">Best P&amp;L per trade</option>
+        </select>
+      </label>
+      <label
+        className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400"
+        title="The run's P&L in ₹, before or after charges as the switch above says. A minus sign for a loss, e.g. -5000."
+      >
+        P&amp;L from ₹
+        <input
+          inputMode="decimal"
+          value={filters.pnlMin}
+          onChange={(e) => set("pnlMin", e.target.value)}
+          placeholder="e.g. -5000"
+          className={clsx(box, "w-24")}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        to ₹
+        <input
+          inputMode="decimal"
+          value={filters.pnlMax}
+          onChange={(e) => set("pnlMax", e.target.value)}
+          placeholder="e.g. 20000"
+          className={clsx(box, "w-24")}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400" title="Hide runs with fewer closed trades">
+        Trades at least
+        <input
+          type="number"
+          min={0}
+          inputMode="numeric"
+          value={filters.minTrades}
+          onChange={(e) => set("minTrades", e.target.value)}
+          placeholder="any"
+          className={clsx(box, "w-20")}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
         Days from
         <input type="date" value={filters.from} onChange={(e) => set("from", e.target.value)} className={box} />
       </label>
@@ -1269,6 +1466,7 @@ function RunDetailBody({
 }) {
   // A day opens to show how each stock did that day (the stock table below opens the other way).
   const [openDay, setOpenDay] = useState<string | null>(null);
+  const basis = useBacktestBasis();
   const stocks = run.stocks ?? [];
   type DayKey = "date" | "trades" | "wins" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative";
   const dayCols = useColumnOrder<DayColKey>("backtests.cols.days", DAY_COLS);
@@ -1287,7 +1485,7 @@ function RunDetailBody({
         </h3>
         <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>P&amp;L {signed(t.net)}</span>
       </div>
-      {scalpPickOf(run.settings) ? <PickList pick={scalpPickOf(run.settings)!} stocks={stocks} /> : null}
+      {scalpPickOf(run.settings) ? <PickList pick={scalpPickOf(run.settings)!} stocks={stocks} swings={run.day_swings} /> : null}
       {run.fast_move ? (
         <p className="mb-2 rounded-lg border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-100">
           <span className="font-semibold">Fast movers → Bot 5:</span> {run.fast_move.cut} trade
@@ -1318,7 +1516,7 @@ function RunDetailBody({
           <div className="mb-1 px-2 text-xs uppercase tracking-wider text-slate-400">
             Hand-offs in this run ({(run.handoff_trail ?? []).length}) · where each stock was sent
           </div>
-          <HandoffTable rows={[...(run.handoff_trail ?? [])].reverse()} showDay={run.start_date !== run.end_date} />
+          <HandoffTable rows={[...(run.handoff_trail ?? [])].reverse()} showDay={run.start_date !== run.end_date} basis={basis} />
         </div>
       ) : null}
       <div className="overflow-x-auto">
@@ -1334,8 +1532,13 @@ function RunDetailBody({
                 loss: <SortTh label="Loss" k="loss" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("loss")} />,
                 gross: <SortTh label="Gross" k="gross" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("gross")} />,
                 charges: <SortTh label="Charges" k="charges" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("charges")} />,
-                net: <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("net")} />,
+                net: <SortTh label="P&L" k="net" num title={`Profit + loss, ${basisWords(basis)}`} sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("net")} />,
                 cumulative: <SortTh label="Running total" k="cumulative" num sort={daySort} onSort={onDaySort} drag={dayCols.dragProps("cumulative")} />,
+                swing: (
+                  <th {...dayCols.dragProps("swing")} className="px-2 py-1.5 text-left font-medium" title={`The day's highest and lowest P&L (closed + open, ${basisWords(basis)}), when, and which came first`}>
+                    Day high / low <NewTag id="bt-day-swing" />
+                  </th>
+                ),
               })}
             </tr>
           </thead>
@@ -1383,7 +1586,8 @@ loss: <td className="px-2 py-1.5 text-right text-rose-300">{signed(d.loss)}</td>
 gross: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.gross))}>{signed(d.gross)}</td>,
 charges: <td className="px-2 py-1.5 text-right text-amber-300">{inr(d.charges)}</td>,
 net: <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(d.net))}>{signed(d.net)}</td>,
-cumulative: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.cumulative))}>{signed(d.cumulative)}</td>
+cumulative: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.cumulative))}>{signed(d.cumulative)}</td>,
+swing: <td className="px-2 py-1.5 text-xs">{heading ? <span className="text-slate-500">—</span> : <SwingText s={run.day_swings?.[d.date]} compact />}</td>
 })}
 </tr>
                 {isOpen
@@ -1405,7 +1609,8 @@ charges: <td className="px-2 py-1 text-right text-amber-300">{inr(sd.charges)}</
 net: <td className={clsx("px-2 py-1 text-right", pnlTone(sd.net))}>{signed(sd.net)}</td>,
 cumulative: <td className="px-2 py-1 text-right text-slate-500" title="Share of the day's P&L">
                           {d.net !== 0 ? `${Math.round((sd.net / Math.abs(d.net)) * 100)}% of day` : "—"}
-                        </td>
+                        </td>,
+swing: <td className="px-2 py-1" />
 })}
 </tr>
                     ))
@@ -1429,7 +1634,8 @@ loss: <td className="px-2 py-2 text-right text-rose-300">{signed(t.loss)}</td>,
 gross: <td className={clsx("px-2 py-2 text-right", pnlTone(t.gross))}>{signed(t.gross)}</td>,
 charges: <td className="px-2 py-2 text-right text-amber-300">{inr(t.charges)}</td>,
 net: <td className={clsx("px-2 py-2 text-right font-semibold", pnlTone(t.net))}>{signed(t.net)}</td>,
-cumulative: <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t.max_drawdown)}</td>
+cumulative: <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t.max_drawdown)}</td>,
+swing: <td className="px-2 py-2" />
 })}
 </tr>
             </tfoot>
@@ -1453,7 +1659,7 @@ cumulative: <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t
           </div>
         </dl>
         {/* A real backtest run (a live book has a negative id and no saved strategy of its own). */}
-        {run.id > 0 && !settingsRows ? <ApplyRunStrategy runId={run.id} runBot={Number(run.settings.bot ?? 1) || 1} /> : null}
+        {run.id > 0 && !settingsRows ? <ApplyRunStrategy runId={run.id} runBot={Number(run.settings.bot ?? 1) || 1} hasBot5={Boolean(fastBotOf(run.settings)?.bot5)} /> : null}
       </div>
     </section>
   );
@@ -1461,6 +1667,7 @@ cumulative: <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t
 
 /** The run split by stock. Each row opens that stock's own day-wise P&L. */
 function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Settings }) {
+  const basis = useBacktestBasis();
   const [open, setOpen] = useState<string | null>(null);
   // The whole section folds like a day row; folded by default (owner's request), remembered per browser.
   const [shown, setShown] = useState<boolean>(() => {
@@ -1517,7 +1724,7 @@ function ByStock({ stocks, settings }: { stocks: ReplayStockRow[]; settings: Set
                 loss: <SortTh label="Loss" k="loss" num sort={sort} onSort={onSort} drag={stockCols.dragProps("loss")} />,
                 gross: <SortTh label="Gross" k="gross" num sort={sort} onSort={onSort} drag={stockCols.dragProps("gross")} />,
                 charges: <SortTh label="Charges" k="charges" num sort={sort} onSort={onSort} drag={stockCols.dragProps("charges")} />,
-                net: <SortTh label="P&L" k="net" num title="Profit + loss, before charges" sort={sort} onSort={onSort} drag={stockCols.dragProps("net")} />,
+                net: <SortTh label="P&L" k="net" num title={`Profit + loss, ${basisWords(basis)}`} sort={sort} onSort={onSort} drag={stockCols.dragProps("net")} />,
                 dd: <SortTh label="Max DD" k="dd" num sort={sort} onSort={onSort} drag={stockCols.dragProps("dd")} />,
               })}
             </tr>
@@ -1604,7 +1811,7 @@ dd: <td className={clsx("px-2 py-1 text-right", pnlTone(d.cumulative))} title="R
 /** A pick run: which stocks each day picked at the pick time, and why. Each kind of pick backtest records its own
  * fields (scalp score / strong-trend score / volume vs usual), so every number is read by kind and a missing one shows
  * as a dash: an older run or another kind's rows must never break the Backtests tab. */
-function PickList({ pick, stocks }: { pick: ScalpPickInfo; stocks: ReplayStockRow[] }) {
+function PickList({ pick, stocks, swings }: { pick: ScalpPickInfo; stocks: ReplayStockRow[]; swings?: Record<string, DaySwing> }) {
   const days = Object.keys(pick.picks ?? {}).sort();
   const kind = pick.kind;
   const [show, setShow] = useState<"all" | "traded" | "won" | "lost" | "idle">("all");
@@ -1720,6 +1927,11 @@ function PickList({ pick, stocks }: { pick: ScalpPickInfo; stocks: ReplayStockRo
                       <span className="text-slate-400">
                         {d.rows.length} armed · {d.traded} traded · {d.won} won · {d.lost} lost
                       </span>
+                      {swings?.[d.date] ? (
+                        <span className="text-[11px]">
+                          <SwingText s={swings[d.date]} />
+                        </span>
+                      ) : null}
                       <span className={clsx("ml-auto font-mono font-semibold", pnlTone(d.pnl))}>{signed(d.pnl)}</span>
                     </>
                   )}

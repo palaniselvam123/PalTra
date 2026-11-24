@@ -61,3 +61,37 @@ def test_trend_groups_and_text():
     text = handoff_log.trend_text(json.loads(up), "LONG")
     assert text.startswith("Up since 12:10 (+0.80%), with it") and "1 cross" in text
     assert handoff_log.trend_text(None, "LONG") == ""
+
+
+def test_with_pnl_pairs_each_fast_move_with_the_cut_and_the_bot5_trade():
+    """The run detail's hand-off rows carry the source bot's cut trade and the trade Bot 5's settings opened."""
+    import datetime as dt
+    from types import SimpleNamespace as T
+
+    import handoff_log
+
+    day = dt.datetime(2026, 11, 5)
+
+    def tr(i, sym, entry, exit_, reason_in, reason_out, gross):
+        return T(id=i, symbol=sym, direction="LONG", entry_time=day.replace(hour=entry[0], minute=entry[1]),
+                 exit_time=day.replace(hour=exit_[0], minute=exit_[1]), entry_reason=reason_in, exit_reason=reason_out,
+                 gross_pnl=gross, net_pnl=gross - 40)
+
+    trades = [
+        tr(1, "BSE", (12, 0), (12, 35), "SMA_CROSS", "FAST_MOVE_HANDOFF", 300.0),
+        tr(2, "BSE", (12, 35), (13, 10), "FAST_MOVE", "TSL_HIT", -120.0),
+        tr(3, "BSE", (14, 0), (14, 15), "SMA_CROSS", "FAST_MOVE_HANDOFF", 150.0),
+        tr(4, "BSE", (14, 15), (15, 15), "FAST_MOVE", "EOD_SQUARE_OFF", 900.0),
+        tr(5, "SBIN", (10, 0), (11, 0), "SMA_CROSS", "MA_CROSS", 50.0),
+    ]
+    rows = [  # newest first, as handoff_log.rows gives them
+        {"id": 2, "at": "2026-11-05T14:15:10", "symbol": "BSE", "kind": "FAST_MOVE", "to_bot": 5, "moved": True, "trade_id": None},
+        {"id": 1, "at": "2026-11-05T12:35:10", "symbol": "BSE", "kind": "FAST_MOVE", "to_bot": 5, "moved": True, "trade_id": None},
+        {"id": 3, "at": "2026-11-05T10:30:00", "symbol": "SBIN", "kind": "FAST_MOVE", "to_bot": 5, "moved": False, "trade_id": None},
+    ]
+    got = handoff_log.with_pnl(rows, trades)
+    assert [r["id"] for r in got] == [2, 1, 3]
+    assert got[1]["from_trade"]["trade_id"] == 1 and got[1]["to_trade"]["trade_id"] == 2
+    assert got[1]["to_trade"]["gross"] == -120.0 and got[1]["to_trade"]["net"] == -160.0
+    assert got[0]["from_trade"]["trade_id"] == 3 and got[0]["to_trade"]["trade_id"] == 4
+    assert got[2]["from_trade"] is None and got[2]["to_trade"] is None  # not moved, no cut trade

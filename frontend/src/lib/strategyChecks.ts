@@ -47,6 +47,8 @@ export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
     !cfg.vturn_exit &&
     !cfg.decel_exit &&
     !(cfg.pivot_target === "R1" || cfg.pivot_target === "R2") &&
+    !cfg.day_target &&
+    !cfg.target_net &&
     !(cfg.flow_exit && String(cfg.flow_exit_mode ?? "EXIT").toUpperCase() !== "CONFIRM") &&
     !cfg.og_exit_exec &&
     !cfg.og_exit_wait &&
@@ -214,8 +216,11 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
   const ownCandle = num(cfg.candle_minutes, 1);
   const mixed = crossExitOn(cfg) && exitCandle > 0 && exitCandle !== ownCandle;
   if (mixed) out.push({ name: `SMA cross on the ${exitCandle}-minute candle`, when: candle, code: "EXIT_CANDLE_CROSS" });
-  const small = String(cfg.small_exit_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < ownCandle);
-  if (small.length) out.push({ name: `Smaller candles turned (${small.join(" / ")}-min)`, when: candle, code: "SMALL_CANDLE_EXIT" });
+  const small = [
+    ...String(cfg.small_exit_minutes ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > 0 && n < ownCandle),
+    ...String(cfg.small_exit_upper ?? "").split(",").map((s) => Number(s.trim())).filter((n) => n > ownCandle),
+  ];
+  if (small.length) out.push({ name: `Smaller / bigger candles turned (${small.join(" / ")}-min)${cfg.small_exit_when === "TROUBLE" ? ", only in a loss or giving back profit" : ""}`, when: candle, code: "SMALL_CANDLE_EXIT" });
   if (cfg.st_exit) out.push({ name: "Supertrend flip (candle closes beyond it)", when: candle, code: "SUPERTREND" });
   if (cfg.slope_exit) out.push({ name: "SMA 9 slope turn / bend", when: candle, code: "SMA9_TURN / SMA9_BEND" });
   if (cfg.vturn_exit) out.push({ name: "SMA 9 V-turn", when: candle, code: "SMA9_VTURN" });
@@ -238,6 +243,9 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
       code: "GAP_FADE",
     });
   if (cfg.pivot_target === "R1" || cfg.pivot_target === "R2") out.push({ name: `Pivot target (${cfg.pivot_target})`, when: price, code: "PIVOT_TARGET" });
+  if (cfg.day_target) out.push({ name: "Day high / low target (today's or yesterday's)", when: price, code: "DAY_LEVEL_TARGET" });
+  if (cfg.target_net)
+    out.push({ name: "Profit safety net on every trade (keeps part of the best profit)", when: price, code: "TARGET_NET" });
   if (cfg.flow_exit && String(cfg.flow_exit_mode ?? "EXIT").toUpperCase() !== "CONFIRM")
     out.push({ name: `Executed volume: the other side did ${cfg.flow_exit_pct ?? 60}% of the shares traded`, when: Number(cfg.flow_exit_window ?? 3) === 0 ? candle : "each closed minute", code: "FLOW_EXIT" });
   if (cfg.og_exit_exec || cfg.og_exit_wait)

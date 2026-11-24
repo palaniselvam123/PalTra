@@ -75,6 +75,8 @@ export type BacktestPdfInput = {
   pickLog?: { day: string; time: string; symbol: string; source: string; side: string; why: string }[];
   /** Each trade's latest saved Most active read before its entry, by trade id (volume vs usual, money traded). */
   marketReads?: Record<string, MarketRead>;
+  /** P&L before charges (default, the screens' basis) or after charges (the backtest switch). */
+  basis?: "gross" | "net";
 };
 
 /** "2.3× usual / ₹45 cr / read 09:52" for a trade's Most active read at entry, or "-" without one. */
@@ -144,7 +146,9 @@ export async function downloadBacktestPdf({
   pickRule,
   pickLog,
   marketReads,
+  basis = "gross",
 }: BacktestPdfInput): Promise<void> {
+  const pnlHead = `P&L (${basis === "net" ? "after" : "before"} charges)`;
   const [{ jsPDF }, { autoTable }] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
   const width = doc.internal.pageSize.getWidth();
@@ -246,7 +250,7 @@ export async function downloadBacktestPdf({
       ["Win rate", `${t.win_rate.toFixed(1)}%`],
       ["Total profit", pdfMoney(t.profit)],
       ["Total loss", pdfMoney(t.loss)],
-      ["P&L (before charges)", pdfMoney(t.net)],
+      [pnlHead, pdfMoney(t.net)],
       ["Max drawdown", pdfMoney(t.max_drawdown)],
       ["Green / red days", `${t.green_days} / ${t.red_days}`],
       ...rangeRows,
@@ -325,7 +329,7 @@ export async function downloadBacktestPdf({
       startY: y + 6,
       margin: { left: margin, right: margin },
       theme: "striped",
-      head: [["When it opened", "Trades", "Won", "Win %", "P&L (before charges)"]],
+      head: [["When it opened", "Trades", "Won", "Win %", pnlHead]],
       body: trendRows.map((g) => {
         const v = byTrend.get(g)!;
         return [TREND_GROUP_WORDS[g], v.trades, v.wins, v.trades ? `${((100 * v.wins) / v.trades).toFixed(0)}%` : "-", pdfMoney(v.pnl)];
@@ -420,7 +424,7 @@ export async function downloadBacktestPdf({
     startY: y + 6,
     margin: { left: margin, right: margin },
     theme: "striped",
-    head: [["Trade ID", "Stock", "Side", "Qty", "Entry time", "Entry", "Full value", `Margin ${pct}%`, "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Trend at entry", "Vol vs usual / money at entry", "Charges", "P&L (before charges)"]],
+    head: [["Trade ID", "Stock", "Side", "Qty", "Entry time", "Entry", "Full value", `Margin ${pct}%`, "Exit time", "Exit", "Max high (P&L there)", "Max low (P&L there)", "Points", "Exit reason", "Trend at entry", "Vol vs usual / money at entry", "Charges", pnlHead]],
     body: rows.length
       ? rows.map((r) => [
           r.trade_ref || `#${r.id}`,

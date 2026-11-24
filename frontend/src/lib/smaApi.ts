@@ -5,7 +5,7 @@ routes are mounted at `/sma` on this host, so the browser must not call
 127.0.0.1.
 */
 
-import { runBeforeCharges, tradeBeforeCharges } from "./pnlBasis";
+import { runOnBasis, tradeBeforeCharges } from "./pnlBasis";
 import { onSignedOut } from "./session";
 import type { TrendRead } from "./trendReads";
 
@@ -95,6 +95,11 @@ export type SmaConfig = {
   small_exit_counter?: number;
   small_exit_loss_pct?: number;
   small_exit_agree?: number;
+  /** ALWAYS, or TROUBLE = look only while in a loss or giving back profit. */
+  small_exit_when?: "ALWAYS" | "TROUBLE";
+  small_exit_giveback?: number;
+  small_exit_upper?: string;
+  small_exit_upper_must?: boolean;
   /** Patterns only with the SMA trend. */
   pattern_trend?: boolean;
   pattern_set?: "STRONG" | "ALL";
@@ -274,6 +279,24 @@ export type SmaConfig = {
   extreme_cancel_on_cross?: boolean;
   /** Entry-candle check: the order waits until its own candle is past its open the trade's way (entry_candle.py). */
   entry_candle_confirm?: boolean;
+  /** Live SMA re-check at execution (live_sma.py): SMA 9 vs 21 on the live price when the order goes / while it waits. */
+  live_sma_check?: boolean;
+  live_sma_min_gap?: number;
+  /** Day high / low target (day_target.py): today's (before the entry) or yesterday's high / low, whichever first. */
+  day_target?: boolean;
+  day_target_min_pct?: number;
+  day_target_early_pct?: number;
+  day_target_skip_min?: number;
+  /** Profit safety net on every trade (target_net.py). */
+  target_net?: boolean;
+  target_net_keep?: number;
+  target_net_keep2?: number;
+  target_net_at2?: number;
+  /** Where the profit safety net starts on any trade ("TARGET" from older saves reads as PCT). */
+  target_net_start?: "TARGET" | "PCT" | "RS" | "ATR";
+  target_net_start_pct?: number;
+  target_net_start_rs?: number;
+  target_net_start_atr?: number;
   entry_candle_pct?: number;
   entry_candle_max?: number;
   handoff_candle?: "OFF" | "WAIT" | "FOLLOW" | string;
@@ -301,6 +324,12 @@ export type SmaConfig = {
   turn_exit_candle?: boolean;
   /** A trade opened by an SMA 9 turn closes on the first candle of the other colour. */
   turn_colour_exit?: boolean;
+  /** Turn entry gap range: a turn opens a trade only while the signed SMA 9/21 gap % is inside its side's range. */
+  turn_gap_on?: boolean;
+  turn_gap_long_min?: number;
+  turn_gap_long_max?: number;
+  turn_gap_short_min?: number;
+  turn_gap_short_max?: number;
   uturn_run?: number;
   uturn_min_pct?: number;
   vturn_move_pct?: number;
@@ -640,7 +669,9 @@ export type ChopScanRow = {
   /** MORNING before 10:00 IST (today's candles), MIDDAY from 10:00. */
   trend_mode?: "MORNING" | "MIDDAY" | "HEIKIN_ASHI" | "COLOUR";
   /** The server's one-line reading of each check (names the morning / midday rule used). */
-  trend_notes?: Partial<Record<ChopTrendCheck, string>>;
+  trend_notes?: Partial<Record<ChopTrendCheck | "skip", string>>;
+  /** Minutes after 09:15 left out of the trend read (0 = none). */
+  trend_skip_min?: number;
   /** Morning volume since 09:15 against the usual for the same minutes (x), and the earlier sessions used. */
   rvol?: number | null;
   trend_days?: number;
@@ -759,6 +790,8 @@ export type ChopScan = {
   quiet_min: number;
   /** The candles the scan read: NORMAL (real, SMA cross), COLOUR (real, by colour) or HA (Heikin Ashi); older servers leave it out. */
   candles?: ChopCandles;
+  /** Today's first N candles the scan left out of the trend read (0 = none). */
+  skip_candles?: number;
   as_of: string | null;
   /** When the last pass ended (IST); older servers leave it out. */
   finished_at?: string | null;
@@ -1224,6 +1257,7 @@ export type TrendPicksAuto = {
   top_n: number;
   minutes: number;
   candles?: "NORMAL" | "HA";
+  skip_candles?: number;
   until?: string;
   bot: number;
   lists: ("armed" | "fno" | "nifty50" | "nifty100" | "niftybank")[];
@@ -1511,6 +1545,8 @@ export type ScanRunDetail = ScanRun & {
 export type ChopCandles = "NORMAL" | "COLOUR" | "HA";
 export type ChopAuto = {
   candles?: ChopCandles;
+  /** Today's first N candles left out of the trend read (0 = none). */
+  skip_candles?: number;
   on: boolean;
   every_min: number;
   minutes: CrossScanMinutes;
@@ -1529,7 +1565,7 @@ export type ChopAuto = {
 };
 
 export type ChopAutoUpdate = Partial<
-  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max" | "lists" | "candles">
+  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max" | "lists" | "candles" | "skip_candles">
 >;
 
 /** One 1-minute review of an uncertain SMA position. Only EXIT ever closes the trade. */
@@ -2003,8 +2039,27 @@ export interface AllBotsGuard {
   stop: number;
   /** "HH:MM" IST square-off time for every bot, "" = off. */
   squareoff: string;
+  /** Profit safety net (all_bots_guard.trail_rule): on, start ₹ / keep %, second step ₹ (0 = none) / keep %. */
+  trail: boolean;
+  trail_start: number;
+  trail_keep: number;
+  trail_start2: number;
+  trail_keep2: number;
+  /** Today's best combined P&L so far, and the safety net it gives (null until the best reaches the start). */
+  /** The practice wallet's money loaded (₹, 0 = none): the capital the % levels are read from. */
+  capital: number;
+  /** "RS" = the ₹ fields are in force, "PCT" = the *_pct fields as % of capital. */
+  unit: "RS" | "PCT";
+  target_pct: number;
+  stop_pct: number;
+  trail_start_pct: number;
+  trail_start2_pct: number;
+  /** The levels in force now, in ₹. */
+  effective: { target: number; stop: number; trail_start: number; trail_start2: number };
+  peak: number;
+  floor: number | null;
   total: number;
-  hit: "target" | "stop" | null;
+  hit: "target" | "stop" | "time" | "trail" | null;
   halted_bots: number[];
   reason: string;
 }
@@ -2105,7 +2160,8 @@ export type ChartPayload = {
   filters?: ChartFilters;
   /** Buyers' share of the waiting orders from the Most active scans (live and saved), oldest first; display only. */
   /** Saved Most active reads: buyers %, and volume vs usual (×) / money traded (₹ cr) when that read had them. */
-  pressure?: { time: number; buy_pct: number; rvol?: number; value_cr?: number }[];
+  /** buy_qty / sell_qty: total quantity waiting to buy / sell (Groww's bid / ask total) at that read. */
+  pressure?: { time: number; buy_pct: number; rvol?: number; value_cr?: number; buy_qty?: number; sell_qty?: number }[];
   /** Executed buy / sell shares per 1-minute candle, estimated (trade_flow.py); display only. */
   flow?: { time: number; buy: number; sell: number; src: "T" | "C" }[];
   /** "Executed volume only": what the bot decided at each window end it judged (entered / not taken and why); display only. */
@@ -2162,6 +2218,8 @@ export type TradeRow = {
   gross_pnl: number | null;
   brokerage_and_taxes: number | null;
   net_pnl: number | null;
+  /** The server's P&L after charges, kept when `net_pnl` is turned to before charges (pnlBasis.tradeBeforeCharges). */
+  net_after?: number | null;
   points: number | null;
   mode: string;
   /** The replay run a REPLAY trade belongs to. */
@@ -2333,8 +2391,13 @@ export type ReplayInfo = {
 /** The rule a pick run recorded (`scalp_pick` in the run's settings). `kind` says which backtest picked: absent =
  * the Scalp page's scalp picks (scalp_picks.py), `TREND` = strong-trend picks (trend_picks.py), `ACTIVE` = Most active
  * picks (active_picks.py); each kind keeps its own fields, so read them by kind. */
+/** Ranking columns of the saved-scan backtest (backend saved_picks.COLUMNS). */
+export type SavedScanColumn =
+  | "rvol" | "value" | "buyers" | "sellers" | "imbalance" | "exec_buyers" | "exec_sellers"
+  | "move" | "up" | "down" | "speed" | "vwap" | "range";
+
 export type ScalpPickRule = {
-  kind?: "TREND" | "ACTIVE" | "AUTOARM";
+  kind?: "TREND" | "ACTIVE" | "AUTOARM" | "SAVED";
   pick_time: string;
   /** The run saved the stocks it picks from, so a run cut short can be resumed (runs started since this was added). */
   resumable?: boolean;
@@ -2475,6 +2538,25 @@ export type ReplayRun = {
   by_regime?: TrendGroupRow[];
   /** Where each stock was handed during the run (handoff_log.rows), on the run detail only. */
   handoff_trail?: HandoffRow[];
+  /** Each day's highest / lowest P&L (closed + open) on the run's P&L log, with when and which came first. */
+  day_swings?: Record<string, DaySwing>;
+};
+
+/** One replayed day's P&L swing (open_pnl_log.replay_swings): before charges, and after (`_net`). */
+export type DaySwing = {
+  high: number;
+  high_at: string;
+  low: number;
+  low_at: string;
+  first: "HIGH" | "LOW" | null;
+  high_net: number;
+  high_net_at: string;
+  low_net: number;
+  low_net_at: string;
+  first_net: "HIGH" | "LOW" | null;
+  last: number;
+  last_at: string;
+  points: number;
 };
 
 /** One group of closed trades by the trend at entry. */
@@ -2505,6 +2587,20 @@ export type HandoffRow = {
   moved: boolean;
   trade_id: number | null;
   regime: import("./trendAtEntry").TradeRegime | null;
+  /** In a run's detail only (handoff_log.with_pnl): the trade the sending bot closed for it, and the first trade
+   * the receiving bot's settings opened on that stock after it. */
+  from_trade?: HandoffTrade | null;
+  to_trade?: HandoffTrade | null;
+};
+
+export type HandoffTrade = {
+  trade_id: number;
+  side: string;
+  entry_time: string | null;
+  exit_time: string | null;
+  exit_reason: string | null;
+  gross: number;
+  net: number;
 };
 
 /** One run's numbers in a backtest comparison (GET /api/replay/compare), on the basis asked (before / after charges). */
@@ -2778,7 +2874,7 @@ export type ResumableRun = {
   next_day: string | null;
   symbols: string[];
   /** Which Scalp-page backtest it is (TREND / ACTIVE / AUTOARM / SCALP); null for a plain replay. */
-  kind?: "TREND" | "ACTIVE" | "AUTOARM" | "SCALP" | null;
+  kind?: "TREND" | "ACTIVE" | "AUTOARM" | "SAVED" | "SCALP" | null;
 };
 
 export function replayActive(info: ReplayInfo | null | undefined): boolean {
@@ -2992,6 +3088,8 @@ export type AutoArmBody = {
   every_min: number;
   minutes: number;
   candles?: "NORMAL" | "HA";
+  /** Today's first N candles left out of the strong-trend read (0 = none). */
+  skip_candles?: number;
   until?: string;
   bot: number;
   speed?: number;
@@ -3254,7 +3352,7 @@ export const smaApi = {
     symbols: string[],
     minutes: CrossScanMinutes = 5,
     force = false,
-    opts: { quiet_min?: number; alert_on_quiet?: boolean; price_min?: number; price_max?: number; candles?: ChopCandles } = {}
+    opts: { quiet_min?: number; alert_on_quiet?: boolean; price_min?: number; price_max?: number; candles?: ChopCandles; skip_candles?: number } = {}
   ) =>
     request<ChopScan>(
       "/api/chop-scan/start",
@@ -3269,6 +3367,7 @@ export const smaApi = {
           price_min: opts.price_min ?? 0,
           price_max: opts.price_max ?? 0,
           candles: opts.candles ?? "NORMAL",
+          skip_candles: opts.skip_candles ?? 0,
         }),
       },
       20000,
@@ -3459,8 +3558,21 @@ export const smaApi = {
       }),
     }),
   testPnlAlerts: () => request<Record<string, string>>("/api/bots/pnl-alerts/test", { method: "POST" }),
-  saveAllBotsGuard: (target: number, stop: number, squareoff: string) =>
-    request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ target, stop, squareoff }) }),
+  saveAllBotsGuard: (target: number, stop: number, squareoff: string, pct?: { unit: "RS" | "PCT"; target_pct: number; stop_pct: number }) =>
+    request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ target, stop, squareoff, ...(pct ?? {}) }) }),
+  saveProfitNet: (body: {
+    stop: number;
+    trail: boolean;
+    trail_start: number;
+    trail_keep: number;
+    trail_start2: number;
+    trail_keep2: number;
+    unit?: "RS" | "PCT";
+    stop_pct?: number;
+    trail_start_pct?: number;
+    trail_start2_pct?: number;
+  }) =>
+    request<AllBotsGuard>("/api/bots/guard", { method: "PUT", body: JSON.stringify({ ...body, target: 0, trail_only: true }) }),
   killAllBots: () => request<{ bot: number; bot_status: string }[]>("/api/bots/kill-all", { method: "POST" }),
   setMode: (mode: "PAPER" | "LIVE", confirmLive = false) =>
     request<{ trading_mode: string }>("/api/mode", {
@@ -3564,6 +3676,8 @@ export const smaApi = {
     minutes: number;
     /** NORMAL = real candles, HA = the trend read on Heikin Ashi candles. */
     candles?: "NORMAL" | "HA";
+    /** Today's first N candles left out of the trend read (0 = none). */
+    skip_candles?: number;
     /** Trade until this time each day ("HH:MM", up to 15:30 = the close). */
     until?: string;
     bot: number;
@@ -3590,6 +3704,26 @@ export const smaApi = {
     play_handoffs: boolean;
     speed?: number;
   }) => request<ReplayInfo>("/api/replay/active-picks", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 20000),
+  /** Saved-scan backtest (backend saved_picks.py): each day's first saved Most active scan at or after `at`, the top N
+   * by one or more columns (average place), traded by `bot` from the minute after the scan read them, at `qty` shares
+   * (0 = the bot's own). Practice money; nothing is armed. */
+  replaySavedScans: (body: {
+    date: string;
+    end_date: string;
+    at: string;
+    rank_by: SavedScanColumn[];
+    top_n: number;
+    qty: number;
+    side: "ANY" | "BUYERS" | "SELLERS";
+    min_value_cr: number;
+    min_rvol: number;
+    price_min?: number;
+    price_max?: number;
+    until?: string;
+    bot: number;
+    play_handoffs: boolean;
+    speed?: number;
+  }) => request<ReplayInfo & { notes?: string[]; days_with_picks?: number }>("/api/replay/saved-scans", { method: "POST", body: JSON.stringify({ speed: 300, ...body }) }, 120000),
   /** Stock ranking: backtest a bot's strategy on many stocks in batches, then rank the stocks (stock_rank.py). */
   stockRankStart: (body: {
     date: string;
@@ -3616,6 +3750,7 @@ export const smaApi = {
     direction: TrendPickDirection;
     minutes: number;
     candles?: "NORMAL" | "HA";
+    skip_candles?: number;
     until?: string;
     bot: number;
     lists?: string[];
@@ -3688,9 +3823,9 @@ export const smaApi = {
     request<ArmLogDay>(`/api/arm-log?desk=${encodeURIComponent(desk)}${day ? `&day=${day}` : ""}`),
   /** The newest `limit` runs (server default 50, at most 500). */
   replayRuns: (limit?: number): Promise<ReplayRun[]> =>
-    request<ReplayRun[]>(limit ? `/api/replay/runs?limit=${limit}` : "/api/replay/runs").then((runs) => runs.map((r) => runBeforeCharges(r))),
+    request<ReplayRun[]>(limit ? `/api/replay/runs?limit=${limit}` : "/api/replay/runs").then((runs) => runs.map((r) => runOnBasis(r))),
   replayRun: (id: number): Promise<ReplayRun> =>
-    request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runBeforeCharges(r)),
+    request<ReplayRun>(`/api/replay/runs/${id}`).then((r) => runOnBasis(r)),
   /** Each trade's latest saved Most active read before its entry (by trade id); trades without one are left out. */
   replayRunMarketReads: (id: number) => request<Record<string, MarketRead>>(`/api/replay/runs/${id}/market-reads`),
   replayRunTrendReads: (id: number, opts: { symbol?: string; day?: string; workOut?: boolean } = {}) => {
@@ -3701,12 +3836,20 @@ export const smaApi = {
     return request<TrendReadsResult>(`/api/replay/runs/${id}/trend-reads${q.toString() ? `?${q}` : ""}`);
   },
   /** Put the strategy a backtest run played with onto a bot (Trade list, mode and name stay). No order is placed. */
-  applyRunStrategy: (id: number, toDesk: "1" | "2" | "3" | "4" | "5" | "research", reset: boolean, withStocks: boolean, confirmLive = false) =>
+  /** source "bot5" = the Bot 5 settings the run's fast-mover hand-off played with, not the replayed bot's strategy. */
+  applyRunStrategy: (
+    id: number,
+    toDesk: "1" | "2" | "3" | "4" | "5" | "research",
+    reset: boolean,
+    withStocks: boolean,
+    confirmLive = false,
+    source: "run" | "bot5" = "run"
+  ) =>
     request<{ desk: string; changed: string[]; notes: string[]; run_id: number }>(
       `/api/replay/runs/${id}/apply`,
       {
         method: "POST",
-        body: JSON.stringify({ to_desk: toDesk, reset, stock_settings: withStocks, confirm_live: confirmLive }),
+        body: JSON.stringify({ to_desk: toDesk, reset, stock_settings: withStocks, confirm_live: confirmLive, source }),
       },
       15000,
       false
