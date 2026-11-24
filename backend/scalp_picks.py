@@ -162,6 +162,8 @@ def rule_from_dict(data: dict, sma_fast: int = 9, sma_slow: int = 21):
             pick_time=_hhmm(data.get("pick_time"), dt.time(10, 0)), top_n=int(data.get("top_n") or 10),
             direction=str(data.get("direction") or "BOTH"), minutes=int(data.get("minutes") or 5),
             sma_fast=int(data.get("sma_fast") or sma_fast), sma_slow=int(data.get("sma_slow") or sma_slow),
+            candles="HA" if str(data.get("candles") or "").upper() == "HA" else "NORMAL",
+            skip_candles=int(data.get("skip_candles") or 0),
         )
     if kind == "ACTIVE":
         import active_picks
@@ -185,6 +187,7 @@ def rule_from_dict(data: dict, sma_fast: int = 9, sma_slow: int = 21):
             minutes=int(data.get("minutes") or 5),
             sma_fast=int(data.get("sma_fast") or sma_fast), sma_slow=int(data.get("sma_slow") or sma_slow),
             candles="HA" if str(data.get("candles") or "").upper() == "HA" else "NORMAL",
+            skip_candles=int(data.get("skip_candles") or 0),
             min_rvol=float(data.get("min_rvol") or 0.0),
             min_checks=int(data.get("min_checks") or 6), side=str(data.get("side") or "BOTH"),
             pct=float(data.get("pct") or 70.0), pressure_side=str(data.get("pressure_side") or "BOTH"),

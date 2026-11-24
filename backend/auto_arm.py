@@ -218,6 +218,9 @@ class AutoArmRule:
     sma_slow: int = 21
     #: NORMAL = the real candles; HA = the Trend quality read on Heikin Ashi candles (chop_scan.ha_bars).
     candles: str = "NORMAL"
+    #: Today's first N candles left out of the strong-trend read (0 = none; the Trend quality card's "Skip today's first
+    #: candles", strong_read `skip`).
+    skip_candles: int = 0
     min_checks: int = 6
     side: str = "BOTH"
     pct: float = 70.0
@@ -250,7 +253,8 @@ class AutoArmRule:
         return {
             "kind": KIND, "source": self.source, "pick_time": self.first.strftime("%H:%M"),
             "first": self.first.strftime("%H:%M"), "last": self.last.strftime("%H:%M"), "every_min": self.every_min,
-            "minutes": self.minutes, "sma_fast": self.sma_fast, "sma_slow": self.sma_slow, "candles": self.candles, "min_checks": self.min_checks, "side": self.side, "pct": self.pct,
+            "minutes": self.minutes, "sma_fast": self.sma_fast, "sma_slow": self.sma_slow, "candles": self.candles,
+            "skip_candles": self.skip_candles, "min_checks": self.min_checks, "side": self.side, "pct": self.pct,
             "pressure_side": self.pressure_side, "min_value_cr": self.min_value_cr, "min_rvol": self.min_rvol,
             "basis": self.basis, "flow_pct": self.flow_pct,
             "max_day": self.max_day,
@@ -261,14 +265,17 @@ class AutoArmRule:
 
 
 def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fast: int, slow: int,
-                ha: bool = False) -> dict | None:
+                ha: bool = False, skip: int = 0) -> dict | None:
     """One stock's strong-trend read as the Trend quality card had it at `at` (candles closed before it).
 
     The tape is cut to what the live scan downloads (`WARMUP_DAYS` calendar days from midnight, chop_scan
     `ChopScanner._run`), so the morning volume check compares today with the same earlier sessions and the Wilder ATR
-    starts from the same candle: a longer tape (a multi-day run carries every earlier day) read differently."""
+    starts from the same candle: a longer tape (a multi-day run carries every earlier day) read differently.
+
+    `skip` (minutes after 09:15, 0 = off): today's candles before 09:15 + skip are left out of the checks and the VWAP,
+    and a strong trend must have moved 1 ATR its way since them, as the Trend quality card reads it (chop_scan.analyze)."""
     import trend_strength
-    from chop_scan import WARMUP_DAYS, _vwap_today, closed_bars, ha_bars
+    from chop_scan import WARMUP_DAYS, _moved_since_skip, _vwap_today, closed_bars, ha_bars
     from indicators import enrich
 
     cut = int(dt.datetime.combine(day, at, tzinfo=IST).timestamp())
@@ -286,14 +293,35 @@ def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fa
         return None
     # The last closed candle's close, before any Heikin Ashi change (chop_scan.analyze): the price VWAP is compared with.
     real_close = float(bars["close"].iloc[-1])
+    today_start = int(dt.datetime.combine(day, dt.time(9, 15), tzinfo=IST).timestamp())
+    skip_from = today_start + int(skip) * 60 if skip else None
+    vwap = _vwap_today(part, now, skip_from)
     if ha:  # as the Trend quality card reads them: the Heikin Ashi candles' own trend (ha_trend), VWAP on real prices
         import ha_trend
 
         bars = ha_bars(bars)
         enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), fast, slow)
-        return ha_trend.checks(enriched, _vwap_today(part, now), real_close)
-    enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), fast, slow)
-    return trend_strength.read(enriched, _vwap_today(part, now), now=now, tape=part)
+        view = _skip_view(enriched, today_start, skip_from)
+        read = ha_trend.checks(view, vwap, real_close)
+    else:
+        enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), fast, slow)
+        view = _skip_view(enriched, today_start, skip_from)
+        read = trend_strength.read(view, vwap, now=now, tape=part)
+    if skip_from is None or not isinstance(read, dict):
+        return read
+    kept, note = _moved_since_skip(enriched, today_start, skip_from, read.get("trend"))
+    notes = {**(read.get("trend_notes") or {}), **({"skip": note} if note else {})}
+    return {**read, "trend": kept, "trend_notes": notes, "trend_skip_min": int(skip)}
+
+
+def _skip_view(enriched: pd.DataFrame, today_start: int, skip_from: int | None) -> pd.DataFrame:
+    """The candles the checks read: without today's skipped opening ones (chop_scan._skipped), else all."""
+    if skip_from is None:
+        return enriched
+    from chop_scan import _skipped
+
+    view = _skipped(enriched, today_start, skip_from)
+    return view if len(view) >= 2 else enriched
 
 
 def _strong_ok(read: dict | None, rule: AutoArmRule) -> str | None:
@@ -319,6 +347,8 @@ def strong_why(read: dict, side: str, rule: AutoArmRule) -> str:
     text = f"strong {side.lower()}, {passed} of {len(checks) or 7} checks on {rule.minutes}-min {kind}candles"
     if read.get("trend_mode") == "MORNING":
         text += " (morning rules, before 10:00)"
+    if rule.skip_candles:
+        text += f", first {rule.skip_candles} candle(s) skipped"
     missed = [k for k, ok in checks.items() if not ok]
     if missed:
         text += "; missed: " + ", ".join(missed)
@@ -361,7 +391,8 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: AutoArmRu
                 if symbol in found or any(e[1] == symbol and e[0] <= at for e in events):
                     continue
                 try:
-                    read = strong_read(frame, day, t, rule.minutes, rule.sma_fast, rule.sma_slow, ha=rule.candles == "HA")
+                    read = strong_read(frame, day, t, rule.minutes, rule.sma_fast, rule.sma_slow, ha=rule.candles == "HA",
+                                       skip=rule.skip_candles * rule.minutes)
                 except Exception:  # noqa: BLE001 - one bad tape never stops the day
                     log.exception("auto-arm trend read failed for %s", symbol)
                     continue

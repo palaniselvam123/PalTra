@@ -1257,6 +1257,7 @@ export type TrendPicksAuto = {
   top_n: number;
   minutes: number;
   candles?: "NORMAL" | "HA";
+  skip_candles?: number;
   until?: string;
   bot: number;
   lists: ("armed" | "fno" | "nifty50" | "nifty100" | "niftybank")[];
@@ -3073,6 +3074,8 @@ export type AutoArmBody = {
   every_min: number;
   minutes: number;
   candles?: "NORMAL" | "HA";
+  /** Today's first N candles left out of the strong-trend read (0 = none). */
+  skip_candles?: number;
   until?: string;
   bot: number;
   speed?: number;
@@ -3659,6 +3662,8 @@ export const smaApi = {
     minutes: number;
     /** NORMAL = real candles, HA = the trend read on Heikin Ashi candles. */
     candles?: "NORMAL" | "HA";
+    /** Today's first N candles left out of the trend read (0 = none). */
+    skip_candles?: number;
     /** Trade until this time each day ("HH:MM", up to 15:30 = the close). */
     until?: string;
     bot: number;
@@ -3731,6 +3736,7 @@ export const smaApi = {
     direction: TrendPickDirection;
     minutes: number;
     candles?: "NORMAL" | "HA";
+    skip_candles?: number;
     until?: string;
     bot: number;
     lists?: string[];
