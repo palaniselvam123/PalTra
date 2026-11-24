@@ -553,6 +553,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     day_target: Boolean(form.day_target),
     day_target_min_pct: Math.min(10, Math.max(0, Number(form.day_target_min_pct ?? 0.2) || 0)),
     day_target_early_pct: Math.min(2, Math.max(0, Number(form.day_target_early_pct ?? 0) || 0)),
+    day_target_skip_min: Math.min(180, Math.max(0, Math.round(Number(form.day_target_skip_min ?? 0)) || 0)),
     target_net: Boolean(form.target_net),
     target_net_keep: Math.min(99, Math.max(1, Number(form.target_net_keep ?? 70) || 70)),
     target_net_keep2: Math.min(99, Math.max(1, Number(form.target_net_keep2 ?? 75) || 75)),
@@ -3134,11 +3135,12 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 least the % below beyond the entry counts, so the trade is in profit when it closes; with none, the trade has no
                 day target. &quot;Close early&quot; books it that % before the level, so a touch that just misses still counts.
                 Checked on every price; the stop, the other targets and the exits stay on, and whichever comes first closes.
-                Off by default.
+                &quot;Ignore today&apos;s high / low from the first N minutes&quot; leaves out the opening run on a gap day: with 15, a
+                buy at 09:30 no longer aims at the 09:28 top of the first rush (yesterday&apos;s high still counts). Off by default.
               </InfoTip>
             </label>
             {form.day_target ? (
-              <div className="mt-2 grid grid-cols-2 items-end gap-2">
+              <div className="mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-3">
                 <Field
                   label="Level at least this % beyond the entry"
                   value={String(form.day_target_min_pct ?? 0.2)}
@@ -3150,6 +3152,14 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   value={String(form.day_target_early_pct ?? 0)}
                   onChange={(v) => set("day_target_early_pct", v)}
                   own={isOwn("day_target_early_pct")}
+                />
+                <Field
+                  label="Ignore today's high / low from the first N min (0 = off)"
+                  value={String(form.day_target_skip_min ?? 0)}
+                  onChange={(v) => set("day_target_skip_min", v)}
+                  own={isOwn("day_target_skip_min")}
+                  suffix="min"
+                  fresh="day-target-skip"
                 />
               </div>
             ) : null}
@@ -4183,7 +4193,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   else if (f.target_net && (f.day_target || f.pivot_target === "R1" || f.pivot_target === "R2"))
     add({ group: "stop", key: "target_net", text: `Past the pivot / day target the trade runs on, keeping ${f.target_net_keep ?? 70}% of its best profit${Number(f.target_net_at2 ?? 2) > 0 ? ` (${f.target_net_keep2 ?? 75}% from ${f.target_net_at2 ?? 2}× the target distance)` : ""}`, off: { target_net: false } });
   if (f.day_target)
-    add({ group: "stop", key: "day_target", text: `Target at today's or yesterday's high / low, whichever comes first (at least ${f.day_target_min_pct ?? 0.2}% from the entry)`, off: { day_target: false } });
+    add({ group: "stop", key: "day_target", text: `Target at today's or yesterday's high / low, whichever comes first (at least ${f.day_target_min_pct ?? 0.2}% from the entry)${Number(f.day_target_skip_min ?? 0) > 0 ? `; today's levels from 09:15 + ${f.day_target_skip_min} min only` : ""}`, off: { day_target: false } });
 
   // 7. Advanced
   if (f.recovery_hold) add({ group: "advanced", key: "recovery_hold", text: "Recovery hold: a losing trade is held past the opposite cross", off: { recovery_hold: false }, warn: true });

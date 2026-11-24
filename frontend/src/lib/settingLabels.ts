@@ -257,6 +257,7 @@ export const SETTING_LABELS: Record<string, string> = {
   day_target: "day high / low target",
   day_target_min_pct: "Day target: level at least % from entry",
   day_target_early_pct: "Day target: close early by %",
+  day_target_skip_min: "Day target: ignore today's high / low from the first N min",
   target_net: "safety net after the pivot / day target",
   target_net_keep: "Safety net: keep % of best profit",
   target_net_keep2: "Safety net: then keep %",

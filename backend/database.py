@@ -236,6 +236,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "day_target": "BOOLEAN DEFAULT 0",
             "day_target_min_pct": "FLOAT DEFAULT 0.2",
             "day_target_early_pct": "FLOAT DEFAULT 0",
+            "day_target_skip_min": "INTEGER DEFAULT 0",
             "target_net": "BOOLEAN DEFAULT 0",
             "target_net_keep": "FLOAT DEFAULT 70",
             "target_net_keep2": "FLOAT DEFAULT 75",

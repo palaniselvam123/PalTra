@@ -878,6 +878,7 @@ class ConfigUpdate(BaseModel):
     day_target: bool | None = None
     day_target_min_pct: float | None = Field(default=None, ge=0, le=day_target_mod.MAX_MIN_PCT)
     day_target_early_pct: float | None = Field(default=None, ge=0, le=day_target_mod.MAX_EARLY_PCT)
+    day_target_skip_min: int | None = Field(default=None, ge=0, le=day_target_mod.MAX_SKIP_MIN)
     target_net: bool | None = None
     target_net_keep: float | None = Field(default=None, ge=1, le=99)
     target_net_keep2: float | None = Field(default=None, ge=1, le=99)
@@ -2063,6 +2064,7 @@ def _gap_dict(row) -> dict:
         "day_target": day_target_mod.on(row),
         "day_target_min_pct": day_target_mod.min_pct(row),
         "day_target_early_pct": day_target_mod.early_pct(row),
+        "day_target_skip_min": day_target_mod.skip_min(row),
         "target_net": target_net_mod.on(row),
         "target_net_keep": target_net_mod.keep(row),
         "target_net_keep2": target_net_mod.keep2(row),

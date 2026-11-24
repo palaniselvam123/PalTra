@@ -54,6 +54,18 @@ def test_the_nearest_level_beyond_the_entry_wins_either_way():
     assert day_target.reached("SHORT", 97.0, 97.0) and not day_target.reached("SHORT", 97.1, 97.0)
 
 
+def test_skip_ignores_todays_early_high_but_keeps_yesterdays():
+    entry = _ts(MON, 9, 45) + 20
+    lv = day_target.levels(_tape(), entry, 15)  # 09:15 candle (high 103) left out; 09:40 still counts
+    assert lv["today_high"] == 101.0 and lv["today_low"] == 97.0 and lv["prev_high"] == 105.0
+    assert day_target.target_for("LONG", 100.0, lv, CFG)[:2] == ("today's high", 101.0)
+    lv = day_target.levels(_tape(), entry, 30)  # every candle of today is before 09:45
+    assert lv["today_high"] is None and lv["today_low"] is None
+    assert day_target.target_for("LONG", 100.0, lv, CFG)[:2] == ("yesterday's high", 105.0)
+    assert day_target.skip_min(SimpleNamespace(day_target_skip_min=999)) == day_target.MAX_SKIP_MIN
+    assert day_target.skip_min(SimpleNamespace()) == 0
+
+
 def _engine(direction: str, entry: float):
     from strategy_engine import OpenPosition, StrategyEngine
 
@@ -112,4 +124,7 @@ def test_api_saves_the_day_target(tmp_path, monkeypatch):
         ok = client.put("/api/bots/2/config", json={"day_target": True, "day_target_min_pct": 0.5, "day_target_early_pct": 0.05}).json()
         assert ok["day_target"] is True and ok["day_target_min_pct"] == 0.5 and ok["day_target_early_pct"] == 0.05
         assert client.put("/api/bots/2/config", json={"day_target_early_pct": 3}).status_code == 422
+        assert got["day_target_skip_min"] == 0
+        assert client.put("/api/bots/2/config", json={"day_target_skip_min": 15}).json()["day_target_skip_min"] == 15
+        assert client.put("/api/bots/2/config", json={"day_target_skip_min": 500}).status_code == 422
     database.reset_engine()

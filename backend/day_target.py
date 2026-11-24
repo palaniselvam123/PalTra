@@ -11,7 +11,12 @@ A long closes at the nearest high above the entry, a short at the nearest low be
 (0, 0-2) closes that % before the level (a touch that just misses still counts). Worked out once per trade from the
 candles (a restart finds the same level), checked on every price by `StrategyEngine._watch_day_target`, closed
 through `_exit_now` (`DAY_LEVEL_TARGET`; a LIVE stop is cancelled first, a LIVE position restored without its stop id
-is left to that stop). The other stops and targets stay on: whichever comes first closes. Pure helpers.
+is left to that stop). The other stops and targets stay on: whichever comes first closes.
+
+**Ignore early highs** (`day_target_skip_min`, 0 = off, 0-180; owner's DATAPATTNS case: a 09:30 buy closed 30 s later at
+the opening run's own 09:28 top, 13 points away, then the stock ran 200 points): today's high / low counts only from
+candles that began at least that many minutes after 09:15, so the first minutes' run on a gap day is not taken for a
+level. Yesterday's high / low is unchanged. Pure helpers.
 """
 from __future__ import annotations
 
@@ -25,6 +30,8 @@ EXIT_REASON = "DAY_LEVEL_TARGET"
 DEFAULT_MIN_PCT = 0.2
 MAX_MIN_PCT = 10.0
 MAX_EARLY_PCT = 2.0
+MAX_SKIP_MIN = 180
+OPEN = dt.time(9, 15)
 
 
 def on(cfg) -> bool:
@@ -50,9 +57,18 @@ def early_pct(cfg) -> float:
     return _pct(cfg, "day_target_early_pct", 0.0, MAX_EARLY_PCT)
 
 
-def levels(tape: pd.DataFrame | None, entry_ts: float) -> dict | None:
+def skip_min(cfg) -> int:
+    try:
+        n = int(float(getattr(cfg, "day_target_skip_min", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(MAX_SKIP_MIN, n))
+
+
+def levels(tape: pd.DataFrame | None, entry_ts: float, skip: int = 0) -> dict | None:
     """{"today_high", "today_low", "prev_high", "prev_low", "prev_day"} (any may be None) from 1-minute candles
-    (ts / high / low) that began before the entry minute. None without candles."""
+    (ts / high / low) that began before the entry minute; today's only from candles that began `skip` minutes or more
+    after 09:15. None without candles."""
     if tape is None or getattr(tape, "empty", True) or not {"ts", "high", "low"} <= set(tape.columns):
         return None
     ts = pd.to_numeric(tape["ts"], errors="coerce")
@@ -64,6 +80,9 @@ def levels(tape: pd.DataFrame | None, entry_ts: float) -> dict | None:
     today = dt.datetime.fromtimestamp(int(entry_ts), IST).date()
     out = {"today_high": None, "today_low": None, "prev_high": None, "prev_low": None, "prev_day": None}
     now_rows = before[days == today]
+    if skip > 0 and not now_rows.empty:
+        start = dt.datetime.combine(today, OPEN, IST) + dt.timedelta(minutes=skip)
+        now_rows = now_rows[pd.to_numeric(now_rows["ts"]) >= start.timestamp()]
     if not now_rows.empty:
         out["today_high"] = float(pd.to_numeric(now_rows["high"]).max())
         out["today_low"] = float(pd.to_numeric(now_rows["low"]).min())

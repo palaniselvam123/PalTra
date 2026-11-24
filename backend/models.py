@@ -522,6 +522,7 @@ class BotConfig(Base):
     day_target: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     day_target_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.2)
     day_target_early_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    day_target_skip_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     # Safety net after the pivot / day target (target_net.py): off by default.
     target_net: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     target_net_keep: Mapped[float | None] = mapped_column(Float, nullable=True, default=70.0)
