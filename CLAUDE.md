@@ -1617,7 +1617,9 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   `StrategyEngine._log_handoff` (`_hand_to_chop_bot`, `_watch_breakout`), `FastBot._record` (live; the same result kept at
   most once per `LOG_REPEAT_SEC` 10 min) and `ReplayEngine._fast_move`. A run's rows go with `delete_run` and its unfinished
   days with a resume / rewind (`_drop_unfinished_days`). `GET /api/handoffs?run_id=|day=&bot=&mode=`; the run detail lists
-  the run's hand-offs (`get_run` → `handoff_trail`, `HandoffTable`, also in the PDF) and the Stocks bar's "Hand-offs" button
+  the run's hand-offs (`get_run` → `handoff_trail`, `HandoffTable`, also in the PDF; each row with the sending bot's cut
+  trade and the receiving bot's first trade after it, `handoff_log.with_pnl` → `from_trade` / `to_trade`, shown as "Bot 1
+  P&L" / "Bot 5 P&L" columns with totals on the backtest basis) and the Stocks bar's "Hand-offs" button
   (`HandoffTrail`) a market day's.
 - `backend/morning_scan.py` – 09:30 morning checklist (read-only; the Scalp page's "09:30 Morning" tab,
   `components/Scalp/MorningScan.tsx`): at 09:30 a stock has only three 5-minute candles, too few for Trend

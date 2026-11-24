@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
 import { ArrowRightLeft, Loader2, RefreshCw, X } from "lucide-react";
-import { smaApi, type HandoffRow, type TrendGroupRow } from "@/lib/smaApi";
+import { smaApi, type HandoffRow, type HandoffTrade, type TrendGroupRow } from "@/lib/smaApi";
+import { NewTag } from "@/components/ui/NewTag";
 import { trendColor, trendText, type TrendGroup } from "@/lib/trendAtEntry";
 import { Badge, pnlTone } from "./ui";
 
@@ -39,11 +40,66 @@ function PhaseChip({ row }: { row: HandoffRow }) {
   );
 }
 
-/** The hand-offs as a table: when, stock, from → to, why, what happened, choppy / trending then. */
-export function HandoffTable({ rows, showDay = false }: { rows: HandoffRow[]; showDay?: boolean }) {
+type Basis = "gross" | "net";
+
+/** One side's trade P&L: the amount, with its times and exit in the tooltip. */
+function TradePnl({ t, basis }: { t: HandoffTrade | null | undefined; basis: Basis }) {
+  if (!t) return <span className="text-slate-500">—</span>;
+  const v = basis === "net" ? t.net : t.gross;
+  const hhmm = (x: string | null) => (x ? x.slice(11, 16) : "?");
+  return (
+    <span
+      className={clsx("font-mono font-semibold", pnlTone(v))}
+      title={`${t.side} ${hhmm(t.entry_time)} → ${hhmm(t.exit_time)}${t.exit_reason ? ` · ${t.exit_reason}` : ""} · before charges ${signed(t.gross)}, after ${signed(t.net)}`}
+    >
+      {signed(v)}
+      <span className="block font-sans text-[11px] font-normal text-slate-500">
+        {hhmm(t.entry_time)} → {hhmm(t.exit_time)}
+      </span>
+    </span>
+  );
+}
+
+/** Totals of the two P&L columns over the rows that have them: the sending bots' cut trades and the receiving
+ * bots' trades. */
+function PnlTotals({ rows, basis }: { rows: HandoffRow[]; basis: Basis }) {
+  const pick = (t: HandoffTrade | null | undefined) => (t ? (basis === "net" ? t.net : t.gross) : null);
+  const from = rows.map((r) => pick(r.from_trade)).filter((v): v is number => v != null);
+  const to = rows.map((r) => pick(r.to_trade)).filter((v): v is number => v != null);
+  if (!from.length && !to.length) return null;
+  const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
+  const senders = [...new Set(rows.filter((r) => r.from_trade).map((r) => r.from_bot))].map((b) => `Bot ${b}`).join(" / ") || "Sending bot";
+  const receivers = [...new Set(rows.filter((r) => r.to_trade).map((r) => r.to_bot))].map((b) => `Bot ${b}`).join(" / ") || "Receiving bot";
+  const wins = to.filter((v) => v > 0).length;
+  return (
+    <p className="mb-1 flex flex-wrap gap-x-5 gap-y-1 px-2 text-xs text-slate-400">
+      <span>
+        {senders} trades cut ({from.length}): <span className={clsx("font-mono font-semibold", pnlTone(sum(from)))}>{signed(sum(from))}</span>
+      </span>
+      <span>
+        {receivers} trades after ({to.length}, {wins} won):{" "}
+        <span className={clsx("font-mono font-semibold", pnlTone(sum(to)))}>{signed(sum(to))}</span>
+      </span>
+      <span>
+        Together: <span className={clsx("font-mono font-semibold", pnlTone(sum(from) + sum(to)))}>{signed(sum(from) + sum(to))}</span>
+      </span>
+      <span className="text-slate-500">{basis === "net" ? "after charges" : "before charges"}</span>
+    </p>
+  );
+}
+
+/** The hand-offs as a table: when, stock, from → to, why, what happened, choppy / trending then. With `basis` (a
+ * run's detail), also each side's trade P&L. */
+export function HandoffTable({ rows, showDay = false, basis }: { rows: HandoffRow[]; showDay?: boolean; basis?: Basis }) {
   if (!rows.length) return null;
+  const withPnl = basis != null && rows.some((r) => r.from_trade || r.to_trade);
+  const fromBots = [...new Set(rows.map((r) => r.from_bot))];
+  const toBots = [...new Set(rows.map((r) => r.to_bot))];
+  const fromHead = fromBots.length === 1 ? `Bot ${fromBots[0]} P&L` : "Sender P&L";
+  const toHead = toBots.length === 1 ? `Bot ${toBots[0]} P&L` : "Receiver P&L";
   return (
     <div className="overflow-x-auto">
+      {withPnl ? <PnlTotals rows={rows} basis={basis} /> : null}
       <table className="w-full min-w-[720px] text-left text-xs">
         <thead className="text-slate-400">
           <tr className="[&_th]:px-2 [&_th]:py-1.5 [&_th]:font-medium">
@@ -53,6 +109,18 @@ export function HandoffTable({ rows, showDay = false }: { rows: HandoffRow[]; sh
             <th>Why</th>
             <th title="Choppy or trending at that moment, on the bot's own candle">Trend then</th>
             <th>What happened</th>
+            {withPnl ? (
+              <>
+                <th className="text-right" title="The trade the sending bot closed for this hand-off">
+                  <span className="inline-flex items-center gap-1">
+                    {fromHead} <NewTag id="bt-handoff-pnl" link={false} />
+                  </span>
+                </th>
+                <th className="text-right" title="The first trade the receiving bot's settings opened on this stock after the hand-off">
+                  {toHead}
+                </th>
+              </>
+            ) : null}
           </tr>
         </thead>
         <tbody>
@@ -77,6 +145,16 @@ export function HandoffTable({ rows, showDay = false }: { rows: HandoffRow[]; sh
                 {r.moved ? "Moved" : "Not moved"}
                 {r.result ? <span className="block truncate text-slate-500">{r.result}</span> : null}
               </td>
+              {withPnl ? (
+                <>
+                  <td className="whitespace-nowrap text-right">
+                    <TradePnl t={r.from_trade} basis={basis} />
+                  </td>
+                  <td className="whitespace-nowrap text-right">
+                    <TradePnl t={r.to_trade} basis={basis} />
+                  </td>
+                </>
+              ) : null}
             </tr>
           ))}
         </tbody>

@@ -2587,6 +2587,20 @@ export type HandoffRow = {
   moved: boolean;
   trade_id: number | null;
   regime: import("./trendAtEntry").TradeRegime | null;
+  /** In a run's detail only (handoff_log.with_pnl): the trade the sending bot closed for it, and the first trade
+   * the receiving bot's settings opened on that stock after it. */
+  from_trade?: HandoffTrade | null;
+  to_trade?: HandoffTrade | null;
+};
+
+export type HandoffTrade = {
+  trade_id: number;
+  side: string;
+  entry_time: string | null;
+  exit_time: string | null;
+  exit_reason: string | null;
+  gross: number;
+  net: number;
 };
 
 /** One run's numbers in a backtest comparison (GET /api/replay/compare), on the basis asked (before / after charges). */
