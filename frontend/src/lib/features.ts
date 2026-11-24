@@ -699,6 +699,8 @@ export const FEATURES: Feature[] = [
     purpose: "The smaller-candle exit can look only while the trade is in a loss or has given back part of its best profit, so a trade running your way is not cut by a small wiggle. It can also read bigger candles (5 to 60 minutes) and, if you want, close only when a bigger candle agrees."},
   { id: "day-target-skip", area: "settings", added: "2026-11-24", pr: 520, href: S("sma-day-target"), where: "Settings → Strategy → 5. Stop-loss and target → Day high / low target", title: "Day target: ignore the opening run's high / low",
     purpose: "Today's high / low made in the first N minutes after 09:15 no longer counts as the day target, so on a gap day a trade is not closed at the top of the first rush. Yesterday's high / low still counts."},
+  { id: "net-any-profit", area: "settings", added: "2026-11-24", pr: 522, href: S("sma-target-net"), where: "Settings → Strategy → 5. Stop-loss and target → Profit safety net on every trade", title: "Profit safety net on every trade (target-only mode removed)",
+    purpose: "The safety net now always starts from a profit on any trade (default 0.25% of the entry, or ₹ / ATR) and keeps part of the best profit. The old mode that held the trade past the pivot / day target is gone: those targets close the trade again when reached."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */

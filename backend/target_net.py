@@ -1,22 +1,17 @@
-"""Safety net after a target (target_net.py; owner's request: once the day high / low or pivot target is touched, let the
-trade run on with a safety net, like the all-bots profit safety net on the Bots page).
+"""Profit safety net on every trade (target_net.py; owner's request: like the all-bots profit safety net on the Bots page,
+per trade, for any profit, not only at the day high / low or pivot target).
 
-`target_net` (off by default; per bot and per stock, PAPER and LIVE, replays too). With it on, the pivot target
-(pivots.py) and the day high / low target (day_target.py) no longer close the trade when reached. From the moment the
-best price since the entry (`OpenPosition.high` / `low`) reaches the target, the trade keeps `target_net_keep` (70) % of
-its best profit per share: floor = entry + keep % × (best − entry) for a long (mirror for a short). Once the best
-profit is at least `target_net_at2` (2.0, 0 = no second step) × the target's distance from the entry, it keeps
-`target_net_keep2` (75) % instead. The floor only rises. A price at or through the floor closes the trade
-(`TARGET_NET`, via `_exit_now`: a LIVE stop is cancelled first). With the stop on, the stop is also moved up to the floor
-(tighter only, `_move_stop`: LIVE modifies the Groww stop), so the exchange holds it too. Stateless: the floor comes from
-the best price, so a restart finds the same one.
-
-**Start on every trade** (`target_net_start`: `TARGET` default = only at the pivot / day target, as above; `PCT` = once
-the trade is `target_net_start_pct` (0.25) % of the entry price in profit; `RS` = once it is `target_net_start_rs`
-(₹500) in profit for its quantity; `ATR` = once it is `target_net_start_atr` (1.0) × the ATR at entry in profit). With a
-profit start the net works on every trade, with or without the pivot / day targets (`StrategyEngine._watch_profit_net`);
-the start distance plays the target's part (the second step is a multiple of it). The pivot / day targets keep their own
-net too; whichever floor the price reaches first closes. Pure helpers.
+`target_net` (off by default; per bot and per stock, PAPER and LIVE, replays too). The net starts once the trade is
+in profit by the start distance (`target_net_start`): `PCT` (default) = `target_net_start_pct` (0.25) % of the entry
+price, `RS` = `target_net_start_rs` (₹500) for the trade's quantity, `ATR` = `target_net_start_atr` (1.0) × the ATR at
+entry (`start_level`). From then the trade keeps `target_net_keep` (70) % of its best profit per share: floor = entry +
+keep % × (best − entry) for a long (mirror for a short), best = `OpenPosition.high` / `low`. Once the best profit is at
+least `target_net_at2` (2.0, 0 = no second step) × the start distance, it keeps `target_net_keep2` (75) % instead. The
+floor only rises. A price at or through the floor closes the trade (`TARGET_NET`, via `_exit_now`: a LIVE stop is
+cancelled first). With the stop on, the stop is moved up to the floor too (tighter only, `_move_stop`: LIVE modifies the
+Groww stop). Checked on every price by `StrategyEngine._watch_profit_net`. The pivot / day high / low targets are
+separate and close the trade as usual when reached (the old "hold past the target" mode is gone; a saved `TARGET` start
+reads as `PCT`). Stateless: the floor comes from the best price, so a restart finds the same one. Pure helpers.
 """
 from __future__ import annotations
 
@@ -54,12 +49,13 @@ def at2(cfg) -> float:
     return _num(cfg, "target_net_at2", DEFAULT_AT2, 0.0, MAX_AT2)
 
 
-STARTS = ("TARGET", "PCT", "RS", "ATR")
+STARTS = ("PCT", "RS", "ATR")
 
 
 def start(cfg) -> str:
-    value = str(getattr(cfg, "target_net_start", None) or "TARGET").upper()
-    return value if value in STARTS else "TARGET"
+    """PCT | RS | ATR; anything else (an old TARGET, blank) reads as PCT."""
+    value = str(getattr(cfg, "target_net_start", None) or "PCT").upper()
+    return value if value in STARTS else "PCT"
 
 
 def start_pct(cfg) -> float:
@@ -75,9 +71,9 @@ def start_atr(cfg) -> float:
 
 
 def start_level(direction: str, entry: float, qty: int, atr: float | None, cfg) -> tuple[str, float] | None:
-    """(label, price) at which the net starts on any trade, or None (start TARGET, or not workable)."""
+    """(label, price) at which the net starts on any trade, or None (not workable: no qty / no ATR)."""
     kind = start(cfg)
-    if kind == "TARGET" or not entry > 0:
+    if not entry > 0:
         return None
     if kind == "PCT":
         dist, label = entry * start_pct(cfg) / 100.0, f"{start_pct(cfg):g}% profit"

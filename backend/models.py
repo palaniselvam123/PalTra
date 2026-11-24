@@ -528,8 +528,8 @@ class BotConfig(Base):
     target_net_keep: Mapped[float | None] = mapped_column(Float, nullable=True, default=70.0)
     target_net_keep2: Mapped[float | None] = mapped_column(Float, nullable=True, default=75.0)
     target_net_at2: Mapped[float | None] = mapped_column(Float, nullable=True, default=2.0)
-    # Where the safety net starts (target_net.py): TARGET (pivot / day target) | PCT | RS | ATR profit on any trade.
-    target_net_start: Mapped[str | None] = mapped_column(String(6), nullable=True, default="TARGET")
+    # Where the profit safety net starts (target_net.py): PCT | RS | ATR profit on any trade (an old TARGET reads as PCT).
+    target_net_start: Mapped[str | None] = mapped_column(String(6), nullable=True, default="PCT")
     target_net_start_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.25)
     target_net_start_rs: Mapped[float | None] = mapped_column(Float, nullable=True, default=500.0)
     target_net_start_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.0)

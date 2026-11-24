@@ -287,12 +287,12 @@ export type SmaConfig = {
   day_target_min_pct?: number;
   day_target_early_pct?: number;
   day_target_skip_min?: number;
-  /** Safety net after the pivot / day target (target_net.py). */
+  /** Profit safety net on every trade (target_net.py). */
   target_net?: boolean;
   target_net_keep?: number;
   target_net_keep2?: number;
   target_net_at2?: number;
-  /** Where the net starts: TARGET (pivot / day target) or a profit on any trade. */
+  /** Where the profit safety net starts on any trade ("TARGET" from older saves reads as PCT). */
   target_net_start?: "TARGET" | "PCT" | "RS" | "ATR";
   target_net_start_pct?: number;
   target_net_start_rs?: number;

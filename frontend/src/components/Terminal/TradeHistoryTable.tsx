@@ -1139,7 +1139,7 @@ export const REASON_SHORT: Record<string, string> = {
   SMA9_TURN_AGAINST: "SMA 9 turned against",
   PIVOT_TARGET: "Pivot target",
   DAY_LEVEL_TARGET: "Day high / low target: today's (before the entry) or yesterday's high / low, whichever came first",
-  TARGET_NET: "Safety net: the trade reached its pivot / day target or its set profit, ran on and fell back to the kept share of its best profit",
+  TARGET_NET: "Profit safety net: the trade reached its start profit, ran on and fell back to the kept share of its best profit (older trades: after the pivot / day target)",
   PRESSURE_FADE: "Most active: the buyers (a buy) / sellers (a sell) faded to the set %",
   TREND_FADE: "Trend quality exit: the phase turned choppy or the other way, or the trend score fell under the set level",
   FLOW_EXIT: "Executed volume exit: the other side did the set % of the shares traded at market over the window (estimated)",

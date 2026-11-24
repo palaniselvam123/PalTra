@@ -6125,9 +6125,6 @@ class StrategyEngine:
         goal = pivots.target_for(pos.direction, pos.entry_price, self._pivots(symbol, opened.astimezone(IST).date()), mode)
         if goal is None:
             return
-        if target_net.on(cfg):
-            await self._target_net(cfg, pos, symbol, f"pivot {goal[0]}", goal[1])
-            return
         if not pivots.reached(pos.direction, self.ltp, goal[1]):
             return
         self._signals[symbol] = f"{symbol} pivot target {goal[0]} {goal[1]:.2f} reached"
@@ -6157,16 +6154,13 @@ class StrategyEngine:
         goal = self._day_goal.get(key)
         if goal is None:
             return
-        if target_net.on(cfg):
-            await self._target_net(cfg, pos, symbol, goal[0], goal[2])
-            return
         if not day_target.reached(pos.direction, self.ltp, goal[2]):
             return
         self._signals[symbol] = f"{symbol} day target — {goal[0]} {goal[1]:.2f} reached"
         await self._exit_now(cfg, self.ltp, day_target.EXIT_REASON)
 
     async def _watch_profit_net(self, cfg: BotConfig) -> None:
-        """Every price: the safety net started by a profit on any trade (target_net_start PCT / RS / ATR)."""
+        """Every price: the profit safety net on any trade, started at a profit (target_net_start PCT / RS / ATR)."""
         pos = self.position
         if pos is None or not target_net.on(cfg) or self.status != "RUNNING" or self.ltp <= 0:
             return
@@ -6182,7 +6176,7 @@ class StrategyEngine:
         await self._target_net(cfg, pos, symbol, found[0], found[1])
 
     async def _target_net(self, cfg: BotConfig, pos: OpenPosition, symbol: str, name: str, target: float) -> None:
-        """Safety net after a target (target_net.py): once the best price reached `target`, keep the set % of the best
+        """Profit safety net (target_net.py): once the best price reached the start `target`, keep the set % of the best
         profit; close at that floor and move the stop up to it."""
         if pos.direction == "LONG":
             best = max(x for x in (pos.high, self.ltp) if x is not None)
@@ -6195,13 +6189,13 @@ class StrategyEngine:
         level = round_price(symbol, level)
         if target_net.hit(pos.direction, self.ltp, level):
             self._signals[symbol] = (
-                f"{symbol} safety net after the {name} target {target:.2f} — kept {share:g}% of the best "
+                f"{symbol} profit safety net (from {name} at {target:.2f}) — kept {share:g}% of the best "
                 f"{best:.2f}, closed at {self.ltp:.2f} (net {level:.2f})"
             )
             await self._exit_now(cfg, self.ltp, target_net.EXIT_REASON)
             return
         self._signals[symbol] = (
-            f"{symbol} past the {name} target {target:.2f} — running with a safety net at {level:.2f} "
+            f"{symbol} past {name} ({target:.2f}) — running with a safety net at {level:.2f} "
             f"({share:g}% of the best {best:.2f})"
         )
         if pos.stop_active and pos.sl_trigger is not None:
@@ -6463,7 +6457,7 @@ class StrategyEngine:
                     "COLOUR_TURN": "candle turned the other colour — flat",
                     "PIVOT_TARGET": "pivot target reached — flat",
                     day_target.EXIT_REASON: "day high / low target reached — flat",
-                    target_net.EXIT_REASON: "safety net after the target — flat",
+                    target_net.EXIT_REASON: "profit safety net — flat",
                     pressure_exit.EXIT_REASON: "buyers / sellers faded — flat",
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
@@ -8275,7 +8269,7 @@ _ALERT_REASON = {
     "COLOUR_TURN": "candle turned the other colour",
     "PIVOT_TARGET": "pivot target (R1 / S1)",
     day_target.EXIT_REASON: "day high / low target",
-    target_net.EXIT_REASON: "safety net after the target",
+    target_net.EXIT_REASON: "profit safety net",
     "REPLAY_STOPPED": "replay stopped",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
