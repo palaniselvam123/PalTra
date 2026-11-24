@@ -105,6 +105,10 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: PickRule)
         import active_picks
 
         return active_picks.picks_for_day(frames, day, rule)
+    if getattr(rule, "kind", None) == "SAVED":
+        import saved_picks
+
+        return saved_picks.picks_for_day(frames, day, rule)
     scored = []
     for symbol, frame in frames.items():
         bars = bars_known_at(frame, day, rule.pick_time)
@@ -167,6 +171,10 @@ def rule_from_dict(data: dict, sma_fast: int = 9, sma_slow: int = 21):
             rank=str(data.get("rank") or "rvol"), bias=str(data.get("bias") or "BOTH"),
             min_value_cr=float(data.get("min_value_cr") or 0.0),
         )
+    if kind == "SAVED":
+        import saved_picks
+
+        return saved_picks.rule_from_dict(data)
     if kind == "AUTOARM":
         import auto_arm
 

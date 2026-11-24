@@ -529,3 +529,20 @@ def test_every_stock_setting():
     assert not pressure_exit.every_stock(type("C", (), {})())
     assert pressure_exit.every_stock(type("C", (), {"pressure_exit_all": True})())
     assert ConfigUpdate(pressure_exit_all=True).pressure_exit_all is True
+
+
+def test_series_carries_the_waiting_quantities(monkeypatch):
+    import datetime as dt
+
+    import pressure_exit as pe
+
+    monkeypatch.setattr(pe, "_READS", {})
+    monkeypatch.setattr(pe, "_EXTRA", {})
+    monkeypatch.setattr(pe, "_QTY", {})
+    at = dt.datetime(2026, 11, 23, 10, 0, tzinfo=pe.IST)
+    pe.note_scan({"as_of": at.isoformat(), "rows": [
+        {"symbol": "ABC", "buy_share": 215155 / (215155 + 220167), "buy_qty": 215155, "sell_qty": 220167,
+         "read_at": at.isoformat()}]})
+    points = pe.series("ABC", at.timestamp() - 60, at.timestamp() + 60)
+    assert points[-1]["buy_qty"] == 215155 and points[-1]["sell_qty"] == 220167
+    assert points[-1]["buy_pct"] == 49.4

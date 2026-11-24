@@ -33,6 +33,8 @@ SOURCE_WORD = "most active"
 _READS: dict[str, list[tuple[float, float]]] = {}
 # symbol -> {int epoch: (volume vs usual ×, money traded ₹ cr)} for the same live reads (display only)
 _EXTRA: dict[str, dict[int, tuple[float | None, float | None]]] = {}
+# The live reads' total buy / sell quantity waiting (Groww's bid / ask total), same keys as _EXTRA. Display only.
+_QTY: dict[str, dict[int, tuple[int | None, int | None]]] = {}
 
 
 def _opt(value) -> float | None:
@@ -99,9 +101,12 @@ def note_scan(snapshot: dict) -> int:
         reads.append((at, share))
         extra = _EXTRA.setdefault(symbol, {})
         extra[int(at)] = (_opt(row.get("rvol")), _opt(row.get("value_cr")))
+        qty = _QTY.setdefault(symbol, {})
+        qty[int(at)] = (_int(row.get("buy_qty")), _int(row.get("sell_qty")))
         cutoff = at - KEEP_SEC
         while reads and reads[0][0] < cutoff:
             extra.pop(int(reads[0][0]), None)
+            qty.pop(int(reads[0][0]), None)
             reads.pop(0)
         kept += 1
     return kept
@@ -171,8 +176,16 @@ def judge(
 MAX_SERIES_DAYS = 3
 
 
-def _point(at: int, share: float, rvol: float | None, value_cr: float | None) -> dict:
+def _int(value) -> int | None:
+    v = _opt(value)
+    return int(v) if v is not None else None
+
+
+def _point(at: int, share: float, rvol: float | None, value_cr: float | None,
+           qty: tuple[int | None, int | None] | None = None) -> dict:
     point = {"time": at, "buy_pct": round(share * 100.0, 1)}
+    if qty and qty[0] is not None and qty[1] is not None:
+        point["buy_qty"], point["sell_qty"] = qty
     if rvol is not None:
         point["rvol"] = round(rvol, 2)
     if value_cr is not None:
@@ -189,6 +202,7 @@ def series(symbol: str, start_ts: float, end_ts: float) -> list[dict]:
     if not symbol or end_ts < start_ts:
         return []
     found: dict[int, tuple[float, float | None, float | None]] = {}
+    qtys: dict[int, tuple[int | None, int | None]] = {}
     last = dt.datetime.fromtimestamp(end_ts, IST).date()
     # A long range reads only its last few days of saved scans.
     day = max(dt.datetime.fromtimestamp(start_ts, IST).date(), last - dt.timedelta(days=MAX_SERIES_DAYS - 1))
@@ -199,6 +213,7 @@ def series(symbol: str, start_ts: float, end_ts: float) -> list[dict]:
         while day <= last and days < MAX_SERIES_DAYS:
             for at, share, rvol, value in scan_history.active_reads(day.isoformat()).get(symbol, ()):
                 found[int(at)] = (share, rvol, value)
+            qtys.update(scan_history.active_qty(day.isoformat()).get(symbol, {}))
             day += dt.timedelta(days=1)
             days += 1
     except Exception:  # noqa: BLE001
@@ -207,7 +222,8 @@ def series(symbol: str, start_ts: float, end_ts: float) -> list[dict]:
     for at, share in _READS.get(symbol, ()):
         rvol, value = extra.get(int(at), (None, None))
         found[int(at)] = (share, rvol, value)
-    return [_point(t, *v) for t, v in sorted(found.items()) if start_ts <= t <= end_ts]
+    qtys.update(_QTY.get(symbol, {}))
+    return [_point(t, *v, qtys.get(t)) for t, v in sorted(found.items()) if start_ts <= t <= end_ts]
 
 
 def read_before(symbol: str, at_ts: float) -> dict | None:

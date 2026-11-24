@@ -478,7 +478,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
   };
 
   /** Arm or unarm. Arming saves the prompt's changes (`save`) just before. */
-  const setTrade = async (cleaned: string, turningOn: boolean, save?: () => Promise<void>) => {
+  const setTrade = async (cleaned: string, turningOn: boolean, save?: () => Promise<void>, autoQty?: boolean) => {
     if (turningOn && live) {
       const ok = window.confirm(
         `Arm ${cleaned} for live SMA orders? The bot can buy or sell it while this chart stays on ${symbol || "the stock you are viewing"}.`
@@ -489,7 +489,7 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
     setError(null);
     try {
       if (save) await save();
-      await smaApi.setTradeSymbol(cleaned, turningOn, turningOn ? "Manual" : null);
+      await smaApi.setTradeSymbol(cleaned, turningOn, turningOn ? "Manual" : null, autoQty);
       remember(cleaned);
       onChanged();
     } catch (e: unknown) {
@@ -742,7 +742,8 @@ export function Header({ state, config, connected, loadNote, onChanged, notice, 
           deskName={state?.bot_name || (desk === "research" ? "Research" : undefined)}
           live={live}
           price={bookBySymbol.get(armAsk)?.ltp ?? (state?.symbol?.toUpperCase() === armAsk ? state?.ltp : null)}
-          onArm={(save) => setTrade(armAsk, true, save)}
+          walletAuto={!live && desk !== "research"}
+          onArm={(save, opts) => setTrade(armAsk, true, save, opts?.autoQty)}
           onClose={() => setArmAsk(null)}
         />
       ) : null}

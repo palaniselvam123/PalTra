@@ -42,31 +42,37 @@ def round_to_nse_tick(price: float, tick: float = NSE_TICK) -> float:
 
 
 def true_range(df: pd.DataFrame) -> pd.Series:
-    prev_close = df["close"].shift(1)
-    ranges = pd.concat(
-        [
-            df["high"] - df["low"],
-            (df["high"] - prev_close).abs(),
-            (df["low"] - prev_close).abs(),
-        ],
-        axis=1,
-    )
-    return ranges.max(axis=1)
+    """max(high − low, |high − previous close|, |low − previous close|), NaNs skipped (the first row: high − low).
+
+    Worked out on numpy arrays (np.fmax skips a NaN like pandas' row max did): it runs for every stock each minute
+    in enrich(), and the pandas concat + row max was a large share of a replay's time."""
+    high = pd.to_numeric(df["high"], errors="coerce").to_numpy(dtype="float64")
+    low = pd.to_numeric(df["low"], errors="coerce").to_numpy(dtype="float64")
+    close = pd.to_numeric(df["close"], errors="coerce").to_numpy(dtype="float64")
+    prev = np.empty_like(close)
+    if len(close):
+        prev[0] = np.nan
+        prev[1:] = close[:-1]
+    with np.errstate(invalid="ignore"):
+        out = np.fmax(np.fmax(high - low, np.abs(high - prev)), np.abs(low - prev))
+    return pd.Series(out, index=df.index, dtype="float64")
 
 
-def atr_wilder(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """Wilder ATR via `ewm(alpha=1/period, adjust=False)` — TradingView's seed."""
-    tr = true_range(df)
+def atr_wilder(df: pd.DataFrame, period: int = 14, tr: pd.Series | None = None) -> pd.Series:
+    """Wilder ATR via `ewm(alpha=1/period, adjust=False)` — TradingView's seed. `tr`: the true range if known."""
+    if tr is None:
+        tr = true_range(df)
     return tr.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
 
 
-def adx_wilder(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """Wilder ADX(period). NaN until the smoother has `period` samples."""
+def adx_wilder(df: pd.DataFrame, period: int = 14, tr: pd.Series | None = None) -> pd.Series:
+    """Wilder ADX(period). NaN until the smoother has `period` samples. `tr`: the true range if known."""
     up = df["high"].diff()
     down = -df["low"].diff()
     plus_dm = np.where((up > down) & (up > 0), up, 0.0)
     minus_dm = np.where((down > up) & (down > 0), down, 0.0)
-    tr = true_range(df)
+    if tr is None:
+        tr = true_range(df)
     alpha = 1 / period
     atr = tr.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
     plus_s = pd.Series(plus_dm, index=df.index).ewm(alpha=alpha, min_periods=period, adjust=False).mean()
@@ -115,6 +121,9 @@ def sma_gap_pct(fast: float, slow: float) -> float | None:
     return (float(fast) - slow_f) / slow_f * 100.0
 
 
+_IST_SECONDS = 19800  # IST = UTC + 5:30
+
+
 def derive_minute_volume(df: pd.DataFrame) -> pd.Series:
     """Shares traded in each candle, from Groww's cumulative session volume.
 
@@ -131,15 +140,20 @@ def derive_minute_volume(df: pd.DataFrame) -> pd.Series:
     if "volume" not in df.columns or "ts" not in df.columns:
         return out
 
-    work = pd.DataFrame(
-        {
-            "_idx": df.index,
-            "_ts": pd.to_numeric(df["ts"], errors="coerce"),
-            "_vol": pd.to_numeric(df["volume"], errors="coerce"),
-        }
-    )
-    work = work.sort_values(["_ts", "_idx"], kind="mergesort")
-    dates = pd.to_datetime(work["_ts"], unit="s", utc=True).dt.tz_convert("Asia/Kolkata").dt.date
+    ts_all = pd.to_numeric(df["ts"], errors="coerce").to_numpy(dtype="float64")
+    vol_all = pd.to_numeric(df["volume"], errors="coerce").to_numpy(dtype="float64")
+    pos = np.arange(len(ts_all))
+    # Oldest first, ties by index label (as always). A tape is almost always in order already, so the sort is
+    # skipped then; anything else is sorted the old pandas way, so the order is exactly as before.
+    steps = np.diff(ts_all)
+    in_order = len(ts_all) < 2 or bool(np.all(steps > 0)) or (bool(np.all(steps >= 0)) and df.index.is_monotonic_increasing)
+    if not in_order:
+        pos = pd.DataFrame({"_ts": ts_all, "_idx": df.index}).sort_values(["_ts", "_idx"], kind="mergesort").index.to_numpy()
+    ts_sorted = ts_all[pos]
+    # The IST calendar day as a whole number (IST has no daylight saving): no per-row timezone conversion.
+    with np.errstate(invalid="ignore"):
+        day_sorted = np.floor((ts_sorted + _IST_SECONDS) / 86400.0)
+    work_rows = zip(df.index[pos].tolist(), ts_sorted.tolist(), vol_all[pos].tolist(), day_sorted.tolist())
 
     prev_cum: float | None = None
     prev_ts: float | None = None
@@ -148,15 +162,15 @@ def derive_minute_volume(df: pd.DataFrame) -> pd.Series:
     # Collected, then written once: a per-row .at write was most of enrich()'s
     # time on every quote.
     found: dict = {}
-    for idx, ts, vol, day in zip(work["_idx"], work["_ts"], work["_vol"], dates):
-        if pd.isna(ts) or pd.isna(day):
+    for idx, ts, vol, day in work_rows:
+        if ts != ts:  # NaN time
             continue
         if day != prev_day:
             prev_day = day
             prev_cum = None
             prev_ts = None
             reject_next = False
-        if pd.isna(vol):
+        if vol != vol:  # NaN volume
             prev_cum = None
             prev_ts = None
             reject_next = False
@@ -239,9 +253,10 @@ def enrich(
     out["sma_21"] = out["sma_slow"]
     if sma_medium is not None:
         out["sma_medium"] = out["close"].rolling(int(sma_medium)).mean()
-    out["tr"] = true_range(out)
-    out["atr_14"] = atr_wilder(out, int(atr_period))
-    out["adx_14"] = adx_wilder(out, int(atr_period))
+    tr = true_range(out)
+    out["tr"] = tr
+    out["atr_14"] = atr_wilder(out, int(atr_period), tr)
+    out["adx_14"] = adx_wilder(out, int(atr_period), tr)
     if "volume" in out.columns:
         out["cumulative_volume"] = pd.to_numeric(out["volume"], errors="coerce")
     else:

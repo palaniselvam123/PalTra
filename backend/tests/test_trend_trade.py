@@ -232,4 +232,49 @@ def test_api_saves_the_settings(tmp_path, monkeypatch):
         body = client.put("/api/config", json={"tq_entry": True, "tq_entry_score": 85, "tq_exit": True, "tq_all": True}).json()
         assert body["tq_entry"] is True and body["tq_entry_score"] == 85 and body["tq_exit"] is True and body["tq_all"] is True
         assert client.put("/api/config", json={"tq_exit_score": 101}).status_code == 422
+        assert got["tq_skip_doji"] is False and got["tq_doji_pct"] == 10
+        body = client.put("/api/config", json={"tq_skip_doji": True, "tq_doji_pct": 15}).json()
+        assert body["tq_skip_doji"] is True and body["tq_doji_pct"] == 15
+        assert client.put("/api/config", json={"tq_doji_pct": 0}).status_code == 422
     database.reset_engine()
+
+
+def _bar(o, h, l, c):
+    return {"open": o, "high": h, "low": l, "close": c, "ts": 0}
+
+
+def test_skip_doji_waits_on_a_candle_that_went_nowhere():
+    doji = dict(read(), last_bar=_bar(2663.2, 2668.0, 2660.0, 2663.2))  # GLENMARK 10:20, 18 Nov
+    assert tt.entry_call(doji, cfg())[0] == "LONG"                     # off by default: the old behaviour
+    side, note = tt.entry_call(doji, cfg(tq_skip_doji=True))
+    assert side is None and "doji (body 0% of its range, needs 10%)" in note and note.endswith("— waiting")
+    small = dict(read(), last_bar=_bar(100, 110, 100, 100.5))          # body 5% of the range
+    assert tt.entry_call(small, cfg(tq_skip_doji=True))[0] is None
+    assert tt.entry_call(small, cfg(tq_skip_doji=True, tq_doji_pct=5))[0] == "LONG"
+    real = dict(read(), last_bar=_bar(100, 110, 99, 108))
+    assert tt.entry_call(real, cfg(tq_skip_doji=True))[0] == "LONG"
+    flat = dict(read(), last_bar=_bar(100, 100, 100, 100))             # no range at all counts as a doji
+    assert tt.entry_call(flat, cfg(tq_skip_doji=True))[0] is None
+    assert tt.entry_call(read(), cfg(tq_skip_doji=True))[0] == "LONG"  # no candle known: nothing to skip on
+
+
+def test_doji_pct_bounds():
+    assert tt.doji_pct(cfg()) == 10 and tt.doji_pct(cfg(tq_doji_pct=0)) == 10
+    assert tt.doji_pct(cfg(tq_doji_pct=200)) == 90 and tt.doji_pct(cfg(tq_doji_pct="x")) == 10
+
+
+def test_regime_read_carries_the_newest_closed_candle():
+    import datetime as dt
+    import pandas as pd
+    import stock_regime
+
+    ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
+    start = int(dt.datetime(2026, 11, 18, 9, 15, tzinfo=ist).timestamp())
+    n = 200
+    frame = pd.DataFrame({"ts": [start + 60 * i for i in range(n)], "open": [100 + i * 0.1 for i in range(n)],
+                          "high": [100.5 + i * 0.1 for i in range(n)], "low": [99.5 + i * 0.1 for i in range(n)],
+                          "close": [100.2 + i * 0.1 for i in range(n)], "volume": [1000 * (i + 1) for i in range(n)]})
+    now = dt.datetime.fromtimestamp(start + 60 * n, ist)
+    got = stock_regime.read(frame, 9, 21, 5, now)
+    bar = got["last_bar"]
+    assert set(bar) == {"open", "high", "low", "close", "ts"} and bar["ts"] == start + 60 * (n - 5)

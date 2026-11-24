@@ -310,6 +310,21 @@ def _strong_ok(read: dict | None, rule: AutoArmRule) -> str | None:
     return side if passed >= rule.min_checks else None
 
 
+def strong_why(read: dict, side: str, rule: AutoArmRule) -> str:
+    """Why a Trend quality pick was armed, with the candle and rules it was read on, so it can be set against a scan's
+    History row ("strong down, 7 of 7 checks on 15-min candles (morning rules); missed: volume")."""
+    checks = {k: v for k, v in (read.get("trend_checks") or {}).items() if isinstance(v, bool)}
+    passed = sum(1 for ok in checks.values() if ok)
+    kind = "Heikin Ashi " if rule.candles == "HA" else ""
+    text = f"strong {side.lower()}, {passed} of {len(checks) or 7} checks on {rule.minutes}-min {kind}candles"
+    if read.get("trend_mode") == "MORNING":
+        text += " (morning rules, before 10:00)"
+    missed = [k for k, ok in checks.items() if not ok]
+    if missed:
+        text += "; missed: " + ", ".join(missed)
+    return text
+
+
 def _times(rule: AutoArmRule) -> list[dt.time]:
     out, t = [], dt.datetime.combine(dt.date(2000, 1, 1), rule.first)
     end = dt.datetime.combine(dt.date(2000, 1, 1), rule.last)
@@ -357,7 +372,6 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: AutoArmRu
                     if before.empty or not price_ok(float(before["close"].iloc[-1]), rule.price_min, rule.price_max):
                         side = None
                 if side:
-                    passed = sum(1 for ok in (read.get("trend_checks") or {}).values() if ok)
                     found[symbol] = {"at": at}
                     if callable(rule.on_found):
                         try:
@@ -365,7 +379,7 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: AutoArmRu
                         except Exception:  # noqa: BLE001 - progress only
                             pass
                     events.append((at, symbol, {"source": "Trend quality", "side": "LONG" if side == "UP" else "SHORT",
-                                                "why": f"strong {side.lower()}, {passed} of 7 checks"}))
+                                                "why": strong_why(read, side, rule)}))
     out: list[dict] = []
     seen: set[str] = set()
     for at, symbol, info in sorted(events, key=lambda e: (e[0], e[1])):

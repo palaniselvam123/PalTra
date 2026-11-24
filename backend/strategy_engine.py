@@ -80,6 +80,7 @@ import vwap_stop
 import smart_stop
 import reentry_wait
 import atr_target
+import candle_patterns
 import colour_exit
 import colour_force
 import supertrend
@@ -97,6 +98,9 @@ import handoff_chain
 import handoff_log
 import stop_handoff
 import stock_regime
+import target_net
+import day_target
+import live_sma
 import turn_entry
 import high52
 import fresh_entry
@@ -107,6 +111,7 @@ import recovery
 import fade_unarm
 import pivots
 import pressure_exit
+import trend_log
 import trend_trade
 import trade_flow
 import flow_exit
@@ -413,7 +418,7 @@ SNAPSHOT_FIELDS = (
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body",
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
-    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
+    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours", "ha_scope",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "reverse_on_exit", "reverse_colour_exit", "reverse_settings",
     "exit_join", "exit_group", "exit_need", "exit_within",
@@ -438,17 +443,23 @@ SNAPSHOT_FIELDS = (
     "decel_exit", "decel_lookback", "decel_arm_atr", "decel_drop_pct", "decel_min_atr", "decel_candles",
     "decel_confirm", "decel_pierce_atr", "decel_peak_from",
     "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct", "turn_toward_cross", "turn_exit_candle", "turn_colour_exit",
+    "turn_gap_on", "turn_gap_long_min", "turn_gap_long_max", "turn_gap_short_min", "turn_gap_short_max",
+    "day_target", "day_target_min_pct", "day_target_early_pct", "day_target_skip_min",
+    "target_net", "target_net_keep", "target_net_keep2", "target_net_at2",
+    "target_net_start", "target_net_start_pct", "target_net_start_rs", "target_net_start_atr",
+    "live_sma_check", "live_sma_min_gap",
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
     "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "breakout_min_profit_pct",
     "breakout_min_profit_rs", "chop_losses", "fade_unarm", "fade_unarm_rule", "fade_unarm_min",
-    "tq_entry", "tq_entry_score", "tq_entry_phase", "tq_only", "tq_exit", "tq_exit_score", "tq_exit_phase", "tq_all",
+    "tq_entry", "tq_entry_score", "tq_entry_phase", "tq_only", "tq_exit", "tq_exit_score", "tq_exit_phase", "tq_all", "tq_skip_doji", "tq_doji_pct",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "colour_inside_minutes", "colour_inside_body", "colour_exit_on", "colour_exit_count", "colour_exit_body", "colour_exit_inside", "colour_force", "colour_pull", "colour_pull_candles", "colour_pull_market", "candle_minutes",
     "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks", "nth_dir_rule",
     "exit_candle_minutes",
     "small_exit_minutes", "small_exit_cross", "small_exit_slope", "small_exit_counter", "small_exit_loss_pct", "small_exit_agree",
+    "small_exit_when", "small_exit_giveback", "small_exit_upper", "small_exit_upper_must",
     "sc_minutes", "sc_count", "sc_join", "sc_need", "sc_entry", "sc_confirm",
     "slope_minutes",
     "review_on", "review_gap_pct", "review_cooldown_min",
@@ -769,7 +780,7 @@ def _entry_block(
 def _base_entry_reason(frame, direction, cfg, on, only, price):
     if on("candle_dir"):
         # Heikin Ashi colours (heikin_ashi.py): the candle direction check reads the smoothed colours.
-        frame = heikin_ashi.view(frame, cfg)
+        frame = heikin_ashi.view(frame, cfg, "entry")
     return entry_filter_reason(
         frame,
         direction,
@@ -1087,6 +1098,7 @@ def chart_filters(cfg) -> dict:
         "decel_exit": decel_guard.on(cfg),
         "turn_entry": turn_entry.entry_on(cfg),
         "turn_toward_cross": turn_entry.entry_on(cfg) and turn_entry.toward_on(cfg),
+        "turn_gap": turn_entry.gap_range(cfg) if turn_entry.entry_on(cfg) and turn_entry.gap_on(cfg) else None,
         # What the chart's "why no trade here" line needs: when entries stop, and whether a cross orders at once.
         "entry_cutoff_time": getattr(cfg, "entry_cutoff_time", None) or "15:00",
         "square_off_time": getattr(cfg, "square_off_time", None) or "15:15",
@@ -1095,6 +1107,18 @@ def chart_filters(cfg) -> dict:
         "pattern_tf": int(pattern_setting(cfg, "pattern_tf") or 1),
         "colour_count": _colour_count(cfg),
         "colour_min_body": _colour_min_body(cfg),
+        # The colour rules' body floors, so the chart's reading line can set a candle's body against them in ₹, % and
+        # ATRs (display only; the same helpers colour_call reads). The entry floor: per candle size in %, or × ATR,
+        # or each candle of the run its own size. The exit rule (colour_exit.py), when on, closes trades instead.
+        "ha_colours": heikin_ashi.on(cfg),
+        "ha_scope": heikin_ashi.scope(cfg),
+        "colour_body_unit": candle_patterns.colour_body_unit(cfg),
+        "colour_body_pct": candle_patterns.colour_min_body_pct(cfg, int(pattern_setting(cfg, "pattern_tf") or 1)),
+        "colour_body_atr": candle_patterns.colour_body_atr(cfg),
+        "colour_body_seq": candle_patterns.parse_body_seq(getattr(cfg, "colour_body_seq", "")),
+        "colour_exit_on": colour_exit.on(cfg),
+        "colour_exit_count": colour_exit.count(cfg),
+        "colour_exit_body": colour_exit.body(cfg),
         "use_gap_mode": bool(getattr(cfg, "use_gap_mode", False)),
         # Always in a trade (always_in.py): the chart's "why" line says how a flat stock is entered.
         "always_in": always_in.enabled(cfg),
@@ -1131,7 +1155,7 @@ _FILTER_KEYS = (
     "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min", "gap_short_max",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
-    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours",
+    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours", "ha_scope",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -1413,6 +1437,8 @@ class StrategyEngine:
         self._tapes: dict[str, pd.DataFrame] = {}
         # Daily pivot levels per (stock, trading day) (pivots.py); the earlier session never changes.
         self._pivot_cache: dict[tuple[str, dt.date], dict] = {}
+        # Day high / low target per open trade (day_target.py): (symbol, trade id) -> (name, level, trigger) or None.
+        self._day_goal: dict[tuple[str, int], tuple[str, float, float] | None] = {}
         # Last note of the buyers / sellers fade exit per stock (pressure_exit.py), so the signal line is written once.
         self._pressure_note: dict[str, str] = {}
         # Executed volume exit (flow_exit.py): the last window judged per stock (entry time, window end) and its reading.
@@ -1435,6 +1461,13 @@ class StrategyEngine:
         self._tq_tried: dict[str, int] = {}
         self._tq_note: dict[str, str] = {}
         self._tq_judged: dict[tuple, int] = {}
+        # Trend readings (trend_log.py; display only): what the bot read on each Trend quality stock at every candle
+        # close and what it did, per stock (the chart's why line), the candle last kept, and the exit it made per candle.
+        # `trend_rows` collects them for saving (a replay sets it to a list; None = not saved).
+        self._tq_log: dict[str, list[dict]] = {}
+        self._tq_logged: dict[str, int] = {}
+        self._tq_exit_at: dict[str, tuple[int, str]] = {}
+        self.trend_rows: list[tuple[str, dict]] | None = None
         self._review_bar: dict[str, int] = {}
         self._review_episode: dict[str, dict] = {}
         self.reviews: list[dict] = []
@@ -1949,6 +1982,7 @@ class StrategyEngine:
                 if self.status != "RUNNING":
                     break
                 await self._trend_entry_pass(symbol, frame, cfg, now)
+                self._record_trend(symbol, cfg)
                 if self.status != "RUNNING":
                     break
                 await self._flow_trigger_pass(symbol, frame, cfg, now)
@@ -2005,6 +2039,7 @@ class StrategyEngine:
             if self.status != "RUNNING":
                 break
             await self._trend_entry_pass(symbol, frame, cfg, now)
+            self._record_trend(symbol, cfg)
             if self.status != "RUNNING":
                 break
             await self._flow_trigger_pass(symbol, frame, cfg, now)
@@ -2090,8 +2125,11 @@ class StrategyEngine:
         await self._watch_recovery(symbol_cfg, now)
         await self._watch_gap_fade(symbol_cfg)
         await self._watch_pivot_target(symbol_cfg)
+        await self._watch_day_target(symbol_cfg)
+        await self._watch_profit_net(symbol_cfg)
         await self._watch_pressure_fade(symbol_cfg)
         await self._watch_trend_exit(symbol_cfg)
+        self._record_trend((symbol_cfg.symbol or self._focus or "").upper(), symbol_cfg, symbol_cfg)
         await self._watch_flow_exit(symbol_cfg)
         await self._watch_order_gate(symbol_cfg)
 
@@ -2552,7 +2590,7 @@ class StrategyEngine:
                     waits = (
                         held not in (None, found[0])
                         and turn_entry.exit_candle_on(cfg)
-                        and not turn_entry.candle_against(heikin_ashi.view(frame, cfg).iloc[-2], held)
+                        and not turn_entry.candle_against(heikin_ashi.view(frame, cfg, "exit").iloc[-2], held)
                     )
                     self._alert(
                         turn_entry.alert_text(
@@ -2578,8 +2616,14 @@ class StrategyEngine:
         if held is None and not toward:
             self._turn_done[symbol] = ts
             return self._say(symbol, f"{symbol} no order on the SMA {want} turn — it points away from the 9/21 cross ({note})")
+        gap_no = turn_entry.gap_refusal(frame.iloc[:-1], want, cfg)
+        if held is None and gap_no:
+            self._turn_done[symbol] = ts
+            return self._say(symbol, f"{symbol} no order on the SMA {want} turn — {gap_no} ({note})")
+        if gap_no:
+            toward = False  # against an open trade: close it, no reverse
         if held is not None and turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(
-            heikin_ashi.view(frame, cfg).iloc[-2], held.signal_direction
+            heikin_ashi.view(frame, cfg, "exit").iloc[-2], held.signal_direction
         ):
             # The turn came on a candle of the trade's own colour: wait for one of the other colour to close.
             self._turn_done[symbol] = ts
@@ -2607,7 +2651,8 @@ class StrategyEngine:
             if not cross_exits(cfg):
                 return self._say(symbol, f"{symbol} holding {held.direction} — SMA cross exit is off; the turn does not close it")
             await self._exit_now(cfg, self._exit_price(symbol, held), turn_entry.EXIT_REASON)
-            return self._say(symbol, f"{symbol} closed {held.direction} — SMA 9 turned {want}; no reverse, it points away from the 9/21 cross ({note})")
+            why = turn_entry.gap_refusal(frame.iloc[:-1], want, cfg) or "it points away from the 9/21 cross"
+            return self._say(symbol, f"{symbol} closed {held.direction} — SMA 9 turned {want}; no reverse, {why} ({note})")
         sig = "BULLISH" if want == "LONG" else "BEARISH"
         result = await self.apply_signal(sig, frame, cfg, now, alert=False, why=turn_entry.ENTRY_REASON)
         if result.startswith("blocked — order PENDING"):
@@ -2633,11 +2678,13 @@ class StrategyEngine:
         if not pd.isna(slope) and float(slope) * side >= slope_exit.vturn_turn_pct(cfg):
             self._turn_wait.pop(symbol, None)
             return self._say(symbol, f"{symbol} keeps its {held.direction} — SMA 9 swung back with the trade")
-        if not turn_entry.candle_against(heikin_ashi.view(frame, cfg).iloc[-2], held.signal_direction):
+        if not turn_entry.candle_against(heikin_ashi.view(frame, cfg, "exit").iloc[-2], held.signal_direction):
             self._turn_wait[symbol] = (want, int(bar["ts"]), note)
             colour = "red" if held.signal_direction == "LONG" else "green"
             return self._say(symbol, f"{symbol} holding {held.direction} — still waiting for a {colour} candle to close (SMA 9 turned {want})")
         toward = not turn_entry.toward_on(cfg) or turn_entry.toward_cross(closed, want)
+        if turn_entry.gap_refusal(closed, want, cfg):
+            toward = False
         return await self._turn_act(symbol, want, note, toward, frame, cfg, now)
 
     async def _counter_minute(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> str | None:
@@ -2655,7 +2702,7 @@ class StrategyEngine:
         if self._counter_done.get(symbol) == key:
             return None
         hit, note = counter_candles.run_towards(
-            heikin_ashi.view(frame, cfg).iloc[:-1],
+            heikin_ashi.view(frame, cfg, "entry").iloc[:-1],
             want,
             counter_candles.entry_count(cfg),
             counter_candles.rule(cfg),
@@ -2700,7 +2747,7 @@ class StrategyEngine:
         if int(bar["ts"]) <= exit_ts:
             text = waiting
         else:
-            hit, note = counter_candles.resumes(heikin_ashi.view(frame, cfg).iloc[-2], side, level)
+            hit, note = counter_candles.resumes(heikin_ashi.view(frame, cfg, "entry").iloc[-2], side, level)
             if not hit:
                 text = waiting
             else:
@@ -2792,12 +2839,15 @@ class StrategyEngine:
         cut-off, the Trade list, the caps, the entry filters, the stop and the flip all apply as
         for a cross; after a stop-out the next candle's colour enters again.
         """
-        call = colour_call(frame, cfg)
+        # Heikin Ashi for entries only / exits only (heikin_ashi.py, ha_scope): each call reads its own candles.
+        call = colour_call(frame, heikin_ashi.for_role(cfg, "entry"))
         pos = self.positions.get(symbol)
         entry_call = call
         if pos is not None and colour_exit.on(cfg):
             # The trade is judged by its own exit rule (colour_exit.py); entries keep the usual one.
-            call = colour_call(frame, colour_exit.exit_cfg(cfg))
+            call = colour_call(frame, heikin_ashi.for_role(colour_exit.exit_cfg(cfg), "exit"))
+        elif pos is not None and heikin_ashi.split(cfg):
+            call = colour_call(frame, heikin_ashi.for_role(cfg, "exit"))
         why = "CANDLE_COLOUR"
         if pressure_exit.flip_on(cfg) and pressure_exit.from_most_active(trade_sources(cfg).get(symbol)):
             # Most active stocks (pressure_exit.py): buyers / sellers holding the set % overrule the colour, for the
@@ -2866,8 +2916,9 @@ class StrategyEngine:
                 text = f"{symbol} could not close on the {call.note} — {self.last_signal}"
                 self._signals[symbol] = text
                 return text
-            if colour_exit.on(cfg) and entry_call.side != call.side:
-                # Closed by the exit rule; the other side opens only when the entry rule asks for it too.
+            if (colour_exit.on(cfg) or heikin_ashi.split(cfg)) and entry_call.side != call.side:
+                # Closed by the exit rule (or the exit's own candles, heikin_ashi.ha_scope); the other side opens only
+                # when the entry rule asks for it too.
                 text = f"{symbol} closed — exit rule: {call.note}; no new entry ({entry_call.note})"
                 self._signals[symbol] = text
                 self.last_signal = text
@@ -3353,6 +3404,12 @@ class StrategyEngine:
             if not allowed:
                 gate = f"order-flow check: {note}"
                 entry_block = f"{entry_block}; {gate}" if entry_block else gate
+        if pullback is None and live_sma.on(cfg):
+            # Live SMA re-check (live_sma.py): the order goes now, so the SMAs must agree on the live price too.
+            # A waiting order is judged on every price instead (_watch_pullbacks).
+            live = live_sma.refusal(frame, self._market_price(self._focus, cross_price), want, cfg)
+            if live:
+                entry_block = f"{entry_block}; {live}" if entry_block else live
         # Waiting orders are never read in "Executed volume only" mode (as its label says).
         if not only_flow and pressure_exit.entry_mode(cfg) != "OFF" and pressure_exit.from_most_active(
             trade_sources(cfg).get((self._focus or "").upper())
@@ -4100,6 +4157,8 @@ class StrategyEngine:
                 )
             ):
                 why = f"{extreme_entry.SMA_CROSS}: the SMAs crossed against the {order.direction.lower()} signal"
+            elif (live := live_sma.refusal(frame, price, order.direction, symbol_cfg)) and price is not None:
+                why = live
             elif (expired := tall_pullback.expired(order.signal_ts, closed_ts, order.span_sec, order.candles)) and not (
                 order.market_after and price is not None and price > 0
             ):
@@ -4749,9 +4808,11 @@ class StrategyEngine:
         order_price = self._market_price(cfg.symbol, cross_price)
         practice = (cfg.trading_mode or "PAPER").upper()
         if self.uses_wallet and practice in ("PAPER", "REPLAY"):
-            # Practice wallet: block the margin, borrowing any shortfall. Never stops the order.
+            # Practice wallet: block the margin, borrowing any shortfall. A locked wallet refuses instead.
             try:
                 loan = paper_wallet.cover(cfg.symbol, qty, order_price, bot=self.bot_id, replay=practice == "REPLAY")
+            except paper_wallet.WalletLocked as exc:
+                raise SlCancelFailed(str(exc)) from exc
             except Exception:  # noqa: BLE001
                 logger.exception("paper wallet margin check failed for %s", cfg.symbol)
                 loan = None
@@ -5697,7 +5758,7 @@ class StrategyEngine:
             return
         towards = counter_candles.against(pos.signal_direction)
         hit, note = counter_candles.run_towards(
-            heikin_ashi.view(enriched, cfg).iloc[:-1],
+            heikin_ashi.view(enriched, cfg, "exit").iloc[:-1],
             towards,
             count,
             counter_candles.rule(cfg),
@@ -5842,7 +5903,8 @@ class StrategyEngine:
             return
         symbol = (cfg.symbol or self._focus or "").upper()
         own_minutes = self._exit_minutes(symbol, cfg)
-        watched = small_candles.watched(cfg, own_minutes)
+        upper = small_candles.watched_upper(cfg, own_minutes)
+        watched = small_candles.watched(cfg, own_minutes) + upper
         if not watched:
             return
         if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
@@ -5864,9 +5926,17 @@ class StrategyEngine:
             pos.small_bars[size] = closed_ts
             pos.small_state[size] = small_candles.verdict(frame, pos.signal_direction, cfg, first)
             changed = True
-        if not changed:
-            return
-        hit, note = small_candles.decide(pos.small_state, cfg, pos.direction, pos.entry_price, self.ltp)
+        trouble = small_candles.when(cfg) == "TROUBLE"
+        if not changed and not trouble:
+            return  # with "only in trouble" the latest readings are judged again on every price
+        if pos.direction == "LONG":
+            best = max(x for x in (pos.high, self.ltp) if x is not None)
+        else:
+            best = min(x for x in (pos.low, self.ltp) if x is not None)
+        hit, note = small_candles.decide(
+            {k: v for k, v in pos.small_state.items() if k in watched},
+            cfg, pos.direction, pos.entry_price, self.ltp, best, upper,
+        )
         if not hit:
             return
         self._signals[symbol] = f"{symbol} smaller candles say exit — {note}"
@@ -5942,7 +6012,7 @@ class StrategyEngine:
             return
         reason, note = hit
         if turn_entry.exit_candle_on(cfg) and not turn_entry.candle_against(
-            heikin_ashi.view(closed, cfg).iloc[-1], pos.signal_direction
+            heikin_ashi.view(closed, cfg, "exit").iloc[-1], pos.signal_direction
         ):
             # Wait for a candle of the other colour (turn_exit_candle); the next candle is judged again.
             colour = "red" if pos.signal_direction == "LONG" else "green"
@@ -5997,7 +6067,7 @@ class StrategyEngine:
             # mostly the price before the trade, so only candles that open with or after the entry count.
             return
         pos.tc_bar = closed_ts
-        if not turn_entry.candle_against(heikin_ashi.view(frame, cfg).iloc[-2], pos.signal_direction):
+        if not turn_entry.candle_against(heikin_ashi.view(frame, cfg, "exit").iloc[-2], pos.signal_direction):
             return
         colour = "red" if pos.signal_direction == "LONG" else "green"
         what = "SMA 9 turn" if turn_trade else "reversed"
@@ -6053,10 +6123,91 @@ class StrategyEngine:
         symbol = (cfg.symbol or self._focus or "").upper()
         opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
         goal = pivots.target_for(pos.direction, pos.entry_price, self._pivots(symbol, opened.astimezone(IST).date()), mode)
-        if goal is None or not pivots.reached(pos.direction, self.ltp, goal[1]):
+        if goal is None:
+            return
+        if target_net.on(cfg):
+            await self._target_net(cfg, pos, symbol, f"pivot {goal[0]}", goal[1])
+            return
+        if not pivots.reached(pos.direction, self.ltp, goal[1]):
             return
         self._signals[symbol] = f"{symbol} pivot target {goal[0]} {goal[1]:.2f} reached"
         await self._exit_now(cfg, self.ltp, pivots.PIVOT_EXIT)
+
+    async def _watch_day_target(self, cfg: BotConfig) -> None:
+        """Every price: book the profit at today's or yesterday's high / low, whichever comes first (day_target.py)."""
+        pos = self.position
+        if pos is None or not day_target.on(cfg) or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other exits).
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        key = (symbol, int(pos.trade_id))
+        if key not in self._day_goal:
+            opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+            tape = self._tapes.get(symbol)
+            if tape is None or getattr(tape, "empty", True):
+                tape = self._frames.get(symbol)
+            lv = day_target.levels(tape, opened.timestamp(), day_target.skip_min(cfg))
+            if lv is None:
+                return  # candles not loaded yet: try again on the next price
+            if len(self._day_goal) > 500:
+                self._day_goal.clear()
+            self._day_goal[key] = day_target.target_for(pos.direction, float(pos.entry_price), lv, cfg)
+        goal = self._day_goal.get(key)
+        if goal is None:
+            return
+        if target_net.on(cfg):
+            await self._target_net(cfg, pos, symbol, goal[0], goal[2])
+            return
+        if not day_target.reached(pos.direction, self.ltp, goal[2]):
+            return
+        self._signals[symbol] = f"{symbol} day target — {goal[0]} {goal[1]:.2f} reached"
+        await self._exit_now(cfg, self.ltp, day_target.EXIT_REASON)
+
+    async def _watch_profit_net(self, cfg: BotConfig) -> None:
+        """Every price: the safety net started by a profit on any trade (target_net_start PCT / RS / ATR)."""
+        pos = self.position
+        if pos is None or not target_net.on(cfg) or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other exits).
+            return
+        found = target_net.start_level(
+            pos.direction, float(pos.entry_price), int(pos.qty or 0), _finite(pos.atr_at_entry), cfg
+        )
+        if found is None:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        await self._target_net(cfg, pos, symbol, found[0], found[1])
+
+    async def _target_net(self, cfg: BotConfig, pos: OpenPosition, symbol: str, name: str, target: float) -> None:
+        """Safety net after a target (target_net.py): once the best price reached `target`, keep the set % of the best
+        profit; close at that floor and move the stop up to it."""
+        if pos.direction == "LONG":
+            best = max(x for x in (pos.high, self.ltp) if x is not None)
+        else:
+            best = min(x for x in (pos.low, self.ltp) if x is not None)
+        found = target_net.floor(pos.direction, float(pos.entry_price), float(target), best, cfg)
+        if found is None:
+            return
+        level, share = found
+        level = round_price(symbol, level)
+        if target_net.hit(pos.direction, self.ltp, level):
+            self._signals[symbol] = (
+                f"{symbol} safety net after the {name} target {target:.2f} — kept {share:g}% of the best "
+                f"{best:.2f}, closed at {self.ltp:.2f} (net {level:.2f})"
+            )
+            await self._exit_now(cfg, self.ltp, target_net.EXIT_REASON)
+            return
+        self._signals[symbol] = (
+            f"{symbol} past the {name} target {target:.2f} — running with a safety net at {level:.2f} "
+            f"({share:g}% of the best {best:.2f})"
+        )
+        if pos.stop_active and pos.sl_trigger is not None:
+            tighter = level > float(pos.sl_trigger) if pos.direction == "LONG" else level < float(pos.sl_trigger)
+            if tighter:
+                await self._move_stop(pos, symbol, level, "safety-net stop")
 
     async def _watch_pressure_fade(self, cfg: BotConfig) -> None:
         """Most active stocks: close once the buyers (a buy) or sellers (a sell) fade to the set % (pressure_exit.py)."""
@@ -6311,6 +6462,8 @@ class StrategyEngine:
                     "CANDLE_END": "candle closed — flat",
                     "COLOUR_TURN": "candle turned the other colour — flat",
                     "PIVOT_TARGET": "pivot target reached — flat",
+                    day_target.EXIT_REASON: "day high / low target reached — flat",
+                    target_net.EXIT_REASON: "safety net after the target — flat",
                     pressure_exit.EXIT_REASON: "buyers / sellers faded — flat",
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
@@ -6984,7 +7137,68 @@ class StrategyEngine:
             self._tq_note[symbol] = f"{symbol} in a trade: {note}"
             return
         self._signals[symbol] = f"{symbol} Trend quality exit — {note}"
+        self._tq_exit_at[symbol] = (last_closed, f"closed the trade: {note}")
         await self._exit_now(cfg, self.ltp, trend_trade.EXIT_REASON)
+
+    TQ_LOG_KEEP = 400  # trend readings kept per stock in memory (a day of 1-minute candles)
+
+    def _record_trend(self, symbol: str, cfg: BotConfig, symbol_cfg: BotConfig | None = None) -> None:
+        """Keep the trend reading of a Trend quality stock once per closed candle (trend_log.py; display only).
+
+        Called after the trend entry / exit passes, so the decision is the one the bot just made at that candle."""
+        if not symbol:
+            return
+        try:
+            span = max(1, int(self._exit_minutes(symbol, cfg))) * 60
+            now = self._now()
+            closed = _TQ_ORIGIN + ((int(now.timestamp()) - _TQ_ORIGIN) // span) * span
+            if self._tq_logged.get(symbol) == closed:
+                return
+            self._tq_logged[symbol] = closed
+            scfg = symbol_cfg if symbol_cfg is not None else _cfg_for(cfg, symbol)
+            if not trend_trade.applies(scfg, trade_sources(scfg).get(symbol)):
+                return
+            read = self._trend_read(symbol, scfg)
+            slot = (int(now.timestamp()) - _TQ_ORIGIN) // span
+            pos = self.positions.get(symbol)
+            exit_at = self._tq_exit_at.get(symbol)
+            if exit_at is not None and exit_at[0] == closed:
+                decision = exit_at[1]
+            elif pos is not None:
+                judged = self._tq_judged.get((symbol, int(pos.trade_id))) == closed
+                if judged:
+                    decision = (self._tq_note.get(symbol) or "").split(": ", 1)[-1] or "held"
+                    decision = f"in a {pos.direction.lower()} trade: {decision}"
+                else:
+                    decision = f"in a {pos.direction.lower()} trade" + (
+                        "" if trend_trade.exit_on(scfg) else " (trend exit off: its own exits close it)"
+                    )
+            elif self._tq_tried.get(symbol) == slot:
+                note = self._tq_note.get(symbol) or ""
+                decision = note.replace(f"{symbol} Trend quality entry: ", "", 1)
+            elif not trend_trade.entry_on(scfg):
+                decision = "trend entry off"
+            elif self.status != "RUNNING":
+                decision = f"bot {self.status.lower()}"
+            elif now.time() < OPENING_BUFFER_END or now.time() >= _entry_cutoff(scfg):
+                decision = "outside entry hours"
+            elif symbol in self._pullback:
+                decision = "an entry order is waiting"
+            else:
+                decision = "not asked"
+            row = trend_log.row_from(
+                read, ts=closed, price=self._ltps.get(symbol), minutes=span // 60, decision=decision,
+                held=pos.direction if pos is not None else None,
+            )
+        except Exception:  # noqa: BLE001 - display only; never break the pass
+            logger.exception("trend reading for %s not kept", symbol)
+            return
+        rows = self._tq_log.setdefault(symbol, [])
+        rows.append(row)
+        if len(rows) > self.TQ_LOG_KEEP:
+            del rows[: len(rows) - self.TQ_LOG_KEEP]
+        if self.trend_rows is not None:
+            self.trend_rows.append((symbol, row))
 
     def _stock_cap_hit(self, cfg) -> str | None:
         """The per-stock daily cap (max_trades_per_stock, 0 = off): why this stock takes no more entries today."""
@@ -7861,7 +8075,15 @@ class StrategyEngine:
             "flow_decisions": self._flow_decisions(view, candles),
             # What the simple order-flow check read at each candle (order_gate.py; display only, the chart's why line).
             "gate_notes": self._gate_notes(view, candles),
+            # The trend reading at each candle close and what the bot did (trend_log.py; display only, the why line).
+            "trend_reads": self._trend_reads(view, candles),
         }
+
+    def _trend_reads(self, symbol: str, candles: list[dict]) -> list[dict]:
+        if not symbol or not candles:
+            return []
+        start = float(candles[0]["time"])
+        return [d for d in self._tq_log.get(symbol, []) if d.get("ts", 0) > start]
 
     def _gate_notes(self, symbol: str, candles: list[dict]) -> list[dict]:
         if not symbol or not candles:
@@ -8052,6 +8274,8 @@ _ALERT_REASON = {
     "CANDLE_END": "end of the pattern candle",
     "COLOUR_TURN": "candle turned the other colour",
     "PIVOT_TARGET": "pivot target (R1 / S1)",
+    day_target.EXIT_REASON: "day high / low target",
+    target_net.EXIT_REASON: "safety net after the target",
     "REPLAY_STOPPED": "replay stopped",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",
@@ -8537,7 +8761,7 @@ _TAKEN_EXITS = (
     "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", cum_delta.EXIT_REASON, "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST", "SMA9_DECEL",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
-    "BREAKOUT_STOP", "PIVOT_TARGET", stop_plan.EXIT_REASON, small_candles.REASON,
+    "BREAKOUT_STOP", "PIVOT_TARGET", day_target.EXIT_REASON, target_net.EXIT_REASON, stop_plan.EXIT_REASON, small_candles.REASON,
 )
 
 

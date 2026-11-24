@@ -56,6 +56,10 @@ def read(frame_1m: pd.DataFrame | None, sma_fast: int, sma_slow: int, minutes: i
         "trend_side": strong.get("trend_side"),
         "trend_score": strong.get("trend_score"),
         "trend": strong.get("trend"),
+        "trend_checks": strong.get("trend_checks") or {},
+        "trend_mode": strong.get("trend_mode"),
+        # The newest closed candle the read is on (real prices): the trend entry's doji skip reads its body.
+        "last_bar": _bar(bars.iloc[-1]),
         "minutes": int(minutes),
         "score": chop_scan.score_for(len(hits), minutes_since, avg_gap),
         "crosses": len(hits),
@@ -67,6 +71,13 @@ def read(frame_1m: pd.DataFrame | None, sma_fast: int, sma_slow: int, minutes: i
         "phase_early": trend_phases.too_early(found),
         "phases": [{"side": p["side"], "start": p["start_ts"], "end": p["end_ts"]} for p in found],
     }
+
+
+def _bar(row) -> dict | None:
+    try:
+        return {k: float(row[k]) for k in ("open", "high", "low", "close")} | {"ts": int(row["ts"])}
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def cached(owner: int, symbol: str, frame_1m, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime) -> dict | None:

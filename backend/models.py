@@ -119,6 +119,11 @@ class PaperWallet(Base):
     funds: Mapped[float] = mapped_column(Float, default=0.0)  # money loaded and borrowed, net of withdrawals
     loan: Mapped[float] = mapped_column(Float, default=0.0)  # borrowed to cover margin, still to pay back
     margin_pct: Mapped[float] = mapped_column(Float, default=20.0)  # share of the trade value blocked (20 = 5x)
+    # Locked: no more loans. A PAPER entry the free balance cannot cover is refused instead.
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Auto quantity: arming a stock on a PAPER bot sets its quantity to auto_qty_pct % of the free balance.
+    auto_qty: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_qty_pct: Mapped[float] = mapped_column(Float, default=10.0)
     since: Mapped[dt.datetime] = mapped_column(DateTime)  # closed trades count from here
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
@@ -389,6 +394,11 @@ class BotConfig(Base):
     small_exit_counter: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     small_exit_loss_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     small_exit_agree: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    # Look only in trouble (loss / giving back profit) and bigger candles too (small_candles.py).
+    small_exit_when: Mapped[str | None] = mapped_column(String(8), nullable=True, default="ALWAYS")
+    small_exit_giveback: Mapped[float | None] = mapped_column(Float, nullable=True, default=30.0)
+    small_exit_upper: Mapped[str | None] = mapped_column(String, nullable=True, default="")
+    small_exit_upper_must: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Smaller-candle colours (small_colour.py): entry check and colour-turn confirm, off by default.
     sc_minutes: Mapped[str | None] = mapped_column(String, nullable=True, default="")
     sc_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
@@ -445,6 +455,8 @@ class BotConfig(Base):
     exit_within: Mapped[int | None] = mapped_column(Integer, nullable=True, default=3)
     # Heikin Ashi colours (heikin_ashi.py): every candle-colour rule reads Heikin Ashi candles.
     ha_colours: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Which rules read them: BOTH (default) | ENTRY (entries only, exits on real candles) | EXIT (the other way round).
+    ha_scope: Mapped[str | None] = mapped_column(String, nullable=True, default="BOTH")
     # Supertrend (supertrend.py): entry only on its side, exit when it flips against the trade.
     use_supertrend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Price level check (level_check.py): enter only beyond a Bollinger band or a pivot level.
@@ -496,6 +508,31 @@ class BotConfig(Base):
     # A trade opened by a turn closes on the first candle of the other colour (turn_entry.py).
     turn_colour_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     uturn_run: Mapped[int | None] = mapped_column(Integer, nullable=True, default=5)
+    # Turn entry gap range (turn_entry.py): a turn opens a trade only while the signed SMA 9 / 21 gap % is inside the
+    # range for its side; off by default.
+    turn_gap_on: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    turn_gap_long_min: Mapped[float | None] = mapped_column(Float, nullable=True, default=-0.2)
+    turn_gap_long_max: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.2)
+    turn_gap_short_min: Mapped[float | None] = mapped_column(Float, nullable=True, default=-0.2)
+    turn_gap_short_max: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.2)
+    # Live SMA re-check at execution (live_sma.py): off by default; minimum gap % on the trade's side.
+    live_sma_check: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    live_sma_min_gap: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    # Day high / low target (day_target.py): off by default; level at least min % beyond the entry; close early %.
+    day_target: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    day_target_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.2)
+    day_target_early_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    day_target_skip_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    # Safety net after the pivot / day target (target_net.py): off by default.
+    target_net: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    target_net_keep: Mapped[float | None] = mapped_column(Float, nullable=True, default=70.0)
+    target_net_keep2: Mapped[float | None] = mapped_column(Float, nullable=True, default=75.0)
+    target_net_at2: Mapped[float | None] = mapped_column(Float, nullable=True, default=2.0)
+    # Where the safety net starts (target_net.py): TARGET (pivot / day target) | PCT | RS | ATR profit on any trade.
+    target_net_start: Mapped[str | None] = mapped_column(String(6), nullable=True, default="TARGET")
+    target_net_start_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.25)
+    target_net_start_rs: Mapped[float | None] = mapped_column(Float, nullable=True, default=500.0)
+    target_net_start_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.0)
     uturn_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.005)
     day_extreme_guard: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     day_extreme_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.15)
@@ -597,6 +634,21 @@ class BotConfig(Base):
     all_bots_target: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     all_bots_stop: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     all_bots_squareoff: Mapped[str | None] = mapped_column(String(5), nullable=True, default="")
+    # All-bots profit safety net (all_bots_guard.trail_floor), row 1 only: once today's combined P&L has reached
+    # `all_bots_trail_start` ₹, close every bot when it falls back to `all_bots_trail_keep` % of the day's best;
+    # from `all_bots_trail_start2` ₹ (0 = no second step) keep `all_bots_trail_keep2` % instead. Off by default.
+    all_bots_trail: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    all_bots_trail_start: Mapped[float | None] = mapped_column(Float, nullable=True, default=5000.0)
+    all_bots_trail_keep: Mapped[float | None] = mapped_column(Float, nullable=True, default=70.0)
+    all_bots_trail_start2: Mapped[float | None] = mapped_column(Float, nullable=True, default=10000.0)
+    all_bots_trail_keep2: Mapped[float | None] = mapped_column(Float, nullable=True, default=75.0)
+    # Enter the all-bots levels as % of the practice wallet's money (all_bots_guard.capital) instead of ₹:
+    # `all_bots_unit` "RS" (default, the ₹ fields above) | "PCT" (the *_pct fields below; the keep % stay as they are).
+    all_bots_unit: Mapped[str | None] = mapped_column(String(3), nullable=True, default="RS")
+    all_bots_target_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    all_bots_stop_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    all_bots_trail_start_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
+    all_bots_trail_start2_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     # All-bots P&L alerts (pnl_alerts.py), read from row 1 only: ₹ levels (0 = off), how, which P&L.
     pnl_alert_profit: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     pnl_alert_loss: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
@@ -642,6 +694,8 @@ class BotConfig(Base):
     tq_exit_score: Mapped[int | None] = mapped_column(Integer, nullable=True, default=40)
     tq_exit_phase: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     tq_all: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    tq_skip_doji: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    tq_doji_pct: Mapped[int | None] = mapped_column(Integer, nullable=True, default=10)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

@@ -99,6 +99,8 @@ def test_api_saves_limits_and_start_is_refused_until_they_change(tmp_path, monke
         assert got["target"] == 0 and got["stop"] == 0 and got["hit"] is None
         assert client.put("/api/bots/guard", json={"target": -1, "stop": 0}).status_code == 422
         today = engine._now().date()
+        # The engine is shared with earlier test files: read today's book, whatever day one left it on.
+        monkeypatch.setattr(engine, "_session_date", today.isoformat())
         with database.session_factory()() as s:
             s.add(TradeLog(date=today.isoformat(), symbol="SBIN", direction="LONG", qty=10, mode="PAPER", bot=1,
                            entry_time=dt.datetime.combine(today, dt.time(10)), entry_price=100.0, ma_cross_price=100.0,
@@ -219,3 +221,130 @@ async def test_a_backtest_stops_at_the_all_bots_target(db):  # noqa: F811
     assert any(t["gross"] > 1 for t in plain)  # the wave day has winning trades
     assert eng.status == "HALTED" and "target" in eng.halt_reason
     assert len(rows) < len(plain)
+
+
+@pytest.mark.asyncio
+async def test_a_backtest_day_ends_once_the_bot_is_halted_and_flat(monkeypatch, tmp_path):
+    """Owner's request: after the day target / stop loss / square-off time, the replay no longer plays empty minutes
+    to 15:30; that day finishes and the next one starts."""
+    import pandas as pd
+
+    import database
+    import replay as replay_mod
+    from models import BotConfig
+    from replay import ReplaySession
+    from tests.test_gap_mode import _day
+
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/r.db")
+    database.reset_engine()
+    database.init_db()
+    with database.session_factory()() as s:
+        row = s.get(BotConfig, 1) or BotConfig(id=1)
+        row.all_bots_squareoff = "10:30"
+        s.add(row)
+        s.commit()
+    days = (dt.date(2026, 9, 24), dt.date(2026, 9, 25), dt.date(2026, 9, 28))
+    wave = lambda i, p: 1000.0 + 3.0 * ((i // 12) % 2)  # noqa: E731
+
+    async def fake_fetch(broker, symbol, start, end):  # noqa: ARG001
+        return pd.DataFrame([bar for d in days for bar in _day(d, wave)])
+
+    monkeypatch.setattr(replay_mod, "fetch_frame", fake_fetch)
+    monkeypatch.setattr(replay_mod, "STEP_SECONDS", 60)
+    monkeypatch.setattr(replay_mod, "CPU_SHARE", 1000.0)
+    monkeypatch.setattr(replay_mod, "LOOP_SECONDS", 0.01)
+    ends: list[dt.datetime] = []
+    finish = ReplaySession._finish_day
+
+    async def note_end(self):
+        ends.append(self.engine.feed.clock)
+        await finish(self)
+
+    monkeypatch.setattr(ReplaySession, "_finish_day", note_end)
+    session = ReplaySession()
+    await session.begin(object(), ["AAA"], days[1], dt.time(9, 15), 1_000_000, end_day=days[2], settings={"qty": 10})
+    for _ in range(600):
+        await asyncio.sleep(0.05)
+        if session.status in ("FINISHED", "ERROR"):
+            break
+    assert session.status == "FINISHED", session.error
+    assert len(ends) == 2 and all(e.time() <= dt.time(10, 31) for e in ends), ends
+    assert "rest of the replayed day skipped" in session.engine.halt_reason
+    database.reset_engine()
+
+
+def test_profit_safety_net_floor_moves_up_with_the_best():
+    off = type("C", (), {"all_bots_trail": False})()
+    assert guard.trail_rule(off) is None
+    cfg = type("C", (), {"all_bots_trail": True, "all_bots_trail_start": 5000, "all_bots_trail_keep": 70,
+                         "all_bots_trail_start2": 10000, "all_bots_trail_keep2": 75})()
+    rule = guard.trail_rule(cfg)
+    assert guard.trail_floor(4999, rule) is None
+    assert guard.trail_floor(5000, rule) == 3500
+    assert guard.trail_floor(8000, rule) == 5600
+    assert guard.trail_floor(20000, rule) == 15000
+    assert guard.verdict(3600, 0, 4000, floor=3500) is None
+    assert guard.verdict(3500, 0, 4000, floor=3500) == "trail"
+    assert guard.verdict(-4000, 0, 4000, floor=None) == "stop"
+
+
+@pytest.mark.asyncio
+async def test_profit_safety_net_panics_once_the_pnl_falls_back(monkeypatch):
+    monkeypatch.setattr(guard, "_PEAK", {"day": None, "peak": None})
+    monkeypatch.setattr(guard, "seed_peak", lambda day: None)
+    bot = FakeEngine(1, 0.0, opened=6000)
+    cfg = type("C", (), {"all_bots_target": 0, "all_bots_stop": 4000, "all_bots_trail": True,
+                         "all_bots_trail_start": 5000, "all_bots_trail_keep": 70,
+                         "all_bots_trail_start2": 10000, "all_bots_trail_keep2": 75})()
+    task = asyncio.create_task(guard.run(lambda: [bot], lambda: cfg, lambda: True, poll=0.01))
+    await asyncio.sleep(0.05)
+    assert not bot.killed, "best ₹6,000, net ₹4,200: still running"
+    bot.opened = 4300
+    await asyncio.sleep(0.05)
+    assert not bot.killed
+    bot.opened = 4200
+    await asyncio.sleep(0.05)
+    task.cancel()
+    assert len(bot.killed) == 1 and "safety net" in bot.halt_reason and "4,200" in bot.halt_reason
+
+
+@pytest.mark.asyncio
+async def test_a_backtest_stops_at_the_profit_safety_net(db):  # noqa: F811
+    _, plain = await _replay_day(db)
+    eng, rows = await _replay_day(db, all_bots_trail=True, all_bots_trail_start=1.0, all_bots_trail_keep=99.0,
+                                  all_bots_trail_start2=0.0)
+    assert eng.status == "HALTED" and "safety net" in eng.halt_reason
+    assert len(rows) < len(plain)
+
+
+def test_levels_in_percent_of_capital():
+    cfg = type("C", (), {"all_bots_unit": "PCT", "all_bots_target": 9999, "all_bots_stop": 9999,
+                         "all_bots_target_pct": 2.0, "all_bots_stop_pct": 0.8, "all_bots_trail": True,
+                         "all_bots_trail_start_pct": 1.0, "all_bots_trail_keep": 70,
+                         "all_bots_trail_start2_pct": 2.0, "all_bots_trail_keep2": 75})()
+    assert guard.limits(cfg, 500_000) == (10_000, 4_000)
+    assert guard.trail_rule(cfg, 500_000) == (5_000, 70, 10_000, 75)
+    assert guard.limits(cfg, 0) == (0, 0) and guard.trail_rule(cfg, 0) is None  # no money loaded: off
+    cfg.all_bots_unit = "RS"
+    assert guard.limits(cfg, 500_000) == (9999, 9999)
+
+
+def test_api_saves_percent_levels(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/pct.db")
+    monkeypatch.setenv("OPEN_PNL_FILE", str(tmp_path / "pnl.db"))
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    import paper_wallet
+    from fastapi.testclient import TestClient
+    from main import app
+
+    paper_wallet.add(500_000)
+    with TestClient(app) as client:
+        got = client.put("/api/bots/guard", json={"target": 0, "stop": 0, "unit": "PCT", "target_pct": 2,
+                                                  "stop_pct": 0.8}).json()
+        assert got["unit"] == "PCT" and got["capital"] == 500_000
+        assert (got["effective"]["target"], got["effective"]["stop"]) == (10_000, 4_000)
+        assert got["effective"]["stop"] == 4_000 and got["stop_pct"] == 0.8
+    database.reset_engine()

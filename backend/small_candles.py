@@ -20,6 +20,15 @@ ticked sizes say so at the same time, and, with `small_exit_loss_pct` > 0, only 
 under water from its entry (a winner is left to the bot's own exits). No reverse: the next entry waits for its own
 signal on the bot's own candle. Entries are unchanged. A LIVE position restored without its stop id is left to that
 stop, as with the other candle exits. The stock research baseline keeps it off.
+
+**Look only when the trade is in trouble** (`small_exit_when` `ALWAYS` default | `TROUBLE`; `small_exit_giveback` 30 %,
+1-100): with `TROUBLE` the sizes are judged only while the trade is in a loss (the price on the wrong side of the entry)
+or has fallen back from its best price since the entry by at least that % of the best profit (`in_trouble`); while the
+price keeps going the trade's way the smaller candles are not looked at. Judged again on every pass while it holds.
+
+**Bigger candles too** (`small_exit_upper`, CSV of 5 / 10 / 15 / 30 / 60 bigger than the bot's candle, "" = none;
+`small_exit_upper_must` off): the same three readings on bigger candles, counted with the smaller sizes toward
+`small_exit_agree`; with `small_exit_upper_must` the trade closes only while at least one bigger size also says exit.
 """
 from __future__ import annotations
 
@@ -34,6 +43,8 @@ REASON = "SMALL_CANDLE_EXIT"
 SIZES = (1, 2, 3, 5, 10)
 MAX_COUNTER = 10
 MAX_AGREE = 5
+UPPER_SIZES = (5, 10, 15, 30, 60)
+WHENS = ("ALWAYS", "TROUBLE")
 
 
 def sizes(cfg) -> list[int]:
@@ -53,6 +64,65 @@ def sizes(cfg) -> list[int]:
     return sorted(out)
 
 
+def upper_sizes(cfg) -> list[int]:
+    """The ticked bigger candle sizes in minutes, smallest first; empty = none."""
+    raw = getattr(cfg, "small_exit_upper", None) or ""
+    out: list[int] = []
+    for part in str(raw).replace(";", ",").split(","):
+        try:
+            n = int(float(part.strip()))
+        except ValueError:
+            continue
+        if n in UPPER_SIZES and n not in out:
+            out.append(n)
+    return sorted(out)
+
+
+def clean_upper(raw) -> str:
+    if isinstance(raw, (list, tuple)):
+        raw = ",".join(str(x) for x in raw)
+    return ",".join(str(n) for n in upper_sizes(type("C", (), {"small_exit_upper": raw})()))
+
+
+def watched_upper(cfg, own_minutes: int) -> list[int]:
+    """The ticked bigger sizes that are bigger than the bot's own candle."""
+    return [s for s in upper_sizes(cfg) if s > int(own_minutes or 1)]
+
+
+def upper_must(cfg) -> bool:
+    return bool(getattr(cfg, "small_exit_upper_must", False))
+
+
+def when(cfg) -> str:
+    value = str(getattr(cfg, "small_exit_when", None) or "ALWAYS").upper()
+    return value if value in WHENS else "ALWAYS"
+
+
+def giveback(cfg) -> float:
+    try:
+        v = float(getattr(cfg, "small_exit_giveback", 30) or 30)
+    except (TypeError, ValueError):
+        return 30.0
+    return max(1.0, min(100.0, v))
+
+
+def in_trouble(direction: str, entry: float, price: float, best: float | None, cfg) -> tuple[bool, str]:
+    """(in trouble, why): the trade is in a loss, or has given back `giveback` % of its best profit."""
+    if not entry or not price:
+        return False, ""
+    sign = 1.0 if direction == "LONG" else -1.0
+    now = (price - entry) * sign
+    if now < 0:
+        return True, f"in a loss ({now:+.2f} a share)"
+    top = (best - entry) * sign if best else 0.0
+    if top <= 0:
+        return False, ""
+    back = (top - now) / top * 100.0
+    if back >= giveback(cfg):
+        return True, f"gave back {back:.0f}% of the best profit ({top:.2f} → {now:.2f} a share)"
+    return False, ""
+
+
 def clean_sizes(raw) -> str:
     """A settings value (CSV string or list) as the stored CSV, sizes outside SIZES dropped."""
     if isinstance(raw, (list, tuple)):
@@ -61,8 +131,8 @@ def clean_sizes(raw) -> str:
 
 
 def on(cfg, own_minutes: int) -> bool:
-    """Any ticked size smaller than the bot's own candle."""
-    return any(s < int(own_minutes or 1) for s in sizes(cfg))
+    """Any ticked size smaller than the bot's own candle, or bigger one ticked under "bigger candles too"."""
+    return any(s < int(own_minutes or 1) for s in sizes(cfg)) or bool(watched_upper(cfg, own_minutes))
 
 
 def watched(cfg, own_minutes: int) -> list[int]:
@@ -140,23 +210,40 @@ def verdict(frame: pd.DataFrame | None, signal_direction: str, cfg, first_after_
         other = "SHORT" if signal_direction == "LONG" else "LONG"
         # No reason against the *other* side = every one of the last n candles went against this trade.
         # Heikin Ashi colours (heikin_ashi.py) when the bot reads them.
-        if not indicators._direction_reason(heikin_ashi.view(frame, cfg), other, n, "COLOUR"):  # noqa: SLF001
+        if not indicators._direction_reason(heikin_ashi.view(frame, cfg, "exit"), other, n, "COLOUR"):  # noqa: SLF001
             size_note.append(f"{n} candle{'s' if n > 1 else ''} in a row against the trade")
     return "; ".join(size_note) if size_note else None
 
 
-def decide(state: dict[int, str | None], cfg, direction: str, entry: float, price: float) -> tuple[bool, str]:
-    """Whether enough sizes say exit now and the loss gate allows it: (exit, note)."""
+def decide(
+    state: dict[int, str | None],
+    cfg,
+    direction: str,
+    entry: float,
+    price: float,
+    best: float | None = None,
+    upper: tuple[int, ...] | list[int] = (),
+) -> tuple[bool, str]:
+    """Whether enough sizes say exit now and the gates allow it: (exit, note). `upper` = the bigger sizes in `state`."""
     saying = {size: note for size, note in state.items() if note}
     need = agree(cfg)
     if len(saying) < need:
+        return False, ""
+    if upper and upper_must(cfg) and not any(size in saying for size in upper):
         return False, ""
     gate = loss_pct(cfg)
     under = losing_pct(direction, entry, price)
     if gate > 0 and under < gate:
         return False, ""
-    parts = [f"{size}-min: {note}" for size, note in sorted(saying.items())]
+    trouble = ""
+    if when(cfg) == "TROUBLE":
+        bad, trouble = in_trouble(direction, entry, price, best, cfg)
+        if not bad:
+            return False, ""
+    parts = [f"{size}-min{' (bigger)' if size in upper else ''}: {note}" for size, note in sorted(saying.items())]
     text = " · ".join(parts)
     if gate > 0:
         text += f" · {under:.2f}% under water"
+    if trouble:
+        text += f" · {trouble}"
     return True, text

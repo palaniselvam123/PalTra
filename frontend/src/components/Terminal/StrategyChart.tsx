@@ -27,10 +27,13 @@ import { type FlowPoint, type FlowRead, cvdValues, emaValues, flowReads, heikinA
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { NewTag } from "@/components/ui/NewTag";
+import { type ColourBodyRead, bodyText, colourBodyRead, colourBodyTip } from "@/lib/colourBody";
+import { trendReadText, type TrendRead } from "@/lib/trendReads";
 import { PinToggle } from "@/components/ui/PinToggle";
 import { usePinned } from "@/lib/usePinned";
 import { StockNewsPanel } from "./StockNewsPanel";
 import { DrillAsk, DrillPanel, drillSizes, withSlopes, type Drill, type DrillAskAt } from "./ChartDrill";
+import { qtyShort } from "@/lib/qtyShort";
 
 type Props = {
   chart: ChartPayload | null;
@@ -641,7 +644,19 @@ function gateWhy(p: { c: Candle; bar: number; notes: GateNote[] | null; filters?
   return entryNote ? say(entryNote) : "";
 }
 
-function whyNoTrade(p: Parameters<typeof baseWhy>[0] & { gateNotes?: GateNote[] | null }): string {
+function whyNoTrade(p: Parameters<typeof baseWhy>[0] & { gateNotes?: GateNote[] | null; trendReads?: TrendRead[] | null }): string {
+  const withTrend = (text: string) => {
+    // The trend reading the bot made when this candle closed (trend_log.py): score, phase and what it did.
+    const c0 = p.rows[p.i];
+    if (!c0 || p.forming || !p.trendReads?.length) return text;
+    const end0 = c0.time + p.bar * 60;
+    const r = p.trendReads.filter((x) => x.ts > c0.time && x.ts <= end0).sort((a, b) => b.ts - a.ts)[0];
+    return r ? `${text ? `${text} ` : ""}${trendReadText(r)}` : text;
+  };
+  return withTrend(whyNoTradeBase(p));
+}
+
+function whyNoTradeBase(p: Parameters<typeof baseWhy>[0] & { gateNotes?: GateNote[] | null }): string {
   const base = baseWhy(p);
   const c = p.rows[p.i];
   if (!c || p.forming) return base;
@@ -1642,13 +1657,25 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   // after the range was asked (the first load sees 1 minute, then the state says 5), and merging
   // 1-minute candles here would rebuild SMA 21 from that one day only, so it would start late.
   // Ask the server again at the size on screen: it adds the days before and draws every line.
+  // `loadingPast` is a dependency too: the size usually arrives while the first range is still
+  // loading, and the load's candles and its "done" land in two renders, so without it the check
+  // ran only while loading and never once the load had finished (owner's BLUESTARCO case: a past
+  // day on 5-minute candles with no SMA lines or "SMA gap at entry" for the first hour or so).
+  // Each range and size is asked once, so a failed reload is not asked again in a loop.
+  const resizedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!past || loadingPast) return;
-    if (bar === (past.interval ?? 1)) return;
+    if (bar === (past.interval ?? 1)) {
+      resizedRef.current = null; // drawn at the right size: a later mismatch may ask again
+      return;
+    }
+    const key = `${past.symbol}|${past.from}|${past.to}|${bar}`;
+    if (resizedRef.current === key) return;
+    resizedRef.current = key;
     loadPast({ from: past.from.replace(" ", "T"), to: past.to.replace(" ", "T") }, bar, pastRunRef.current, past.symbol);
-    // Only a size change reloads; loadPast reads the current refs and state.
+    // Only a size change (or the end of a load) reloads; loadPast reads the current refs and state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bar, past]);
+  }, [bar, past, loadingPast]);
 
   useEffect(() => {
     if (!rootRef.current) return;
@@ -2431,6 +2458,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     return { value: null, at: shownIndex };
   })();
   const shownSlope = slopeRead.value;
+  // Candle colour mode: this candle's body against the colour rules' floors (display only, lib/colourBody.ts).
+  const colourRead = shownIndex >= 0 && rows.length ? colourBodyRead(rows, shownIndex, filters, bar, shownAtr) : null;
   const slopeTip = rows.length ? slopeHelp(rows, slopeRead.at, slopeBack, bar, filters) : "";
   // Why the bot took no trade on the candle under the mouse (or the latest one).
   const whyLine =
@@ -2447,6 +2476,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           flow: view?.flow ?? null,
           flowDecisions: view?.flow_decisions ?? null,
           gateNotes: view?.gate_notes ?? null,
+          trendReads: view?.trend_reads ?? null,
         })
       : "";
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
@@ -2759,6 +2789,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         rsi={shownRsi}
         atr={shownAtr}
         breakoutMult={filters?.breakout_handoff ? filters.breakout_atr_mult ?? 1.8 : null}
+        colourRead={colourRead}
+        colourWrongSize={filters?.entry_mode === "COLOUR" && Number(filters.pattern_tf ?? 0) !== bar ? Number(filters.pattern_tf ?? 0) : null}
         slope={shownSlope}
         slopeBack={slopeBack}
         slopeTip={slopeTip}
@@ -2767,6 +2799,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         buyersAt={showBuyers && shownRead ? shownRead.time : null}
         rvol={showBuyers ? shownRead?.rvol ?? null : null}
         valueCr={showBuyers ? shownRead?.value_cr ?? null : null}
+        waitQty={showBuyers && shownRead?.buy_qty != null && shownRead?.sell_qty != null ? { buy: shownRead.buy_qty, sell: shownRead.sell_qty } : null}
         flow={shownFlow}
         waitOn={{ buy: showBuyWait, sell: showSellWait }}
         flowOn={{ buy: showFlowBuy, sell: showFlowSell }}
@@ -3265,6 +3298,8 @@ function OhlcLine({
   rsi,
   atr,
   breakoutMult,
+  colourRead,
+  colourWrongSize,
   slope,
   slopeBack,
   slopeTip,
@@ -3273,6 +3308,7 @@ function OhlcLine({
   buyersAt,
   rvol,
   valueCr,
+  waitQty,
   flow,
   waitOn,
   flowOn,
@@ -3289,6 +3325,10 @@ function OhlcLine({
   atr: number | null;
   /** The breakout hand-off's height rule in ATRs while it is on (null = off). */
   breakoutMult: number | null;
+  /** Candle colour mode: this candle's body against the colour rules' floors (null = not colour mode / other size). */
+  colourRead: ColourBodyRead | null;
+  /** The colour candle size when the chart shows another size (the body reading needs that size). */
+  colourWrongSize: number | null;
   slope: number | null;
   slopeBack: number;
   /** The slope's arithmetic with this candle's numbers (tooltip). */
@@ -3302,6 +3342,8 @@ function OhlcLine({
   /** Volume vs usual (×) and money traded (₹ crore) from that same Most active read. */
   rvol?: number | null;
   valueCr?: number | null;
+  /** Total quantity waiting to buy / sell at that read (Groww's bid / ask total). */
+  waitQty?: { buy: number; sell: number } | null;
   /** This candle's executed buy / sell split, estimated (undefined = not shown). */
   flow?: FlowRead | null;
   /** Which of the four strip lines are on (waiting buyers / sellers, executed buyers / sellers). */
@@ -3379,6 +3421,36 @@ function OhlcLine({
           </span>
         );
       })()}
+      {colourRead ? (
+        <span className="cursor-help whitespace-nowrap" title={colourBodyTip(colourRead)}>
+          <span className="text-slate-400">{colourRead.ha ? "HA body" : "Body"}</span>{" "}
+          <span className={colourRead.colour === "green" ? "text-emerald-300" : colourRead.colour === "red" ? "text-rose-300" : "text-slate-100"}>
+            {bodyText(colourRead.rs, colourRead.pct, colourRead.atr)}
+          </span>{" "}
+          <span className="text-slate-400">{colourRead.closeByExitRule ? "· exit needs" : "· close needs"}</span>{" "}
+          {colourRead.close.rs > 0 ? (
+            <span className={colourRead.close.ok ? "text-emerald-300" : "font-semibold text-amber-300"}>
+              ≥ {bodyText(colourRead.close.rs, colourRead.close.pct, colourRead.close.atr)} {colourRead.close.ok ? "✓" : "✗ too small"}
+            </span>
+          ) : (
+            <span className="text-slate-300">any body</span>
+          )}
+          {colourRead.entry && colourRead.entry.rs > 0 ? (
+            <>
+              {" "}
+              <span className="text-slate-400">· entry needs</span>{" "}
+              <span className={colourRead.entry.ok ? "text-emerald-300" : "text-slate-300"}>
+                ≥ {bodyText(colourRead.entry.rs, colourRead.entry.pct, colourRead.entry.atr)} {colourRead.entry.ok ? "✓" : "✗"}
+              </span>
+            </>
+          ) : null}{" "}
+          <NewTag id="chart-colour-body" link={false} />
+        </span>
+      ) : colourWrongSize ? (
+        <span className="whitespace-nowrap font-sans text-[11px] text-slate-400" title="The candle colour rules read their own candle size; switch the chart to it to see each candle's body against the bot's floors.">
+          Colour body: switch the chart to {colourWrongSize}-min candles
+        </span>
+      ) : null}
       <span className="cursor-help whitespace-nowrap" title={slopeTip || `SMA 9 slope: its move over the last ${slopeBack} candles, in % per candle`}>
         <span className="text-slate-400">Slope</span>{" "}
         <span className={clsx(slope == null ? "text-slate-400" : slope >= 0 ? "text-emerald-300" : "text-rose-300")}>
@@ -3408,6 +3480,13 @@ function OhlcLine({
             </>
           ) : null}
           {buyers == null ? <span className="font-sans text-[11px] text-slate-400"> (no Most active read of this stock before this candle closed)</span> : null}
+          {buyers != null && waitQty ? (
+            <span className="text-slate-300" title={`Waiting to buy ${waitQty.buy.toLocaleString("en-IN")} shares · waiting to sell ${waitQty.sell.toLocaleString("en-IN")} shares (Groww's bid / ask total)`}>
+              {" "}
+              (buy <span className="text-emerald-300">{qtyShort(waitQty.buy)}</span> · sell <span className="text-rose-300">{qtyShort(waitQty.sell)}</span>){" "}
+              <NewTag id="waiting-qty" link={false} />
+            </span>
+          ) : null}
           {buyers != null && buyersAt ? (
             <span className="text-slate-400">
               {" "}

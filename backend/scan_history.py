@@ -224,7 +224,7 @@ MAX_ACROSS_DAYS = 10
 
 def chop_rows(days: list[str], minutes: int | None = None, candles: str | None = None) -> list[dict]:
     """Every saved Trend quality run of the given days (oldest first), each with its rows cut to CHOP_KEEP.
-    `minutes` keeps one candle size, `candles` NORMAL / HA one candle kind (a run saved without it is NORMAL)."""
+    `minutes` keeps one candle size, `candles` NORMAL / COLOUR / HA one candle kind (a run saved without it is NORMAL)."""
     picked = [d for d in dict.fromkeys(days) if d][:MAX_ACROSS_DAYS]
     if not picked:
         return []
@@ -236,10 +236,11 @@ def chop_rows(days: list[str], minutes: int | None = None, candles: str | None =
     out = []
     for row in found:
         meta = _meta_row(row)
-        kind = "HA" if (meta["meta"] or {}).get("candles") == "HA" else "NORMAL"
+        saved = (meta["meta"] or {}).get("candles")
+        kind = saved if saved in ("COLOUR", "HA") else "NORMAL"
         if minutes and meta["minutes"] != minutes:
             continue
-        if candles in ("NORMAL", "HA") and kind != candles:
+        if candles in ("NORMAL", "COLOUR", "HA") and kind != candles:
             continue
         rows = _unpack(row["rows"]) or []
         meta["candles"] = kind
@@ -353,6 +354,22 @@ def usable_share(value) -> float | None:
     return usable(value)
 
 
+# {day: {symbol: {int(epoch read): (buy qty waiting, sell qty waiting)}}}: the totals behind each read's share.
+_ACTIVE_QTY: dict[str, dict[str, dict[int, tuple[int | None, int | None]]]] = {}
+
+
+def active_qty(day: str) -> dict[str, dict[int, tuple[int | None, int | None]]]:
+    """Each saved Most active read's total buy / sell quantity waiting (Groww's bid / ask total), keyed like
+    `active_reads`. Display only."""
+    active_reads(day)
+    return _ACTIVE_QTY.get(day, {})
+
+
+def _qty(value) -> int | None:
+    v = _opt(value)
+    return int(v) if v is not None else None
+
+
 def active_reads(day: str) -> dict[str, list[tuple[float, float, float | None, float | None]]]:
     """{symbol: [(epoch read, buyers' share 0..1, volume vs usual ×, money traded ₹ cr)]} from that IST day's saved Most
     active scans, oldest first (the chart's reading line and the backtest PDF). Never raises."""
@@ -387,9 +404,11 @@ def active_reads(day: str) -> dict[str, list[tuple[float, float, float | None, f
             if share is None or not symbol or at is None:
                 continue
             by_symbol.setdefault(symbol, []).append((at, share, _opt(row.get("rvol")), _opt(row.get("value_cr"))))
+            _ACTIVE_QTY.setdefault(day, {}).setdefault(symbol, {})[int(at)] = (_qty(row.get("buy_qty")), _qty(row.get("sell_qty")))
     for reads in by_symbol.values():
         reads.sort(key=lambda r: r[0])
     _ACTIVE_CACHE[day] = (last_id, by_symbol)
     for old in sorted(_ACTIVE_CACHE)[:-_ACTIVE_CACHE_DAYS]:
         _ACTIVE_CACHE.pop(old, None)
+        _ACTIVE_QTY.pop(old, None)
     return by_symbol

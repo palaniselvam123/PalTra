@@ -1550,7 +1550,7 @@ export const api = {
     ),
   /** Scanner server only: arm a stock on a desk bot. LIVE needs confirmLive (asked in the page first). */
   deskArm: (
-    body: { target: number | "research"; symbol: string; source?: string | null; confirm_live: boolean },
+    body: { target: number | "research"; symbol: string; source?: string | null; confirm_live: boolean; auto_qty?: boolean },
     server: LinkServer = "desk"
   ) =>
     request<unknown>(

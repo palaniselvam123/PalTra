@@ -151,7 +151,8 @@ LIVE_REFUSED = "That bot is LIVE: confirm the LIVE arm first (confirm_live)."
 def token_path(path: str) -> bool:
     """Desk paths that check a link token themselves (exempt from the Google lock)."""
     return path in (
-        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, BACKTEST_EXPORT, BACKTEST_ACTIVE, BACKTEST_QUEUE_DUE,
+        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, BACKTEST_EXPORT, BACKTEST_ACTIVE, BACKTEST_SAVED_PICKS,
+        BACKTEST_QUEUE_DUE,
         NEWS_LISTS, NEWS_LISTS_ADD
     ) or path.startswith(
         (STOCK_PREFIX, BACKTEST_EXPORT + "/")
@@ -171,6 +172,8 @@ BACKTEST_EXPORT = "/api/link/backtest/scan-export"
 BACKTEST_QUEUE_DUE = "/api/link/backtest/queue-due"
 # The desk's saved Most active scans of a day, cut down to the stocks an auto-arm replay would arm (auto_arm.py).
 BACKTEST_ACTIVE = "/api/link/backtest/active-scans"
+# One day's saved-scan backtest picks from the desk's saved Most active scans (saved_picks.py).
+BACKTEST_SAVED_PICKS = "/api/link/backtest/saved-picks"
 
 
 def _backtest_authorized(request: Request) -> None:
@@ -218,6 +221,33 @@ async def backtest_active_scans(request: Request, day: str, pct: float = 70.0, s
         raise HTTPException(400, "Bad side or percentage")
     scans = await asyncio.to_thread(auto_arm.saved_scans, when)
     return {"scans": len(scans), "hits": [list(h) for h in auto_arm.active_hits(scans, pct, side, max(0.0, min_value_cr), max(0.0, price_min), max(0.0, price_max), max(0.0, min_rvol), basis, flow_pct)]}
+
+
+@router.get(BACKTEST_SAVED_PICKS)
+async def backtest_saved_picks(request: Request, day: str, rule: str = "{}"):
+    """One day's picks for the saved-scan backtest on the backtest server (saved_picks.choose_for_day on the desk's
+    saved Most active scans). Read-only."""
+    _backtest_authorized(request)
+    import asyncio
+    import datetime as dt
+    import json
+
+    import auto_arm
+    import saved_picks
+
+    try:
+        when = dt.date.fromisoformat(day)
+        data = json.loads(rule)
+    except ValueError as exc:
+        raise HTTPException(400, "day must be YYYY-MM-DD and rule JSON") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(400, "rule must be an object")
+    parsed = saved_picks.rule_from_dict(data)
+    scans = await asyncio.to_thread(auto_arm.saved_scans, when)
+    if not scans:
+        return {"scans": 0, "picks": [], "note": "no saved Most active scans on the desk"}
+    picks, note = await asyncio.to_thread(saved_picks.choose_for_day, scans, parsed)
+    return {"scans": len(scans), "picks": picks, "note": note}
 
 
 @router.post(BACKTEST_SCANS)
@@ -396,6 +426,8 @@ class ArmRequest(BaseModel):
     source: str | None = Field(default=None, max_length=60)
     # Required when the bot is LIVE: the person confirmed the LIVE arm in the scanner page.
     confirm_live: bool = False
+    # False when the person typed their own quantity: the wallet's auto quantity is then not applied.
+    auto_qty: bool | None = None
 
 
 @router.get(STOCK_PREFIX + "{target}/{symbol}")
@@ -415,7 +447,10 @@ async def desk_stock_save(target: str, symbol: str, body: StockChange, request: 
 async def desk_arm(body: ArmRequest, request: Request):
     t = _desk_guard(request, body.target, body.confirm_live)
     await _first_sync()
-    res = await _terminal("POST", _arm_path(t), {"symbol": body.symbol, "armed": True, "source": body.source})
+    arm = {"symbol": body.symbol, "armed": True, "source": body.source}
+    if body.auto_qty is not None:
+        arm["auto_qty"] = body.auto_qty
+    res = await _terminal("POST", _arm_path(t), arm)
     if server_role.is_backtest() and res.status_code == 200:
         _remember_scanner_arm(t, body.symbol)
     return res
@@ -498,7 +533,10 @@ async def scanner_stock_save(target: str, symbol: str, body: StockChange, confir
 async def scanner_arm(body: ArmRequest, server: Server = "desk"):
     _scanner_only(server)
     _target(body.target)
-    out = await _to_desk("POST", ARM_PATH, body.model_dump(), server=server)
+    sent = body.model_dump()
+    if sent.get("auto_qty") is None:
+        sent.pop("auto_qty", None)  # unset: the desk follows its wallet's switch
+    out = await _to_desk("POST", ARM_PATH, sent, server=server)
     _cache.pop(server, None)  # the armed chips update on the next read
     return out
 

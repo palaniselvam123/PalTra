@@ -143,6 +143,10 @@ def _ensure_bot_config_columns(engine) -> None:
             "small_exit_counter": "INTEGER DEFAULT 0",
             "small_exit_loss_pct": "FLOAT DEFAULT 0",
             "small_exit_agree": "INTEGER DEFAULT 1",
+            "small_exit_when": "VARCHAR(8) DEFAULT 'ALWAYS'",
+            "small_exit_giveback": "FLOAT DEFAULT 30",
+            "small_exit_upper": "VARCHAR DEFAULT ''",
+            "small_exit_upper_must": "BOOLEAN DEFAULT 0",
             "sc_minutes": "VARCHAR DEFAULT ''",
             "sc_count": "INTEGER DEFAULT 2",
             "sc_join": "VARCHAR(8) DEFAULT 'ALL'",
@@ -184,6 +188,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "exit_need": "INTEGER DEFAULT 0",
             "exit_within": "INTEGER DEFAULT 3",
             "ha_colours": "BOOLEAN DEFAULT 0",
+            "ha_scope": "VARCHAR DEFAULT 'BOTH'",
             "use_supertrend": "BOOLEAN DEFAULT 0",
             "use_level": "BOOLEAN DEFAULT 0",
             "use_fresh": "BOOLEAN DEFAULT 0",
@@ -221,6 +226,25 @@ def _ensure_bot_config_columns(engine) -> None:
             "turn_colour_exit": "BOOLEAN DEFAULT 0",
             "uturn_run": "INTEGER DEFAULT 5",
             "uturn_min_pct": "FLOAT DEFAULT 0.005",
+            "turn_gap_on": "BOOLEAN DEFAULT 0",
+            "turn_gap_long_min": "FLOAT DEFAULT -0.2",
+            "turn_gap_long_max": "FLOAT DEFAULT 0.2",
+            "turn_gap_short_min": "FLOAT DEFAULT -0.2",
+            "turn_gap_short_max": "FLOAT DEFAULT 0.2",
+            "live_sma_check": "BOOLEAN DEFAULT 0",
+            "live_sma_min_gap": "FLOAT DEFAULT 0",
+            "day_target": "BOOLEAN DEFAULT 0",
+            "day_target_min_pct": "FLOAT DEFAULT 0.2",
+            "day_target_early_pct": "FLOAT DEFAULT 0",
+            "day_target_skip_min": "INTEGER DEFAULT 0",
+            "target_net": "BOOLEAN DEFAULT 0",
+            "target_net_keep": "FLOAT DEFAULT 70",
+            "target_net_keep2": "FLOAT DEFAULT 75",
+            "target_net_at2": "FLOAT DEFAULT 2",
+            "target_net_start": "VARCHAR(6) DEFAULT 'TARGET'",
+            "target_net_start_pct": "FLOAT DEFAULT 0.25",
+            "target_net_start_rs": "FLOAT DEFAULT 500",
+            "target_net_start_atr": "FLOAT DEFAULT 1",
             "day_extreme_guard": "BOOLEAN DEFAULT 0",
             "day_extreme_pct": "FLOAT DEFAULT 0.15",
             "day_extreme_pull_pct": "FLOAT DEFAULT 0.15",
@@ -290,6 +314,16 @@ def _ensure_bot_config_columns(engine) -> None:
             "all_bots_target": "FLOAT DEFAULT 0",
             "all_bots_stop": "FLOAT DEFAULT 0",
             "all_bots_squareoff": "VARCHAR(5) DEFAULT ''",
+            "all_bots_trail": "BOOLEAN DEFAULT 0",
+            "all_bots_trail_start": "FLOAT DEFAULT 5000",
+            "all_bots_trail_keep": "FLOAT DEFAULT 70",
+            "all_bots_trail_start2": "FLOAT DEFAULT 10000",
+            "all_bots_trail_keep2": "FLOAT DEFAULT 75",
+            "all_bots_unit": "VARCHAR(3) DEFAULT 'RS'",
+            "all_bots_target_pct": "FLOAT DEFAULT 0",
+            "all_bots_stop_pct": "FLOAT DEFAULT 0",
+            "all_bots_trail_start_pct": "FLOAT DEFAULT 0",
+            "all_bots_trail_start2_pct": "FLOAT DEFAULT 0",
             "pnl_alert_profit": "FLOAT DEFAULT 0",
             "pnl_alert_loss": "FLOAT DEFAULT 0",
             "pnl_alert_telegram": "BOOLEAN DEFAULT 1",
@@ -323,6 +357,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "tq_exit_score": "INTEGER DEFAULT 40",
             "tq_exit_phase": "BOOLEAN DEFAULT 1",
             "tq_all": "BOOLEAN DEFAULT 0",
+            "tq_skip_doji": "BOOLEAN DEFAULT 0",
+            "tq_doji_pct": "INTEGER DEFAULT 10",
             "use_or_volume": "BOOLEAN DEFAULT 0",
             "use_or_vwap": "BOOLEAN DEFAULT 0",
             "use_or_spread": "BOOLEAN DEFAULT 0",
@@ -432,12 +468,27 @@ def _ensure_trade_log_columns(engine) -> None:
         )
 
 
+def _ensure_wallet_columns(engine) -> None:
+    with engine.begin() as conn:
+        rows = conn.exec_driver_sql("PRAGMA table_info(paper_wallet)").fetchall()
+        if not rows:
+            return
+        names = {row[1] for row in rows}
+        if "locked" not in names:
+            conn.exec_driver_sql("ALTER TABLE paper_wallet ADD COLUMN locked BOOLEAN DEFAULT 0")
+        if "auto_qty" not in names:
+            conn.exec_driver_sql("ALTER TABLE paper_wallet ADD COLUMN auto_qty BOOLEAN DEFAULT 0")
+        if "auto_qty_pct" not in names:
+            conn.exec_driver_sql("ALTER TABLE paper_wallet ADD COLUMN auto_qty_pct FLOAT DEFAULT 10.0")
+
+
 def init_db() -> BotConfig:
     """Create tables and seed a single BotConfig row from settings."""
     engine = get_engine()
     Base.metadata.create_all(engine)
     _ensure_bot_config_columns(engine)
     _ensure_trade_log_columns(engine)
+    _ensure_wallet_columns(engine)
     SessionLocal = session_factory()
     settings = get_settings()
     with SessionLocal() as db:

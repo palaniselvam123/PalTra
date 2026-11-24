@@ -6,7 +6,8 @@ import Link from "next/link";
 import clsx from "clsx";
 import { ExternalLink, FlaskConical, Loader2, X } from "lucide-react";
 import { api, type LinkServer } from "@/lib/api";
-import { replayActive, smaApi, type SmaConfig } from "@/lib/smaApi";
+import { inr, replayActive, smaApi, type SmaConfig, type WalletSize } from "@/lib/smaApi";
+import { NewTag } from "@/components/ui/NewTag";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { ArmServerSwitch, backtestTerminalUrl, type ArmDesk, type ArmServerChoice } from "@/components/Scalp/ArmPicker";
 
@@ -79,6 +80,26 @@ export function BulkArm({
   const [btDays, setBtDays] = useState(10);
   const [btNote, setBtNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [btBusy, setBtBusy] = useState(false);
+  // The practice wallet's auto quantity for each stock (PAPER bot on this server, wallet's switch on).
+  const [wallet, setWallet] = useState<WalletSize | null>(null);
+  const [useWallet, setUseWallet] = useState(true);
+
+  useEffect(() => {
+    setWallet(null);
+    if (!desk || linkTo || desk.target === "research" || desk.mode === "LIVE") return;
+    let alive = true;
+    smaApi
+      .walletSize(names)
+      .then((w) => alive && w.active && w.auto_qty && setWallet(w))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+    // `names` follows `symbols`, fixed for the life of the dialog.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desk, linkTo]);
+  const walletQty = (s: string) => wallet?.rows.find((r) => r.symbol === s)?.qty ?? 0;
+  const sized = wallet != null && useWallet;
 
   // The bot's own settings fill the boxes (on the scanner, the first stock's settings on that desk bot).
   useEffect(() => {
@@ -123,7 +144,7 @@ export function BulkArm({
   const bad = (() => {
     if (!f || !applyAll) return null;
     const qty = num(f.qty);
-    if (!Number.isInteger(qty) || qty < 1) return "Quantity is a whole number, 1 or more.";
+    if (!sized && (!Number.isInteger(qty) || qty < 1)) return "Quantity is a whole number, 1 or more.";
     const u = f.unit === "PERCENT" ? "0%" : "₹0";
     if (!(num(f.sl) > 0)) return `Stop loss is more than ${u}.`;
     if (!(num(f.trail) > 0)) return `Trail is more than ${u}.`;
@@ -145,7 +166,7 @@ export function BulkArm({
     }
     const body: Partial<SmaConfig> = applyAll
       ? {
-          qty: num(f.qty),
+          ...(sized ? {} : { qty: num(f.qty) }),
           stop_type: "TSL",
           use_stop: true,
           tsl_mode: f.unit,
@@ -165,15 +186,24 @@ export function BulkArm({
         out.push({ symbol: s, ok: false, why: `${owner.name} trades it LIVE — one LIVE bot per stock` });
       } else {
         try {
-          if (Object.keys(body).length) {
-            if (linkTo) await api.deskSaveStock(desk.target, s, body, live, linkTo);
-            else await smaApi.saveStockConfigOn(desk.target, s, body);
+          // Wallet sizing is worked out here per stock (also for ones already armed); none fits = quantity kept.
+          const own = sized && walletQty(s) > 0 ? { ...body, qty: walletQty(s) } : body;
+          if (Object.keys(own).length) {
+            if (linkTo) await api.deskSaveStock(desk.target, s, own, live, linkTo);
+            else await smaApi.saveStockConfigOn(desk.target, s, own);
           }
+          // The dialog decided the quantity (typed, or the wallet's above), so the arm must not size it again.
+          const autoQty = wallet != null || applyAll ? false : undefined;
           if (!desk.armed.includes(s)) {
-            if (linkTo) await api.deskArm({ target: desk.target, symbol: s, source: source ?? null, confirm_live: live }, linkTo);
-            else await smaApi.setTradeSymbolOn(desk.target, s, true, source ?? null);
+            if (linkTo) await api.deskArm({ target: desk.target, symbol: s, source: source ?? null, confirm_live: live, auto_qty: autoQty }, linkTo);
+            else await smaApi.setTradeSymbolOn(desk.target, s, true, source ?? null, autoQty);
           }
-          out.push({ symbol: s, ok: true, why: desk.armed.includes(s) ? "already armed; numbers saved" : undefined });
+          const note = sized ? (walletQty(s) > 0 ? `qty ${walletQty(s)} from the wallet` : "no wallet quantity fits; qty kept") : "";
+          out.push({
+            symbol: s,
+            ok: true,
+            why: desk.armed.includes(s) ? `already armed; numbers saved${note ? ` (${note})` : ""}` : note || undefined,
+          });
         } catch (e: unknown) {
           out.push({ symbol: s, ok: false, why: e instanceof Error ? e.message : "could not arm" });
         }
@@ -327,9 +357,39 @@ export function BulkArm({
                 numbers on each stock.
               </p>
             ) : null}
+            {wallet ? (
+              <div className="mb-2 rounded-md bg-sky-500/10 px-2 py-1.5 text-xs text-sky-200">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={useWallet}
+                    disabled={busy || results != null}
+                    onChange={(e) => setUseWallet(e.target.checked)}
+                    className="accent-sky-500"
+                  />
+                  <span>
+                    <NewTag id="wallet-auto-qty" link={false} /> Quantity from the wallet: {wallet.pct}% of the free balance (
+                    {inr(wallet.free)}) for each stock
+                  </span>
+                </label>
+                {useWallet ? (
+                  <>
+                    <p className="mt-1 break-words text-slate-300">
+                      {wallet.rows
+                        .map((r) => `${r.symbol} ${r.qty > 0 ? r.qty : r.price ? "none fits" : "no price"}`)
+                        .join(" · ")}
+                    </p>
+                    <p className="mt-0.5 text-slate-400">
+                      All of them together block up to {Math.round(wallet.pct * names.length * 10) / 10}% of the free balance
+                      {wallet.pct * names.length > 100 ? " (more than there is: later entries are refused while the wallet is locked, or borrow)" : ""}.
+                    </p>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
             {f ? (
               <div className="divide-y divide-white/5">
-                {field("Quantity", "qty", "Shares per order")}
+                {sized ? null : field("Quantity", "qty", "Shares per order")}
                 <div className="grid grid-cols-[1fr_auto] items-center gap-2 py-1.5">
                   <span>
                     <span className="block text-slate-200">Trailing stop in</span>

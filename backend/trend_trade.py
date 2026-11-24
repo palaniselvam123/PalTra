@@ -14,6 +14,9 @@ the SMAs are on, `trend_side`).
 * **Exit** (`tq_exit`, `tq_exit_score` 40, `tq_exit_phase` on): once per candle closed after the entry, the trade closes
   (`EXIT_REASON`) when the phase is CHOP or the other way, or the score for the trade's side is under the level (the
   SMAs on the other side count as 0). "Not enough candles yet" (`phase_early`) never closes or opens on the phase.
+* **Skip a doji** (`tq_skip_doji`, off; `tq_doji_pct` 10, 1-90): the entry also waits while the newest closed candle
+  the score was read on (`stock_regime.read`'s `last_bar`, real candles) has a body under that % of its high-low range
+  (owner's GLENMARK case: bought at 10:25 on a doji closing ₹1.6 above SMA 9). Asked again on the next candle.
 * **Which stocks** (`tq_all`, off): only the ones the Trend quality auto-arm armed (source chip "Auto-arm: Trend
   quality", and the same picks in an auto-arm backtest), or with it on every armed stock.
 """
@@ -24,6 +27,7 @@ EXIT_REASON = "TREND_FADE"
 SOURCE_WORD = "auto-arm: trend quality"
 DEFAULT_ENTRY_SCORE = 70
 DEFAULT_EXIT_SCORE = 40
+DEFAULT_DOJI_PCT = 10
 # Entries that still go through with "only the trend opens trades": orders a person or another bot asked for.
 PASS_REASONS = (ENTRY_REASON, "FORCE_ORDER", "MANUAL_REVERSE", "NEWS", "HANDOFF", "FAST_MOVE", "BREAKOUT_ARRIVAL",
                 "AUTO_REVIEW_REVERSE", "MOST_ACTIVE")
@@ -59,6 +63,34 @@ def entry_phase(cfg) -> bool:
 
 def exit_phase(cfg) -> bool:
     return getattr(cfg, "tq_exit_phase", True) is not False
+
+
+def skip_doji(cfg) -> bool:
+    return bool(getattr(cfg, "tq_skip_doji", False))
+
+
+def doji_pct(cfg) -> int:
+    try:
+        value = int(round(float(getattr(cfg, "tq_doji_pct", None) or DEFAULT_DOJI_PCT)))
+    except (TypeError, ValueError):
+        value = DEFAULT_DOJI_PCT
+    return max(1, min(90, value))
+
+
+def doji_note(read: dict | None, cfg) -> str | None:
+    """Why the entry waits on a doji (the newest closed candle's body under `tq_doji_pct` % of its range), or None."""
+    if not skip_doji(cfg):
+        return None
+    bar = (read or {}).get("last_bar")
+    if not bar:
+        return None
+    rng = float(bar["high"]) - float(bar["low"])
+    body = abs(float(bar["close"]) - float(bar["open"]))
+    share = 0.0 if rng <= 0 else body / rng * 100
+    need = doji_pct(cfg)
+    if rng > 0 and share >= need:
+        return None
+    return f"last candle a doji (body {share:.0f}% of its range, needs {need}%)"
 
 
 def only_trend(cfg) -> bool:
@@ -131,6 +163,9 @@ def entry_call(read: dict | None, cfg) -> tuple[str | None, str]:
             phase = read.get("phase") or "?"
             return None, text + f", phase {phase} (needs {'UP' if side == 'LONG' else 'DOWN'}) — waiting"
         text += f", phase {'UP' if side == 'LONG' else 'DOWN'} since {read.get('phase_since') or '?'}"
+    doji = doji_note(read, cfg)
+    if doji:
+        return None, text + f", {doji} — waiting"
     return side, text
 
 

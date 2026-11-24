@@ -17,7 +17,7 @@ export const EXIT_KEYS: { key: string; label: string; on: (f: Record<string, unk
   { key: "BEND", label: "SMA 9 bend", on: (f) => Boolean(f.slope_exit) && Number(f.slope_bend_pct ?? 60) > 0 },
   { key: "DECEL", label: "SMA 9 deceleration", on: (f) => Boolean(f.decel_exit) },
   { key: "COUNTER", label: "Counter candles", on: (f) => Number(f.counter_exit_count ?? 0) > 0 },
-  { key: "SMALL", label: "Smaller candles", on: (f) => String(f.small_exit_minutes ?? "").trim() !== "" },
+  { key: "SMALL", label: "Smaller candles", on: (f) => String(f.small_exit_minutes ?? "").trim() !== "" || String(f.small_exit_upper ?? "").trim() !== "" },
   { key: "XCANDLE", label: "Exit candle cross", on: (f) => Number(f.exit_candle_minutes ?? 0) > 0 },
   { key: "ST", label: "Supertrend", on: (f) => Boolean(f.st_exit) },
   { key: "BB", label: "Bollinger", on: (f) => String(f.bb_exit ?? "OFF").toUpperCase() !== "OFF" },

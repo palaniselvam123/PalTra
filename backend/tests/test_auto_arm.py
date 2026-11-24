@@ -453,3 +453,13 @@ def test_resumed_run_keeps_its_candles_and_sma_periods():
     saved = auto_arm.AutoArmRule(candles="HA", min_rvol=2.0, sma_fast=5, sma_slow=13).as_dict()
     rule = scalp_picks.rule_from_dict(saved, 9, 21)
     assert (rule.candles, rule.min_rvol, rule.sma_fast, rule.sma_slow) == ("HA", 2.0, 5, 13)
+
+
+def test_the_why_names_the_candle_and_rules_read():
+    rule = auto_arm.AutoArmRule(minutes=15)
+    read = {"trend_mode": "MORNING", "trend_checks": {"stack": True, "vwap": True, "slope": True, "fan": True,
+                                                      "hold": True, "run": False, "volume": False}}
+    assert auto_arm.strong_why(read, "DOWN", rule) == (
+        "strong down, 5 of 7 checks on 15-min candles (morning rules, before 10:00); missed: run, volume")
+    ha = auto_arm.AutoArmRule(minutes=5, candles="HA")
+    assert auto_arm.strong_why({"trend_checks": {"a": True}}, "UP", ha) == "strong up, 1 of 1 checks on 5-min Heikin Ashi candles"
