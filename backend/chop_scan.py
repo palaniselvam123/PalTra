@@ -56,7 +56,7 @@ from cross_scan import (
     closed_bars,
 )
 from groww_client import IST, market_is_open
-from indicators import _session_vwap, enrich, sma_gap_pct
+from indicators import _session_vwap, derive_minute_volume, enrich, sma_gap_pct
 import heikin_ashi
 import ha_trend
 import trend_phases
@@ -223,6 +223,8 @@ class ChopRow:
     phase_since_ts: int | None = None
     phase_move_pct: float | None = None
     phase_candles: int = 0
+    # Minutes after 09:15 left out of today's trend read (`analyze(skip=)`; 0 = none).
+    trend_skip_min: int = 0
     phases: list = field(default_factory=list)
     strong_phases: int = 0
     # CHOP only because fewer than trend_phases.MIN_RUN candles of today have closed ("not enough candles yet").
@@ -307,10 +309,28 @@ def ha_bars(bars: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT, ha: bool = False, colour: bool = False) -> ChopRow | None:
+MAX_SKIP_CANDLES = 12
+
+
+def skip_minutes(skip_candles, minutes: int) -> int:
+    """The first N candles of the scan's size as minutes after 09:15 (0 = off)."""
+    try:
+        n = int(skip_candles or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(MAX_SKIP_CANDLES, n)) * int(minutes or 1)
+
+
+def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT, ha: bool = False, colour: bool = False, skip: int = 0) -> ChopRow | None:
     """One stock's chop/trend read. None when the tape isn't long enough yet. `ha`: read Heikin Ashi candles.
     `colour`: read the real candles by colour (runs and flips, ha_trend.py) instead of the SMA cross; Heikin Ashi
-    candles are always read by colour."""
+    candles are always read by colour.
+
+    `skip` (minutes after 09:15, 0 = off; owner's request: a stock read "down" at 10:00 only because of the first three
+    big candles, then went sideways): today's candles that began before 09:15 + skip are left out of the trend read.
+    Crosses / colour flips, phases, the strong-trend checks (their candles; morning mode reads today's candles after the
+    skip), the fresh-trend read and the VWAP start after them; the SMAs are still worked out on every candle, so they
+    carry some of the opening move for a while. The day move, last price and activity stay real."""
     if frame_1m is None or getattr(frame_1m, "empty", True):
         return None
     bars = closed_bars(frame_1m, minutes, now)
@@ -329,6 +349,9 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
     by_colour = bool(ha or colour)
     # Heikin Ashi: the trend is read from the candles (colour runs, flips, wicks; ha_trend.py), never the SMA cross.
     hits = ha_trend.flips(enriched, today) if by_colour else _crosses(enriched, today)
+    if skip:
+        cut = today * 86_400 - 19_800 + SESSION_OPEN_SEC + int(skip) * 60
+        hits = [h for h in hits if int(h["ts"]) >= cut]
     ltp = float(frame_1m["close"].iloc[-1]) if len(frame_1m) else None
     minutes_since: float | None = None
     avg_gap: float | None = None
@@ -362,20 +385,28 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         ltp=round(ltp, 2) if ltp is not None else None,
         candle_ts=int(enriched.iloc[-1]["ts"]),
     )
-    vwap = _vwap_today(frame_1m, now)
     today_start = today * 86_400 - 19_800 + SESSION_OPEN_SEC
+    skip_from = today_start + max(0, int(skip or 0)) * 60
+    vwap = _vwap_today(frame_1m, now, skip_from if skip else None)
+    view = _skipped(enriched, today_start, skip_from) if skip else enriched
+    if skip and len(view) < 2:
+        view = enriched  # nothing after the skip yet: read as usual
     if by_colour:
-        trend = ha_trend.checks(enriched, vwap, real_close)
+        trend = ha_trend.checks(view, vwap, real_close)
         if not ha:
             trend = {**trend, "trend_mode": COLOUR_MODE}
-        fresh = ha_trend.fresh(enriched, vwap, now, frame_1m, real_close)
-        phase = ha_trend.summary(ha_trend.phases(enriched, today_start))
+        fresh = ha_trend.fresh(view, vwap, now, frame_1m, real_close)
+        phase = ha_trend.summary(ha_trend.phases(enriched, skip_from))
     else:
-        trend = trend_strength.read(enriched, vwap, now=now, tape=frame_1m)
-        fresh = trend_strength.fresh(enriched, vwap, now, frame_1m, price=real_close)
-        phase = trend_phases.summary(trend_phases.phases(enriched, today_start))
+        trend = trend_strength.read(view, vwap, now=now, tape=frame_1m)
+        fresh = trend_strength.fresh(view, vwap, now, frame_1m, price=real_close)
+        phase = trend_phases.summary(trend_phases.phases(enriched, skip_from))
+    if skip:
+        kept, note = _moved_since_skip(enriched, today_start, skip_from, trend.get("trend"))
+        notes = {**(trend.get("trend_notes") or {}), "skip": note} if note else trend.get("trend_notes")
+        trend = {**trend, "trend": kept, "trend_skip_min": int(skip), **({"trend_notes": notes} if notes else {})}
     by_size = {m: (*_cross_read(hits, enriched, by_colour), trend["trend"]) if m == minutes
-               else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today, vwap, ha, by_colour)
+               else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today, vwap, ha, by_colour, skip_from if skip else None)
                for m in CANDLE_MINUTES}
     return replace(
         base,
@@ -402,7 +433,7 @@ def _side(enriched: pd.DataFrame) -> str | None:
 
 
 def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast: int, sma_slow: int, today: int,
-                vwap: float | None = None, ha: bool = False, colour: bool = False):
+                vwap: float | None = None, ha: bool = False, colour: bool = False, skip_from: int | None = None):
     """(crosses today, side, last cross ts, last cross side, run since ts, run candles, gap %, widest gap %,
     strong trend) on `minutes`-long candles; Nones when too short. `colour`: read by colour (Heikin Ashi always is).
     `today` is the session the main read used (the last closed candle's day)."""
@@ -412,12 +443,56 @@ def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast
     if ha:
         bars = ha_bars(bars)
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
+    view = enriched
+    if skip_from is not None:
+        view = _skipped(enriched, today * 86_400 - 19_800 + SESSION_OPEN_SEC, skip_from)
+        if len(view) < 2:
+            view = enriched
+
+    def after(hits: list[dict]) -> list[dict]:
+        return [h for h in hits if skip_from is None or int(h["ts"]) >= skip_from]
+
     if ha or colour:
         price = float(frame_1m["close"].iloc[-1]) if len(frame_1m) else None
-        strong = ha_trend.checks(enriched, vwap, price)["trend"]
-        return (*_cross_read(ha_trend.flips(enriched, today), enriched, True), strong)
-    strong = trend_strength.read(enriched, vwap, now=now, tape=frame_1m)["trend"]
-    return (*_cross_read(_crosses(enriched, today), enriched), strong)
+        strong = ha_trend.checks(view, vwap, price)["trend"]
+        if skip_from is not None:
+            strong = _moved_since_skip(enriched, today * 86_400 - 19_800 + SESSION_OPEN_SEC, skip_from, strong)[0]
+        return (*_cross_read(after(ha_trend.flips(enriched, today)), enriched, True), strong)
+    strong = trend_strength.read(view, vwap, now=now, tape=frame_1m)["trend"]
+    if skip_from is not None:
+        strong = _moved_since_skip(enriched, today * 86_400 - 19_800 + SESSION_OPEN_SEC, skip_from, strong)[0]
+    return (*_cross_read(after(_crosses(enriched, today)), enriched), strong)
+
+
+SKIP_MOVE_ATR = 1.0  # with the skip on, a strong trend must have moved this many ATRs its way since the skipped candles
+
+
+def _moved_since_skip(enriched: pd.DataFrame, today_start: int, skip_from: int, strong: str | None) -> tuple[str | None, str | None]:
+    """(strong trend kept or None, note). With today's first candles skipped, a strong trend also needs the price to
+    have moved at least SKIP_MOVE_ATR × ATR 14 its way from the close of the last skipped candle (a sideways day after
+    a big opening move is not a trend). Nothing to judge (no skipped candle closed today, no ATR) keeps it."""
+    if not strong or enriched is None or len(enriched) == 0:
+        return strong, None
+    ts = enriched["ts"].astype("int64")
+    before = enriched[(ts >= today_start) & (ts < skip_from)]
+    if before.empty or len(enriched[ts >= skip_from]) == 0:
+        return strong, None
+    base = float(before["close"].iloc[-1])
+    now = float(enriched["close"].iloc[-1])
+    atr = pd.to_numeric(enriched.get("atr_14"), errors="coerce").iloc[-1] if "atr_14" in enriched else float("nan")
+    if not atr == atr or atr <= 0:
+        return strong, None
+    sign = 1.0 if "BULL" in str(strong) else -1.0
+    moved = (now - base) * sign / float(atr)
+    if moved >= SKIP_MOVE_ATR:
+        return strong, f"Moved {moved:.1f} ATR its way since the skipped opening candles"
+    return None, f"Only {moved:+.1f} ATR its way since the skipped opening candles (needs {SKIP_MOVE_ATR:g}): not a trend"
+
+
+def _skipped(enriched: pd.DataFrame, today_start: int, skip_from: int) -> pd.DataFrame:
+    """`enriched` without today's candles that began before `skip_from` (earlier days stay, as the checks' history)."""
+    ts = enriched["ts"].astype("int64")
+    return enriched[(ts < today_start) | (ts >= skip_from)].reset_index(drop=True)
 
 
 def _cross_read(hits: list[dict], enriched: pd.DataFrame, ha: bool = False):
@@ -456,10 +531,21 @@ def _today_1m(frame_1m: pd.DataFrame) -> pd.DataFrame:
     return frame_1m[(frame_1m["ts"].astype("int64") + 19_800) // 86_400 == (last_ts + 19_800) // 86_400]
 
 
-def _vwap_today(frame_1m: pd.DataFrame, now: dt.datetime) -> float | None:
-    """Today's VWAP on the closed 1-minute tape (the bot's own VWAP arithmetic)."""
+def _vwap_today(frame_1m: pd.DataFrame, now: dt.datetime, start_ts: int | None = None) -> float | None:
+    """Today's VWAP on the closed 1-minute tape (the bot's own VWAP arithmetic); from `start_ts` on when given."""
     try:
-        return _session_vwap(closed_bars(frame_1m, 1, now))
+        bars = closed_bars(frame_1m, 1, now)
+        if start_ts is not None and len(bars):
+            if "minute_volume" not in bars.columns:
+                # Per-minute volume from the running total on the whole tape first, so the first kept minute is not
+                # weighted with the whole skipped morning.
+                bars = bars.assign(minute_volume=derive_minute_volume(bars))
+            ts = bars["ts"].astype("int64")
+            last_day = (int(ts.iloc[-1]) + 19_800) // 86_400
+            kept = bars[(ts >= start_ts) | ((ts + 19_800) // 86_400 != last_day)]
+            if len(kept) and (int(kept["ts"].iloc[-1]) + 19_800) // 86_400 == last_day:
+                bars = kept
+        return _session_vwap(bars)
     except Exception:  # noqa: BLE001
         return None
 
@@ -496,6 +582,7 @@ class Status:
     sma_slow: int = 21
     quiet_min: int = QUIET_MIN_DEFAULT
     candles: str = NORMAL  # NORMAL | COLOUR (real candles read by colour) | HA (Heikin Ashi)
+    skip_candles: int = 0  # today's first N candles of the scan's size left out of the trend read
     as_of: str | None = None
     finished_at: str | None = None  # wall-clock time (IST) the last pass ended
     market_open: bool = False
@@ -539,6 +626,7 @@ class ChopScanner:
             "sma_slow": s.sma_slow,
             "quiet_min": s.quiet_min,
             "candles": s.candles,
+            "skip_candles": s.skip_candles,
             "as_of": s.as_of,
             "market_open": s.market_open,
             "rows": s.rows,
@@ -562,7 +650,9 @@ class ChopScanner:
         price_min: float = 0.0,
         price_max: float = 0.0,
         candles: str = NORMAL,
+        skip_candles: int = 0,
     ) -> dict:
+        skip_candles = max(0, min(MAX_SKIP_CANDLES, int(skip_candles or 0)))
         if candles not in CANDLE_KINDS:
             raise ValueError("Candles must be NORMAL, COLOUR (real candles read by colour) or HA (Heikin Ashi)")
         if minutes not in CANDLE_MINUTES:
@@ -571,7 +661,7 @@ class ChopScanner:
         if not names:
             raise ValueError("No stocks to scan")
         now = now or dt.datetime.now(IST)
-        key = (cache_key(now, minutes), minutes, sma_fast, sma_slow, tuple(names), candles)
+        key = (cache_key(now, minutes), minutes, sma_fast, sma_slow, tuple(names), candles, skip_candles)
         if self.status.running:
             return self.snapshot()
         fresh = self._key == key and self.status.as_of is not None
@@ -590,11 +680,13 @@ class ChopScanner:
         self.status.minutes, self.status.sma_fast, self.status.sma_slow = minutes, sma_fast, sma_slow
         self.status.quiet_min = max(1, int(quiet_min or QUIET_MIN_DEFAULT))
         self.status.candles = candles
+        self.status.skip_candles = skip_candles
         self._task = asyncio.get_running_loop().create_task(
             self._run(
                 names, fetch, key, minutes, sma_fast, sma_slow, now,
                 alert_on_quiet=alert_on_quiet, alert_cb=alert_cb, job=job,
                 price_min=price_min, price_max=price_max, ha=candles == HEIKIN_ASHI, colour=candles == COLOUR,
+                skip=skip_minutes(skip_candles, minutes),
             )
         )
         return self.snapshot()
@@ -616,6 +708,7 @@ class ChopScanner:
         price_max: float = 0.0,
         ha: bool = False,
         colour: bool = False,
+        skip: int = 0,
     ) -> None:
         start = (now - dt.timedelta(days=WARMUP_DAYS)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
         end = now.replace(tzinfo=None)
@@ -638,7 +731,7 @@ class ChopScanner:
                         row = await job(symbol, start, end)
                     else:
                         frame = await fetch(symbol, start, end)
-                        row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min, ha=ha, colour=colour)
+                        row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min, ha=ha, colour=colour, skip=skip)
                     ok += 1
                     if row is not None:
                         rows.append(row)

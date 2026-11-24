@@ -48,6 +48,8 @@ class AutoSettings:
     lists: list = field(default_factory=list)
     # The card's candle kind: NORMAL (real candles, SMA cross), COLOUR (real candles read by colour) or HA (Heikin Ashi).
     candles: str = "NORMAL"
+    # Today's first N candles left out of the trend read (chop_scan.analyze `skip`; 0 = off).
+    skip_candles: int = 0
 
 
 SCAN_LISTS = ("armed", "fno", "nifty50", "nifty100", "niftybank")
@@ -83,6 +85,10 @@ def _clean(raw: dict) -> AutoSettings:
     base.minutes = int(base.minutes) if int(base.minutes) in CANDLE_CHOICES else 5
     base.quiet_min = min(375, max(1, int(base.quiet_min)))
     base.candles = str(base.candles).upper() if str(base.candles).upper() in ("NORMAL", "COLOUR", "HA") else "NORMAL"
+    try:
+        base.skip_candles = max(0, min(12, int(base.skip_candles or 0)))
+    except (TypeError, ValueError):
+        base.skip_candles = 0
     base.price_min = max(0.0, float(base.price_min))
     base.price_max = max(0.0, float(base.price_max))
     raw_lists = base.lists if isinstance(base.lists, (list, tuple)) else []

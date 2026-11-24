@@ -467,3 +467,34 @@ def test_a_holiday_scan_reads_the_last_session_not_an_empty_day():
     assert holiday.crosses_by_minutes[5] == same_day.crosses_by_minutes[5]
     # Minutes since the last cross count to the session's last candle, not across the night.
     assert holiday.minutes_since_last_cross is not None and holiday.minutes_since_last_cross < 60
+
+
+def _drop_then_flat() -> pd.DataFrame:
+    """Yesterday quiet at 100; today a 6-point fall in the first 15 minutes, then flat around 94."""
+    import math
+
+    def day(d, closes):
+        start = dt.datetime.combine(d, dt.time(9, 15), tzinfo=IST)
+        rows, prev, run = [], closes[0], 0
+        for i, c in enumerate(closes):
+            run += 1000 * (5 if i < 15 else 1)
+            rows.append({"ts": int((start + dt.timedelta(minutes=i)).timestamp()), "open": prev,
+                         "high": max(prev, c) + 0.05, "low": min(prev, c) - 0.05, "close": c, "volume": run})
+            prev = c
+        return rows
+
+    rows = day(DAY - dt.timedelta(days=1), [100 + 0.05 * math.sin(i / 7) for i in range(375)])
+    rows += day(DAY, [100 - 6 * i / 15 for i in range(15)] + [94 + 0.1 * ((i // 3) % 2) for i in range(120)])
+    return pd.DataFrame(rows)
+
+
+def test_skipping_the_opening_candles_drops_a_trend_made_only_by_them():
+    frame = _drop_then_flat()
+    plain = chop_scan.analyze(frame, 9, 21, 5, _at(9, 55), symbol="GAP")
+    skipped = chop_scan.analyze(frame, 9, 21, 5, _at(9, 55), symbol="GAP", skip=chop_scan.skip_minutes(3, 5))
+    assert plain.trend == "STRONG_BEARISH"  # the opening fall alone reads as a strong down trend
+    assert skipped.trend is None and skipped.trend_skip_min == 15
+    assert "not a trend" in skipped.trend_notes["skip"]
+    assert skipped.vwap is not None and plain.vwap is not None and skipped.vwap < plain.vwap  # VWAP after the skip
+    assert skipped.trend_by_minutes[5] is None
+    assert chop_scan.skip_minutes(99, 5) == chop_scan.MAX_SKIP_CANDLES * 5 and chop_scan.skip_minutes(None, 5) == 0
