@@ -476,10 +476,51 @@ export function gapModeText(s: Settings): string {
 }
 
 const BB_EXIT_TEXT: Record<string, string> = { BAND: "band target", MIDDLE: "middle band", BOTH: "band + middle" };
-type RunFilters = { text: string; bot: string; result: string; status: string; from: string; to: string };
-const NO_FILTERS: RunFilters = { text: "", bot: "ALL", result: "ALL", status: "ALL", from: "", to: "" };
+type RunFilters = {
+  text: string;
+  bot: string;
+  result: string;
+  status: string;
+  from: string;
+  to: string;
+  /** P&L range in ₹ (on the switch's basis, before / after charges), "" = no bound. */
+  pnlMin: string;
+  pnlMax: string;
+  /** Fewest closed trades a run needs, "" = any. */
+  minTrades: string;
+  /** NEW = newest first (the server's order), BEST / WORST = by P&L, PER_TRADE = best P&L per trade. */
+  order: string;
+};
+const NO_FILTERS: RunFilters = {
+  text: "", bot: "ALL", result: "ALL", status: "ALL", from: "", to: "", pnlMin: "", pnlMax: "", minTrades: "", order: "NEW",
+};
 
-/** Does a run pass the Backtests filters? Stock / run # search, bot, result, status and replayed dates. */
+/** A typed ₹ / count box as a number, or null when blank or not a number. */
+function boxNumber(raw: string): number | null {
+  const text = raw.replace(/[,₹\s]/g, "");
+  if (!text || text === "-") return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** The runs in the order the Backtests "Order" menu asks for (a clicked column header still sorts on top). */
+function orderRuns(runs: ReplayRun[], order: string): ReplayRun[] {
+  if (order === "NEW") return runs;
+  const perTrade = (r: ReplayRun) => (r.totals.trades ? r.totals.net / r.totals.trades : null);
+  const key = (r: ReplayRun) => (order === "PER_TRADE" ? perTrade(r) : r.totals.trades ? r.totals.net : null);
+  const sign = order === "WORST" ? 1 : -1;
+  return [...runs].sort((a, b) => {
+    const x = key(a);
+    const y = key(b);
+    if (x == null && y == null) return b.id - a.id;
+    if (x == null) return 1; // runs without trades last either way
+    if (y == null) return -1;
+    return (x - y) * sign || b.id - a.id;
+  });
+}
+
+/** Does a run pass the Backtests filters? Stock / run # search, bot, result, status, replayed dates, P&L range and
+ * fewest trades. */
 function runMatches(run: ReplayRun, f: RunFilters): boolean {
   const text = f.text.trim().toUpperCase();
   if (text) {
@@ -494,6 +535,16 @@ function runMatches(run: ReplayRun, f: RunFilters): boolean {
   if (f.status !== "ALL" && run.status !== f.status) return false;
   if (f.from && run.end_date < f.from) return false;
   if (f.to && run.start_date > f.to) return false;
+  const lo = boxNumber(f.pnlMin);
+  const hi = boxNumber(f.pnlMax);
+  if (lo != null || hi != null) {
+    // A swapped range (min above max) is read the right way round.
+    const [a, b] = lo != null && hi != null && lo > hi ? [hi, lo] : [lo, hi];
+    if (a != null && t.net < a) return false;
+    if (b != null && t.net > b) return false;
+  }
+  const fewest = boxNumber(f.minTrades);
+  if (fewest != null && t.trades < fewest) return false;
   return true;
 }
 
@@ -858,7 +909,10 @@ export function BacktestRuns() {
   }, [openId, basis]);
 
   type RunKey = "id" | "days" | "strategy" | "trades" | "win" | "profit" | "loss" | "net" | "dd";
-  const shownRuns = useMemo(() => (runs ?? []).filter((run) => runMatches(run, filters)), [runs, filters]);
+  const shownRuns = useMemo(
+    () => orderRuns((runs ?? []).filter((run) => runMatches(run, filters)), filters.order),
+    [runs, filters]
+  );
   const filtering = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
   const runCols = useColumnOrder<RunColKey>("backtests.cols.runs", RUN_COLS);
   const { sorted: sortedRuns, sort: runSort, onSort: onRunSort } = useSort<ReplayRun, RunKey>(shownRuns, (r, k) =>
@@ -1270,6 +1324,52 @@ function RunFilterBar({
           <option value="INTERRUPTED">Cut short</option>
           <option value="STOPPED">Stopped</option>
         </select>
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <span className="flex items-center gap-1">
+          Order <NewTag id="bt-runs-pnl-filters" />
+        </span>
+        <select value={filters.order} onChange={(e) => set("order", e.target.value)} className={box}>
+          <option value="NEW">Newest first</option>
+          <option value="BEST">Best P&amp;L first</option>
+          <option value="WORST">Worst P&amp;L first</option>
+          <option value="PER_TRADE">Best P&amp;L per trade</option>
+        </select>
+      </label>
+      <label
+        className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400"
+        title="The run's P&L in ₹, before or after charges as the switch above says. A minus sign for a loss, e.g. -5000."
+      >
+        P&amp;L from ₹
+        <input
+          inputMode="decimal"
+          value={filters.pnlMin}
+          onChange={(e) => set("pnlMin", e.target.value)}
+          placeholder="e.g. -5000"
+          className={clsx(box, "w-24")}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        to ₹
+        <input
+          inputMode="decimal"
+          value={filters.pnlMax}
+          onChange={(e) => set("pnlMax", e.target.value)}
+          placeholder="e.g. 20000"
+          className={clsx(box, "w-24")}
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400" title="Hide runs with fewer closed trades">
+        Trades at least
+        <input
+          type="number"
+          min={0}
+          inputMode="numeric"
+          value={filters.minTrades}
+          onChange={(e) => set("minTrades", e.target.value)}
+          placeholder="any"
+          className={clsx(box, "w-20")}
+        />
       </label>
       <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
         Days from
