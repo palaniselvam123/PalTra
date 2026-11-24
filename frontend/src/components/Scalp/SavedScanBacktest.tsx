@@ -43,6 +43,9 @@ export function SavedScanBacktest() {
   const [side, setSide] = useState<"ANY" | "BUYERS" | "SELLERS">("ANY");
   const [minValue, setMinValue] = useState(0);
   const [minRvol, setMinRvol] = useState(0);
+  // Last price (LTP) range in ₹ the scan read: 0 = no bound (saved_picks.Rule price_min / price_max).
+  const [priceMin, setPriceMin] = useState(0);
+  const [priceMax, setPriceMax] = useState(0);
   const [bot, setBot] = useState(1);
   const [playHandoffs, setPlayHandoffs] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -75,13 +78,19 @@ export function SavedScanBacktest() {
         side,
         min_value_cr: minValue,
         min_rvol: minRvol,
+        price_min: priceMin,
+        price_max: priceMax,
         bot,
         play_handoffs: playHandoffs,
       });
+      const range =
+        priceMin || priceMax
+          ? `, LTP ${priceMin ? `₹${priceMin.toLocaleString("en-IN")}` : "any"} to ${priceMax ? `₹${priceMax.toLocaleString("en-IN")}` : "any"}`
+          : "";
       const by = rankBy.map((c) => COLUMNS.find((x) => x.value === c)?.label ?? c).join(" + ");
       setNote({
         ok: true,
-        text: `Started on Bot ${bot}: ${from} → ${to}, ${got.days_with_picks ?? "?"} day(s) with a usable scan. Each day the top ${topN} by ${by}${qty ? ` at ${qty} shares each` : " at the bot's own quantity"}. The run builds up in the terminal's Backtests tab; its detail and PDF list the scan each day used.`,
+        text: `Started on Bot ${bot}: ${from} → ${to}, ${got.days_with_picks ?? "?"} day(s) with a usable scan. Each day the top ${topN} by ${by}${range}${qty ? ` at ${qty} shares each` : " at the bot's own quantity"}. The run builds up in the terminal's Backtests tab; its detail and PDF list the scan each day used.`,
         lines: got.notes,
       });
     } catch (e: unknown) {
@@ -151,6 +160,16 @@ export function SavedScanBacktest() {
         <label className="flex flex-col gap-1">
           Vol vs usual at least (×)
           <input type="number" min={0} step={0.1} value={minRvol} onChange={(e) => setMinRvol(Math.max(0, Number(e.target.value) || 0))} className={clsx(select, "w-20")} />
+        </label>
+        <label className="flex flex-col gap-1" title="The last price (LTP) in the saved scan. 0 = no lower bound.">
+          <span className="flex items-center gap-1">
+            LTP from (₹) <NewTag id="saved-scan-ltp-range" link={false} />
+          </span>
+          <input type="number" min={0} value={priceMin} onChange={(e) => setPriceMin(Math.max(0, Number(e.target.value) || 0))} className={clsx(select, "w-24")} />
+        </label>
+        <label className="flex flex-col gap-1" title="The last price (LTP) in the saved scan. 0 = no upper bound.">
+          LTP to (₹)
+          <input type="number" min={0} value={priceMax} onChange={(e) => setPriceMax(Math.max(0, Number(e.target.value) || 0))} className={clsx(select, "w-24")} />
         </label>
         <label className="flex flex-col gap-1">
           Trade them on
