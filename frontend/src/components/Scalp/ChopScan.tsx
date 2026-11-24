@@ -33,6 +33,8 @@ const POLL_MS = 3_000;
 // While the server's re-scan is on, the card fetches the newest result this often.
 const AUTO_POLL_MS = 60_000;
 const EVERY_CHOICES = [1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60];
+// "Skip today's first candles" choices (0 = none); the server allows up to 12.
+const SKIP_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 12];
 const QUIET_STORE = "sma.chop.quiet"; // localStorage key for the alert settings
 
 type Props = {
@@ -138,6 +140,9 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   const [minutes, setMinutes] = useState<CrossScanMinutes>(5);
   // Which candles the scan reads: the real ones, or Heikin Ashi (smoother colours; prices shown stay real).
   const [candles, setCandles] = useState<ChopCandles>("NORMAL");
+  // Today's first N candles left out of the trend read (owner's request: big opening candles made a sideways stock
+  // read as a trend). 0 = none.
+  const [skipFirst, setSkipFirst] = useState(0);
   const [score, setScore] = useState<ScoreFilter>("ALL");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -260,6 +265,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             price_min: priceMin,
             price_max: priceMax,
             candles,
+            skip_candles: skipFirst,
           })
         );
       } catch (e: unknown) {
@@ -268,7 +274,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         setBusy(false);
       }
     },
-    [minutes, candles, armed, lists, quietMin, alertOnQuiet, priceMin, priceMax]
+    [minutes, candles, skipFirst, armed, lists, quietMin, alertOnQuiet, priceMin, priceMax]
   );
 
   // The server re-scans by itself (no browser needed). Tell it the card's choices, so its scans match.
@@ -279,6 +285,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         .chopScanAuto({
           minutes,
           candles,
+          skip_candles: skipFirst,
           armed_only: armedOnly,
           lists,
           quiet_min: quietMin,
@@ -292,7 +299,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         });
     }, 800);
     return () => clearTimeout(id);
-  }, [synced, saved, minutes, candles, armedOnly, lists, quietMin, alertOnQuiet, priceMin, priceMax]);
+  }, [synced, saved, minutes, candles, skipFirst, armedOnly, lists, quietMin, alertOnQuiet, priceMin, priceMax]);
 
   const changeAuto = (change: ChopAutoUpdate) => {
     setError(null);
@@ -345,6 +352,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
     setData(saved);
     setMinutes(saved.minutes);
     setCandles(asCandleKind(saved.candles));
+    setSkipFirst(Number(saved.skip_candles ?? 0) || 0);
   }, [saved]);
 
   useEffect(() => {
@@ -359,6 +367,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
           setAuto(d.auto);
           setMinutes(d.auto.minutes);
           setCandles(asCandleKind(d.auto.candles));
+          setSkipFirst(Number(d.auto.skip_candles ?? 0) || 0);
         }
       })
       .catch(() => {
@@ -548,6 +557,21 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
               className="w-44"
             />
           )}
+          {!saved && (
+            <SelectFilter
+              label="Skip today's first candles"
+              value={String(skipFirst)}
+              onChange={(v) => setSkipFirst(Number(v) || 0)}
+              options={SKIP_OPTIONS.map((n) => ({ value: String(n), label: n === 0 ? "None" : `First ${n} (${n * minutes} min)` }))}
+              title="Leave today's first N candles out of the trend read: crosses, phases, the strong-trend checks and VWAP start after them, and a strong trend must also have moved 1 ATR its way since then. For stocks whose big opening candles made a sideways day look like a trend."
+              className="w-48"
+            />
+          )}
+          {!saved ? (
+            <span className="self-end pb-2" title="Skip today's first candles: the big opening candles are left out of the trend read (crosses, phases, the strong-trend checks, VWAP), and a strong trend must also have moved 1 ATR its way since them">
+              <NewTag id="tq-skip-first" />
+            </span>
+          ) : null}
           {!saved ? (
             <span className="self-end pb-2" title="Normal (colours): the real candles read by colour, like Heikin Ashi (colour flips and runs, no SMA cross); the filters below change with the choice">
               <NewTag id={candles === "HA" ? "tq-ha-native" : "tq-colour-mode"} />
@@ -1252,6 +1276,7 @@ function TrendChip({ row: r }: { row: ChopScanRow }) {
       : r.trend_mode === "MORNING" ? "Morning read (before 10:00, today's candles)" : "Midday read (10:00 on)",
     r.trend ? `Strong ${r.trend === "STRONG_BULLISH" ? "bullish" : "bearish"} trend` : `Not a strong trend (${r.trend_side?.toLowerCase() ?? "no"} side)`,
     ...order.map((k) => `${checks[k] ? "✓" : "✗"} ${r.trend_notes?.[k] ?? texts[k] ?? k}`),
+    r.trend_skip_min ? `First ${r.trend_skip_min} min of today left out${r.trend_notes?.skip ? `: ${r.trend_notes.skip}` : ""}` : "",
     r.vwap != null ? `VWAP ${r.vwap.toFixed(2)}` : "VWAP not available",
     r.sma_gap_pct != null ? `${ha ? "Run move" : "SMA gap"} ${r.sma_gap_pct >= 0 ? "+" : ""}${r.sma_gap_pct.toFixed(2)}%` : "",
   ]

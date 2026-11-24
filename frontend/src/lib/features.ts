@@ -701,6 +701,8 @@ export const FEATURES: Feature[] = [
     purpose: "Today's high / low made in the first N minutes after 09:15 no longer counts as the day target, so on a gap day a trade is not closed at the top of the first rush. Yesterday's high / low still counts."},
   { id: "net-any-profit", area: "settings", added: "2026-11-24", pr: 522, href: S("sma-target-net"), where: "Settings → Strategy → 5. Stop-loss and target → Profit safety net on every trade", title: "Profit safety net on every trade (target-only mode removed)",
     purpose: "The safety net now always starts from a profit on any trade (default 0.25% of the entry, or ₹ / ATR) and keeps part of the best profit. The old mode that held the trade past the pivot / day target is gone: those targets close the trade again when reached."},
+  { id: "tq-skip-first", area: "trend", added: "2026-11-24", pr: 524, href: "/scalp/#trend", where: "Scalp → Trend quality → Skip today's first candles", title: "Trend quality can skip the opening candles",
+    purpose: "Big opening candles made a stock that went sideways after them read as a strong trend at 10:00. Pick 'First N' and the crosses, phases, strong-trend checks and VWAP start after those candles; a strong trend must also have moved 1 ATR its way since then. The auto re-scan keeps the choice." },
 ];
 
 /** Today in IST, YYYY-MM-DD. */

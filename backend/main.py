@@ -4222,6 +4222,8 @@ class ChopScanStart(BaseModel):
     # NORMAL = the real candles (SMA cross); COLOUR = the real candles read by colour; HA = Heikin Ashi candles
     # (read by colour too). Prices shown stay real.
     candles: Literal["NORMAL", "COLOUR", "HA"] = "NORMAL"
+    # Today's first N candles of the chosen size left out of the trend read (0 = off; chop_scan.analyze `skip`).
+    skip_candles: int = Field(default=0, ge=0, le=chop_scan.MAX_SKIP_CANDLES)
     force: bool = False
 
 
@@ -4254,6 +4256,7 @@ def _start_chop(
     force: bool,
     source: str = "manual",
     candles: str = chop_scan.NORMAL,
+    skip_candles: int = 0,
 ):
     cfg = engine.load_config()
     return chop_scanner.start(
@@ -4268,12 +4271,14 @@ def _start_chop(
         force=force,
         price_min=price_min,
         price_max=price_max,
-        job=_scan_job(scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), minutes, extra=(quiet_min, chop_scan.candle_kind(candles)), cached=True),
+        job=_scan_job(scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), minutes, extra=(quiet_min, chop_scan.candle_kind(candles), chop_scan.skip_minutes(skip_candles, minutes)), cached=True),
         candles=candles,
+        skip_candles=skip_candles,
         meta={
             "stocks": len(symbols),
             "source": source,
             "candles": candles,
+            "skip_candles": skip_candles,
             "alert_on_quiet": alert_on_quiet,
             "price_min": price_min,
             "price_max": price_max,
@@ -4302,6 +4307,7 @@ async def chop_scan_start(body: ChopScanStart):
             price_max=body.price_max,
             force=body.force,
             candles=body.candles,
+            skip_candles=body.skip_candles,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -4365,6 +4371,7 @@ async def _chop_auto_start(s: chop_auto.AutoSettings) -> None:
         force=True,
         source="auto",
         candles=s.candles,
+        skip_candles=s.skip_candles,
     )
 
 
@@ -4379,6 +4386,7 @@ class ChopAutoUpdate(BaseModel):
     price_max: float | None = Field(default=None, ge=0)
     lists: list[Literal["armed", "fno", "nifty50", "nifty100", "niftybank"]] | None = None
     candles: Literal["NORMAL", "COLOUR", "HA"] | None = None
+    skip_candles: int | None = Field(default=None, ge=0, le=chop_scan.MAX_SKIP_CANDLES)
 
 
 @app.put("/api/chop-scan/auto")

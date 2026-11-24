@@ -669,7 +669,9 @@ export type ChopScanRow = {
   /** MORNING before 10:00 IST (today's candles), MIDDAY from 10:00. */
   trend_mode?: "MORNING" | "MIDDAY" | "HEIKIN_ASHI" | "COLOUR";
   /** The server's one-line reading of each check (names the morning / midday rule used). */
-  trend_notes?: Partial<Record<ChopTrendCheck, string>>;
+  trend_notes?: Partial<Record<ChopTrendCheck | "skip", string>>;
+  /** Minutes after 09:15 left out of the trend read (0 = none). */
+  trend_skip_min?: number;
   /** Morning volume since 09:15 against the usual for the same minutes (x), and the earlier sessions used. */
   rvol?: number | null;
   trend_days?: number;
@@ -788,6 +790,8 @@ export type ChopScan = {
   quiet_min: number;
   /** The candles the scan read: NORMAL (real, SMA cross), COLOUR (real, by colour) or HA (Heikin Ashi); older servers leave it out. */
   candles?: ChopCandles;
+  /** Today's first N candles the scan left out of the trend read (0 = none). */
+  skip_candles?: number;
   as_of: string | null;
   /** When the last pass ended (IST); older servers leave it out. */
   finished_at?: string | null;
@@ -1540,6 +1544,8 @@ export type ScanRunDetail = ScanRun & {
 export type ChopCandles = "NORMAL" | "COLOUR" | "HA";
 export type ChopAuto = {
   candles?: ChopCandles;
+  /** Today's first N candles left out of the trend read (0 = none). */
+  skip_candles?: number;
   on: boolean;
   every_min: number;
   minutes: CrossScanMinutes;
@@ -1558,7 +1564,7 @@ export type ChopAuto = {
 };
 
 export type ChopAutoUpdate = Partial<
-  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max" | "lists" | "candles">
+  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max" | "lists" | "candles" | "skip_candles">
 >;
 
 /** One 1-minute review of an uncertain SMA position. Only EXIT ever closes the trade. */
@@ -3329,7 +3335,7 @@ export const smaApi = {
     symbols: string[],
     minutes: CrossScanMinutes = 5,
     force = false,
-    opts: { quiet_min?: number; alert_on_quiet?: boolean; price_min?: number; price_max?: number; candles?: ChopCandles } = {}
+    opts: { quiet_min?: number; alert_on_quiet?: boolean; price_min?: number; price_max?: number; candles?: ChopCandles; skip_candles?: number } = {}
   ) =>
     request<ChopScan>(
       "/api/chop-scan/start",
@@ -3344,6 +3350,7 @@ export const smaApi = {
           price_min: opts.price_min ?? 0,
           price_max: opts.price_max ?? 0,
           candles: opts.candles ?? "NORMAL",
+          skip_candles: opts.skip_candles ?? 0,
         }),
       },
       20000,

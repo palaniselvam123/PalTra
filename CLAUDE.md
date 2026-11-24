@@ -1434,6 +1434,13 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   and `GET /api/chop-scan` carries `auto` (next_at, last error). On by default only on the scanner
   server; never runs on a desk with `SCANS=off` or while scans are paused. A manual Scan now counts as
   a run.
+  **Skip today's first candles** (`skip_candles` 0-12, `MAX_SKIP_CANDLES`, on `POST /api/chop-scan/start`, `ChopAutoUpdate`
+  and `chop_auto.AutoSettings`; the card's "Skip today's first candles" menu; owner's case: big opening candles made a stock
+  that went sideways after them read as a strong trend at 10:00): `analyze(..., skip=)` (minutes, `skip_minutes`) counts
+  today's crosses, phases, the strong-trend / fresh / candle checks (`_skipped` view) and VWAP (`_vwap_today(..., start_ts)`)
+  only from 09:15 + N candles; a strong trend also needs the price to have moved `SKIP_MOVE_ATR` (1) × ATR its way since the
+  last skipped candle's close (`_moved_since_skip`, note `trend_notes.skip`), on every size (`_crosses_on(..., skip_from)`).
+  Rows carry `trend_skip_min`. The SMAs still run over the opening candles. Display only; nothing in the strategy reads it.
   **Candles: Normal / Heikin Ashi** (`candles` `NORMAL` default | `HA` on `POST /api/chop-scan/start`, `ChopAutoUpdate` and
   `chop_auto.AutoSettings`; the card's "Candles" menu, kept by the auto re-scan; `Status.candles`, saved in the run's
   `meta.candles`): with `HA`, `chop_scan.ha_bars` turns the closed candles of every size into Heikin Ashi ones
