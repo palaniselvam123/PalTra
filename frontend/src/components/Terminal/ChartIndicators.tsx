@@ -204,6 +204,12 @@ export function ChartIndicators({
                           <NewTag id="chart-four-lines" link={false} />
                         </>
                       ) : null}
+                      {key === "adx" || key === "macd" ? (
+                        <>
+                          {" "}
+                          <NewTag id="chart-adx-macd" link={false} />
+                        </>
+                      ) : null}
                     </span>
                     {look.show === "auto" ? (
                       <span className="line-clamp-2 text-slate-500">

@@ -1067,6 +1067,16 @@ def chart_filters(cfg) -> dict:
         "ema_lines": ema_filter.entry_on(cfg) or ema_filter.exit_on(cfg),
         "ema_fast": ema_filter.lengths(cfg)[0],
         "ema_slow": ema_filter.lengths(cfg)[1],
+        # ADX strip: drawn on Auto while the ADX check is on, with its level.
+        "use_adx": bool(getattr(cfg, "use_adx_filter", False)),
+        "adx_threshold": float(getattr(cfg, "adx_threshold", 20) or 20),
+        # MACD strip (macd.py): drawn on Auto while the MACD check or exit is on; the chart works the lines out from
+        # the closes with these lengths, the same ewm arithmetic as macd.series.
+        "use_macd": macd.entry_on(cfg),
+        "macd_exit": macd.exit_on(cfg),
+        "macd_fast": macd.lengths(cfg)[0],
+        "macd_slow": macd.lengths(cfg)[1],
+        "macd_signal": macd.lengths(cfg)[2],
         # Cumulative delta strip (cum_delta.py): drawn while its entry check or divergence exit is on.
         "use_cvd": cum_delta.entry_on(cfg),
         "cvd_div_exit": cum_delta.exit_on(cfg),
@@ -1179,6 +1189,7 @@ def _forming_row(bar) -> dict:
         "sma9": None,
         "sma21": None,
         "atr14": None,
+        "adx14": None,
         "vwap": None,
         "rsi14": None,
         "volume": None,
@@ -1220,6 +1231,8 @@ def candle_rows(
                 "sma9": _finite(row.get("sma_9")),
                 "sma21": _finite(row.get("sma_21")),
                 "atr14": _finite(row.get("atr_14")),
+                # The ADX the bot's ADX check reads (indicators.adx_wilder), for the chart's ADX strip.
+                "adx14": _finite(row.get("adx_14")),
                 "vwap": _finite(vwap.iloc[i]),
                 "rsi14": _finite(rsi.iloc[i]),
                 "volume": _finite(minute_vol.iloc[i]),

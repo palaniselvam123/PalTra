@@ -1823,6 +1823,8 @@ export type Candle = {
   vwap?: number | null;
   /** RSI 14 on 1-minute closes (what the RSI filter reads). */
   rsi14?: number | null;
+  /** ADX 14 the bot's ADX check reads (indicators.adx_wilder). */
+  adx14?: number | null;
   /** EMA cross lines (fast, slow), when the EMA check or exit is on. */
   emaFast?: number | null;
   emaSlow?: number | null;
@@ -1866,6 +1868,15 @@ export type ChartFilters = {
   ema_lines?: boolean;
   ema_fast?: number;
   ema_slow?: number;
+  /** ADX strip: the ADX check on and its level. */
+  use_adx?: boolean;
+  adx_threshold?: number;
+  /** MACD strip (macd.py): its check / exit on and the lengths the chart works the lines out with. */
+  use_macd?: boolean;
+  macd_exit?: boolean;
+  macd_fast?: number;
+  macd_slow?: number;
+  macd_signal?: number;
   /** Draw the Supertrend line (its check or exit on) and its settings. */
   st_line?: boolean;
   st_period?: number;

@@ -69,6 +69,19 @@ def test_candles_carry_vwap_and_rsi():
     assert rows[0]["rsi14"] is None  # not ready yet
 
 
+def test_candles_carry_the_adx_the_check_reads_and_filters_name_adx_and_macd():
+    frame = _frame()
+    rows = candle_rows(frame)
+    assert rows[150]["adx14"] == pytest.approx(float(frame["adx_14"].iloc[150]))
+    assert rows[0]["adx14"] is None  # not ready yet
+    off = chart_filters(_cfg())
+    assert off["use_adx"] is False and off["use_macd"] is False and off["macd_exit"] is False
+    assert (off["macd_fast"], off["macd_slow"], off["macd_signal"]) == (12, 26, 9)
+    on = chart_filters(_cfg(use_adx_filter=True, adx_threshold=25, use_macd=True, macd_fast=8, macd_slow=21, macd_signal=5))
+    assert on["use_adx"] is True and on["adx_threshold"] == 25
+    assert on["use_macd"] is True and (on["macd_fast"], on["macd_slow"], on["macd_signal"]) == (8, 21, 5)
+
+
 def test_candles_carry_the_shares_traded_in_each_minute():
     frame = _frame()
     rows = candle_rows(frame)
@@ -153,7 +166,7 @@ def _chart_engine(frame, cfg):
 def _uncached(frame, cfg, limit):
     """What chart_payload sent before the cache: every row and cross recomputed."""
     rows = candle_rows(frame)[-limit:]
-    for key in ("sma9", "sma21", "atr14", "vwap", "rsi14", "volume"):
+    for key in ("sma9", "sma21", "atr14", "adx14", "vwap", "rsi14", "volume"):
         rows[-1][key] = None
     # The chart starts where the slow SMA is formed (the frame's warm-up is not drawn).
     rows = _from_formed_sma(rows)

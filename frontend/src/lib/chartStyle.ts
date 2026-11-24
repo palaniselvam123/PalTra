@@ -33,7 +33,7 @@ export type LineLook = {
   style: Pattern;
 };
 
-export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "cvd" | "pressure" | "pressureSell" | "flow" | "flowSell" | "pivots";
+export type LineKey = "sma9" | "sma21" | "vwap" | "ema" | "bb" | "st" | "atr" | "rsi" | "adx" | "macd" | "cvd" | "pressure" | "pressureSell" | "flow" | "flowSell" | "pivots";
 
 export type ChartStyle = Record<LineKey, LineLook> & {
   candleUp: string;
@@ -60,6 +60,8 @@ export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: 
   st: { name: "Supertrend", auto: "while the Supertrend check or exit is on", color2: "down" },
   atr: { name: "ATR 14 (strip)", auto: "while the stop type is ATR" },
   rsi: { name: "RSI 14 (strip)", auto: "while the RSI check is ticked" },
+  adx: { name: "ADX 14 (strip)", auto: "while the ADX check is ticked" },
+  macd: { name: "MACD with histogram (strip)", auto: "while the MACD check or exit is on", color2: "signal" },
   cvd: { name: "Cumulative delta (strip)", auto: "while the cumulative delta check or divergence exit is on" },
   pressure: { name: "Buyers waiting % (strip)", auto: "while a Most active scan has read the stock" },
   pressureSell: { name: "Sellers waiting % (strip)", auto: "while a Most active scan has read the stock" },
@@ -83,6 +85,8 @@ export const DEFAULT_CHART_STYLE: ChartStyle = {
   st: { show: "auto", color: "#16A34A", color2: "#DC2626", width: 2, style: 0 },
   atr: { show: "auto", color: "#A78BFA", width: 2, style: 0 },
   rsi: { show: "auto", color: "#F472B6", width: 2, style: 0 },
+  adx: { show: "auto", color: "#FBBF24", width: 2, style: 0 },
+  macd: { show: "auto", color: "#38BDF8", color2: "#F97316", width: 2, style: 0 },
   cvd: { show: "auto", color: "#2DD4BF", width: 2, style: 0 },
   pressure: { show: "auto", color: "#10B981", width: 2, style: 0 },
   pressureSell: { show: "auto", color: "#F43F5E", width: 2, style: 0 },
@@ -272,6 +276,62 @@ export function smoothFlows(reads: (FlowRead | null)[], n: number): (FlowRead | 
 }
 
 /** EMA of the closes (`ewm(adjust=False)`, as the bot); null until `n` candles. */
+/**
+ * Wilder ADX, the same arithmetic as the bot's ADX check (indicators.adx_wilder: pandas ewm(alpha = 1/n,
+ * adjust=False) with min_periods n on the true range and the directional moves, then on DX). Null until ready. Used
+ * where the server sent no `adx14` (candles merged in the browser, an older server).
+ */
+export function adxValues(rows: { high: number; low: number; close: number }[], n = 14): (number | null)[] {
+  const a = 1 / n;
+  let atr: number | null = null;
+  let plus: number | null = null;
+  let minus: number | null = null;
+  let adx: number | null = null;
+  let dxSeen = 0;
+  return rows.map((c, i) => {
+    const prev = i > 0 ? rows[i - 1] : null;
+    const tr = prev ? Math.max(c.high - c.low, Math.abs(c.high - prev.close), Math.abs(c.low - prev.close)) : c.high - c.low;
+    const up = prev ? c.high - prev.high : NaN;
+    const down = prev ? prev.low - c.low : NaN;
+    const pdm = up > down && up > 0 ? up : 0;
+    const mdm = down > up && down > 0 ? down : 0;
+    atr = atr == null ? tr : atr + a * (tr - atr);
+    plus = plus == null ? pdm : plus + a * (pdm - plus);
+    minus = minus == null ? mdm : minus + a * (mdm - minus);
+    if (i + 1 < n || !atr) return null;
+    const pdi = (100 * plus) / atr;
+    const mdi = (100 * minus) / atr;
+    if (pdi + mdi === 0) return null;
+    const dx = (100 * Math.abs(pdi - mdi)) / (pdi + mdi);
+    adx = adx == null ? dx : adx + a * (dx - adx);
+    dxSeen += 1;
+    return dxSeen >= n ? adx : null;
+  });
+}
+
+/**
+ * MACD line, signal line and histogram, the same arithmetic as the bot's MACD check (macd.series: EMA(close, fast) −
+ * EMA(close, slow), signal = EMA of that, pandas ewm(span, adjust=False)). Null until `max(fast, slow) + signal`
+ * candles, when the bot starts trusting it.
+ */
+export function macdValues(closes: number[], fast = 12, slow = 26, signal = 9): ({ line: number; signal: number; hist: number } | null)[] {
+  const ema = (n: number) => {
+    const k = 2 / (n + 1);
+    let e: number | null = null;
+    return closes.map((c) => (e = e == null ? c : e + k * (c - e)));
+  };
+  const f = ema(fast);
+  const s = ema(slow);
+  const k = 2 / (signal + 1);
+  let sig: number | null = null;
+  const need = Math.max(fast, slow) + signal;
+  return closes.map((_, i) => {
+    const line = f[i] - s[i];
+    sig = sig == null ? line : sig + k * (line - sig);
+    return i + 1 >= need ? { line, signal: sig, hist: line - sig } : null;
+  });
+}
+
 export function emaValues(closes: number[], n: number): (number | null)[] {
   const k = 2 / (n + 1);
   let e: number | null = null;

@@ -619,7 +619,12 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   The chart's **Indicators** panel (`components/Terminal/ChartIndicators.tsx`, `lib/chartStyle.ts`, kept in the
   browser) shows or hides SMA fast / slow, VWAP, EMA, Bollinger, Supertrend, ATR and RSI (`Auto` = while the strategy
   uses it, the old behaviour) and sets each line's colour, thickness and pattern and the candle colours; an EMA the
-  strategy does not use is worked out in the browser (`emaValues`). Display only.
+  strategy does not use is worked out in the browser (`emaValues`). Display only. **ADX and MACD strips** (`chartStyle` keys
+  `adx` / `macd`, Auto = while the ADX check / the MACD check or exit is on): ADX 14 from the rows' `adx14` (`candle_rows`,
+  the bot's own `adx_14`; else `chartStyle.adxValues`, the same Wilder arithmetic) with the ADX check's level dashed, and
+  MACD line / signal / histogram from the closes (`chartStyle.macdValues`, `macd.series`' arithmetic, lengths from
+  `chart_filters` `macd_fast` / `macd_slow` / `macd_signal`; bars green above zero / red below, faint while shrinking; none
+  on the forming candle); the reading line gives the candle's ADX (against the level) and MACD / signal / histogram.
   **Movable columns**: the blotter (every book, Replay included; `TradeHistoryTable` `OrderTable`, key `blotter.cols`)
   and the Backtests tables (runs `backtests.cols.runs`, day-wise `backtests.cols.days`, per-stock `backtests.cols.stocks`)
   use `components/ui/columnOrder.tsx` (`useColumnOrder`, `inOrder`, `ColumnHint`) like the Scalp tables: drag a header
