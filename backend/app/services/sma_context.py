@@ -325,6 +325,7 @@ FIELD_HELP = {
     "day_target": "close a profit at today's high / low made before the entry or yesterday's, whichever comes first",
     "day_target_min_pct": "day target: the level must be at least this % beyond the entry",
     "day_target_early_pct": "day target: close this % before the level",
+    "day_target_skip_min": "day target: ignore today's high / low from the first N minutes after 09:15 (0 = off)",
     "target_net": "pivot / day target touched: keep running with a safety net instead of closing",
     "target_net_keep": "safety net: keep this % of the best profit after the target", "target_net_keep2": "safety net: keep this % after the second step",
     "target_net_at2": "safety net second step: best profit at least this many times the target distance (0 = none)",

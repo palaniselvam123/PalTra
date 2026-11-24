@@ -444,7 +444,7 @@ SNAPSHOT_FIELDS = (
     "decel_confirm", "decel_pierce_atr", "decel_peak_from",
     "turn_alert", "turn_entry", "uturn_on", "uturn_run", "uturn_min_pct", "turn_toward_cross", "turn_exit_candle", "turn_colour_exit",
     "turn_gap_on", "turn_gap_long_min", "turn_gap_long_max", "turn_gap_short_min", "turn_gap_short_max",
-    "day_target", "day_target_min_pct", "day_target_early_pct",
+    "day_target", "day_target_min_pct", "day_target_early_pct", "day_target_skip_min",
     "target_net", "target_net_keep", "target_net_keep2", "target_net_at2",
     "target_net_start", "target_net_start_pct", "target_net_start_rs", "target_net_start_atr",
     "live_sma_check", "live_sma_min_gap",
@@ -6148,7 +6148,7 @@ class StrategyEngine:
             tape = self._tapes.get(symbol)
             if tape is None or getattr(tape, "empty", True):
                 tape = self._frames.get(symbol)
-            lv = day_target.levels(tape, opened.timestamp())
+            lv = day_target.levels(tape, opened.timestamp(), day_target.skip_min(cfg))
             if lv is None:
                 return  # candles not loaded yet: try again on the next price
             if len(self._day_goal) > 500:

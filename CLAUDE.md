@@ -304,7 +304,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (in profit); early % closes that much before it. Worked out once per trade (`StrategyEngine._day_goal`, from the candles,
   so a restart finds the same level), checked on every price by `_watch_day_target` (after the pivot target), closed via
   `_exit_now` (`DAY_LEVEL_TARGET`; LIVE stop cancelled first; a LIVE position restored without its stop id is left to that
-  stop). Counts as an exit for `strategyChecks.noExitOn`. The Strategy lab does not know it.
+  stop). Counts as an exit for `strategyChecks.noExitOn`. The Strategy lab does not know it. **Ignore early highs**
+  (`day_target_skip_min`, 0 = off, 0-180; owner's DATAPATTNS case: a 09:30 buy closed 30 s later at the 09:28 top of the
+  opening run): today's high / low counts only from candles that began N minutes or more after 09:15 (`levels(..., skip)`);
+  yesterday's is unchanged.
 - `backend/target_net.py` – **Safety net after the pivot / day target** (`target_net`, off by default; `target_net_keep` 70,
   `target_net_keep2` 75, % 1-99; `target_net_at2` 2.0 × the target's distance, 0 = no second step; per bot and per stock, PAPER
   and LIVE, replays too; Settings → 5. Stop-loss and target, anchor `#sma-target-net`; owner's request: like the Bots page's

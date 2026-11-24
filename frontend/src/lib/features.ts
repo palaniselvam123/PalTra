@@ -697,6 +697,8 @@ export const FEATURES: Feature[] = [
     purpose: "The safety net no longer needs a pivot or day high / low target: it can start on any trade once it is a set profit (in % of the entry, in ₹ for the trade, or in ATRs), then lets the trade run and keeps 70% of its best profit."},
   { id: "small-trouble", area: "settings", added: "2026-11-23", pr: 518, href: S("sma-small-candles"), where: "Settings → Strategy → 3. When to exit → Watch smaller candles while in a trade", title: "Smaller candles only when in trouble, and bigger candles too",
     purpose: "The smaller-candle exit can look only while the trade is in a loss or has given back part of its best profit, so a trade running your way is not cut by a small wiggle. It can also read bigger candles (5 to 60 minutes) and, if you want, close only when a bigger candle agrees."},
+  { id: "day-target-skip", area: "settings", added: "2026-11-24", pr: 520, href: S("sma-day-target"), where: "Settings → Strategy → 5. Stop-loss and target → Day high / low target", title: "Day target: ignore the opening run's high / low",
+    purpose: "Today's high / low made in the first N minutes after 09:15 no longer counts as the day target, so on a gap day a trade is not closed at the top of the first rush. Yesterday's high / low still counts."},
 ];
 
 /** Today in IST, YYYY-MM-DD. */
