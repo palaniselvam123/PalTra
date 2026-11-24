@@ -1,4 +1,4 @@
-"""Safety net after the pivot / day target (target_net.py). PAPER only: exits are recorded, nothing is ordered."""
+"""Profit safety net on every trade (target_net.py). PAPER only: exits are recorded, nothing is ordered."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -29,25 +29,20 @@ CFG = SimpleNamespace(day_target=True, target_net=True, symbol="SHREECEM")
 
 
 @pytest.mark.asyncio
-async def test_the_day_target_runs_on_with_a_net_instead_of_closing():
+async def test_the_day_target_closes_even_with_the_net_on():
+    """The old "hold past the target" mode is gone: the day target closes as usual."""
     eng, calls = _engine("LONG", 100.0)  # today's high 103 before the entry
-    pos = eng.positions["SHREECEM"]
-    pos.stop_active = False
-    for price in (103.2, 104.0, 105.0):
-        eng.ltp = price
-        pos.high = max(pos.high or price, price)
-        await eng._watch_day_target(CFG)
-    assert calls == []  # touched and passed the target: still open
-    assert "safety net at 103.50" in eng._signals["SHREECEM"]  # 100 + 70% of 5
-    eng.ltp = 103.4
+    eng.positions["SHREECEM"].stop_active = False
+    eng.ltp = 103.1
     await eng._watch_day_target(CFG)
-    assert calls == [(103.4, target_net.EXIT_REASON)]
+    assert calls and calls[0][1] == "DAY_LEVEL_TARGET"
 
 
 @pytest.mark.asyncio
-async def test_the_stop_moves_up_to_the_net(monkeypatch):
+async def test_the_stop_moves_up_to_the_net():
     eng, calls = _engine("LONG", 100.0)
     pos = eng.positions["SHREECEM"]
+    pos.qty = 1
     moved = []
 
     async def move(p, symbol, level, label):
@@ -56,10 +51,11 @@ async def test_the_stop_moves_up_to_the_net(monkeypatch):
         return True
 
     eng._move_stop = move
-    eng.ltp = 104.0
-    pos.high = 104.0
-    await eng._watch_day_target(CFG)
-    assert calls == [] and moved == [pytest.approx(102.8)]
+    eng.ltp = 101.0
+    pos.high = 101.0
+    cfg = SimpleNamespace(target_net=True, target_net_start="PCT", target_net_start_pct=0.5, symbol="SHREECEM")
+    await eng._watch_profit_net(cfg)  # start 100.5; 1 >= 2 x 0.5: 75% of 1
+    assert calls == [] and moved == [pytest.approx(100.75)]
 
 
 @pytest.mark.asyncio
@@ -100,8 +96,9 @@ def test_start_level_on_any_trade():
     atr = SimpleNamespace(target_net=True, target_net_start="ATR", target_net_start_atr=1.5)
     assert target_net.start_level("LONG", 100.0, 10, 2.0, atr)[1] == pytest.approx(103.0)
     assert target_net.start_level("LONG", 100.0, 10, None, atr) is None  # no ATR formed
-    assert target_net.start_level("LONG", 100.0, 10, 2.0, ON) is None  # TARGET: pivot / day only
-    assert target_net.start(SimpleNamespace(target_net_start="junk")) == "TARGET"
+    assert target_net.start_level("LONG", 100.0, 10, 2.0, ON)[1] == pytest.approx(100.25)  # default: 0.25% of the entry
+    assert target_net.start(SimpleNamespace(target_net_start="TARGET")) == "PCT"  # the old mode reads as PCT
+    assert target_net.start(SimpleNamespace(target_net_start="junk")) == "PCT"
 
 
 @pytest.mark.asyncio
