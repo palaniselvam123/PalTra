@@ -23,7 +23,7 @@ import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
-import { type FlowPoint, type FlowRead, cvdValues, emaValues, flowReads, heikinAshi, pressureReads, pressureValues, shown, smoothFlows, useChartStyle } from "@/lib/chartStyle";
+import { type FlowPoint, type FlowRead, adxValues, cvdValues, emaValues, macdValues, flowReads, heikinAshi, pressureReads, pressureValues, shown, smoothFlows, useChartStyle } from "@/lib/chartStyle";
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { NewTag } from "@/components/ui/NewTag";
@@ -1185,6 +1185,10 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const rsiRef = useRef<ISeriesApi<"Line"> | null>(null);
   // Cumulative delta strip (cum_delta.py), worked out in the browser from the candles' volume.
   const cvdRef = useRef<ISeriesApi<"Line"> | null>(null);
+  // ADX 14 and MACD (line, signal, histogram), each on its own strip under the candles.
+  const adxRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const adxLevel = useRef<IPriceLine | null>(null);
+  const macdRefs = useRef<{ line: ISeriesApi<"Line">; signal: ISeriesApi<"Line">; hist: ISeriesApi<"Histogram"> } | null>(null);
   const bbRefs = useRef<ISeriesApi<"Line">[]>([]);
   // EMA cross lines (ema_filter.py): fast, slow. Drawn only while the EMA check or exit is on.
   const emaRefs = useRef<ISeriesApi<"Line">[]>([]);
@@ -1804,6 +1808,46 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     });
     instance.priceScale("cvd").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
     cvdRef.current = cvd;
+    const adx = instance.addLineSeries({
+      color: "#FBBF24",
+      lineWidth: 2,
+      priceScaleId: "adx",
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: tag("ADX 14"),
+      visible: false,
+      autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 60 } }),
+    });
+    instance.priceScale("adx").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
+    adxRef.current = adx;
+    // MACD: histogram bars (green above zero, red below) with the MACD and signal lines on top.
+    const macdHist = instance.addHistogramSeries({
+      priceScaleId: "macd",
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: tag("MACD hist"),
+      visible: false,
+    });
+    const macdLine = instance.addLineSeries({
+      color: "#38BDF8",
+      lineWidth: 2,
+      priceScaleId: "macd",
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: tag("MACD"),
+      visible: false,
+    });
+    const macdSignal = instance.addLineSeries({
+      color: "#F97316",
+      lineWidth: 1,
+      priceScaleId: "macd",
+      priceLineVisible: false,
+      lastValueVisible: false,
+      title: tag("Signal"),
+      visible: false,
+    });
+    instance.priceScale("macd").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
+    macdRefs.current = { line: macdLine, signal: macdSignal, hist: macdHist };
     // Buyers' share of the waiting orders (Most active scans), 0–100 on its own strip; sellers % = 100 − it.
     const pressure = instance.addLineSeries({
       color: "#FB923C",
@@ -1988,6 +2032,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     paint(atrRef.current, look.atr);
     paint(rsiRef.current, look.rsi);
     paint(cvdRef.current, look.cvd);
+    paint(adxRef.current, look.adx);
+    paint(macdRefs.current?.line, look.macd);
+    paint(macdRefs.current?.signal, look.macd, look.macd.color2);
     paint(pressureRef.current, look.pressure);
     paint(flowRef.current, look.flow);
     paint(pressureSellRef.current, look.pressureSell);
@@ -2032,6 +2079,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     const showVwap = shown(look.vwap, Boolean(filters?.use_vwap));
     const showRsi = shown(look.rsi, Boolean(filters?.use_rsi));
     const showCvd = shown(look.cvd, Boolean(filters?.use_cvd || filters?.cvd_div_exit));
+    const showAdx = shown(look.adx, Boolean(filters?.use_adx));
+    const showMacd = shown(look.macd, Boolean(filters?.use_macd || filters?.macd_exit));
     smaFastRef.current.applyOptions({ visible: look.sma9.show !== "off" });
     smaSlowRef.current.applyOptions({ visible: look.sma21.show !== "off" });
     const showSlopeBars = showSlope || Boolean(filters?.slope_exit);
@@ -2062,7 +2111,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     // Over the candles (Indicators → "Draw the buyers / sellers lines over the candles"): the 0-100 scale spans the
     // candle area like the SMA lines, and the strips below no longer make room for it.
     const pressureOver = look.pressureOver;
-    const strips = ([["atr", showAtr], ["rsi", showRsi], ["cvd", showCvd], ["pressure", showPressure && !pressureOver]] as const)
+    const strips = ([["atr", showAtr], ["rsi", showRsi], ["adx", showAdx], ["macd", showMacd], ["cvd", showCvd], ["pressure", showPressure && !pressureOver]] as const)
       .filter(([, on]) => on)
       .map(([id]) => id);
     const sliceOf = (id: string) => {
@@ -2075,6 +2124,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     apiRef.current?.priceScale("atr").applyOptions({ scaleMargins: sliceOf("atr") });
     apiRef.current?.priceScale("rsi").applyOptions({ scaleMargins: sliceOf("rsi") });
     apiRef.current?.priceScale("cvd").applyOptions({ scaleMargins: sliceOf("cvd") });
+    apiRef.current?.priceScale("adx").applyOptions({ scaleMargins: sliceOf("adx") });
+    apiRef.current?.priceScale("macd").applyOptions({ scaleMargins: sliceOf("macd") });
     apiRef.current?.priceScale("pressure").applyOptions({
       scaleMargins: pressureOver ? { top: CANDLE_MARGINS.top, bottom: CANDLE_MARGINS.bottom } : sliceOf("pressure"),
     });
@@ -2154,6 +2205,49 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       }
       marks.sort((a, b) => (a.time as number) - (b.time as number));
       host.setMarkers(marks);
+    }
+    if (adxRef.current) {
+      const series = adxRef.current;
+      series.applyOptions({ visible: showAdx });
+      // The bot's own ADX when the server sent it for every candle; else worked out here (merged candles).
+      const fromServer = rows.length > 0 && rows.every((c) => c.adx14 !== undefined);
+      const values = !showAdx ? [] : fromServer ? rows.map((c) => c.adx14 ?? null) : adxValues(rows);
+      series.setData(rows.flatMap((c, i) => (values[i] == null ? [] : [{ time: c.time as never, value: values[i] as number }])));
+      if (adxLevel.current) series.removePriceLine(adxLevel.current);
+      adxLevel.current =
+        showAdx && filters?.use_adx
+          ? series.createPriceLine({
+              price: filters.adx_threshold ?? 20,
+              color: "rgba(251, 191, 36, 0.6)",
+              lineWidth: 1,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: false,
+              title: "",
+            })
+          : null;
+    }
+    if (macdRefs.current) {
+      const { line, signal, hist } = macdRefs.current;
+      for (const series of [line, signal, hist]) series.applyOptions({ visible: showMacd });
+      const reads = showMacd
+        ? macdValues(rows.map((c) => c.close), filters?.macd_fast ?? 12, filters?.macd_slow ?? 26, filters?.macd_signal ?? 9)
+        : [];
+      // The forming candle (the last one, its SMA left blank) would repaint, so the strip stops on the last closed one.
+      const forming = rows.length > 0 && rows[rows.length - 1].sma9 == null ? rows.length - 1 : -1;
+      const at = (i: number) => (i === forming ? null : reads[i] ?? null);
+      line.setData(rows.flatMap((c, i) => (at(i) ? [{ time: c.time as never, value: at(i)!.line }] : [])));
+      signal.setData(rows.flatMap((c, i) => (at(i) ? [{ time: c.time as never, value: at(i)!.signal }] : [])));
+      hist.setData(
+        rows.flatMap((c, i) => {
+          const r = at(i);
+          if (!r) return [];
+          const prev = i > 0 ? at(i - 1) : null;
+          // Bright while the bars grow, faint while they shrink (momentum fading), green above zero, red below.
+          const growing = !prev || Math.abs(r.hist) >= Math.abs(prev.hist);
+          const color = r.hist >= 0 ? (growing ? "rgba(16, 185, 129, 0.85)" : "rgba(16, 185, 129, 0.4)") : growing ? "rgba(244, 63, 94, 0.85)" : "rgba(244, 63, 94, 0.4)";
+          return [{ time: c.time as never, value: r.hist, color }];
+        })
+      );
     }
     if (cvdRef.current) {
       cvdRef.current.applyOptions({ visible: showCvd });
@@ -2427,6 +2521,18 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   };
   const shownVwap = hoverRow ? hoverRow.vwap ?? null : lastOf("vwap");
   const shownRsi = hoverRow ? hoverRow.rsi14 ?? null : lastOf("rsi14");
+  // ADX / MACD on the reading line while their strip is on (the candle under the mouse, else the last one).
+  const readAt = hoverRow ? rows.indexOf(hoverRow) : rows.length - 1;
+  const adxOn = shown(look.adx, Boolean(filters?.use_adx));
+  const macdOn = shown(look.macd, Boolean(filters?.use_macd || filters?.macd_exit));
+  const shownAdx = !adxOn || readAt < 0
+    ? undefined
+    : rows[readAt]?.adx14 !== undefined
+      ? rows[readAt].adx14 ?? null
+      : adxValues(rows.slice(0, readAt + 1))[readAt] ?? null;
+  const shownMacd = !macdOn || readAt < 0
+    ? undefined
+    : macdValues(rows.slice(0, readAt + 1).map((c) => c.close), filters?.macd_fast ?? 12, filters?.macd_slow ?? 26, filters?.macd_signal ?? 9)[readAt] ?? null;
   // The candle's own ATR 14 (the forming candle has none yet: the last closed one's), as the breakout rule reads it.
   const shownAtr = hoverRow?.atr14 ?? lastOf("atr14");
   const slopeBack = filters?.slope_lookback ?? 2;
@@ -2787,6 +2893,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         gap={smaGap}
         vwap={shownVwap}
         rsi={shownRsi}
+        adx={shownAdx}
+        adxLevel={filters?.use_adx ? filters.adx_threshold ?? 20 : null}
+        macd={shownMacd}
         atr={shownAtr}
         breakoutMult={filters?.breakout_handoff ? filters.breakout_atr_mult ?? 1.8 : null}
         colourRead={colourRead}
@@ -2808,6 +2917,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           sma21: look.sma21.color,
           vwap: look.vwap.color,
           rsi: look.rsi.color,
+          adx: look.adx.color,
+          macd: look.macd.color,
           buyers: look.pressure.color,
           sellers: look.pressureSell.color,
           flowBuy: look.flow.color,
@@ -3296,6 +3407,9 @@ function OhlcLine({
   gap,
   vwap,
   rsi,
+  adx,
+  adxLevel,
+  macd,
   atr,
   breakoutMult,
   colourRead,
@@ -3321,6 +3435,11 @@ function OhlcLine({
   gap: number | null;
   vwap: number | null;
   rsi: number | null;
+  /** ADX 14 / MACD of this candle while their strip is on (undefined = strip off: not shown). */
+  adx?: number | null;
+  /** The ADX check's level while it is on. */
+  adxLevel?: number | null;
+  macd?: { line: number; signal: number; hist: number } | null;
   /** ATR 14 of this candle (else the last closed one). */
   atr: number | null;
   /** The breakout hand-off's height rule in ATRs while it is on (null = off). */
@@ -3349,7 +3468,7 @@ function OhlcLine({
   /** Which of the four strip lines are on (waiting buyers / sellers, executed buyers / sellers). */
   waitOn?: { buy: boolean; sell: boolean };
   flowOn?: { buy: boolean; sell: boolean };
-  colors: { sma9: string; sma21: string; vwap: string; rsi: string; buyers: string; sellers: string; flowBuy: string; flowSell: string };
+  colors: { sma9: string; sma21: string; vwap: string; rsi: string; adx?: string; macd?: string; buyers: string; sellers: string; flowBuy: string; flowSell: string };
 }) {
   if (!ohlc) return null;
   const change = ohlc.prevClose != null ? ohlc.close - ohlc.prevClose : ohlc.close - ohlc.open;
@@ -3398,6 +3517,32 @@ function OhlcLine({
         <LineKey color={colors.rsi}>RSI</LineKey>{" "}
         <span className="text-slate-100">{rsi == null ? "—" : rsi.toFixed(1)}</span>
       </span>
+      {adx !== undefined ? (
+        <span className="whitespace-nowrap" title={adxLevel != null ? `The ADX check needs at least ${adxLevel} to enter` : "ADX 14: how strong the trend is (not its way)"}>
+          <LineKey color={colors.adx ?? "#FBBF24"}>ADX</LineKey>{" "}
+          <span className={clsx(adx == null ? "text-slate-400" : adxLevel != null ? (adx >= adxLevel ? "text-emerald-300" : "text-rose-300") : "text-slate-100")}>
+            {adx == null ? "—" : adx.toFixed(1)}
+          </span>
+          {adxLevel != null ? <span className="text-slate-400"> / {adxLevel}</span> : null}
+        </span>
+      ) : null}
+      {macd !== undefined ? (
+        <span className="whitespace-nowrap" title="MACD line − its signal line = the histogram. Above zero: buys pass the MACD check; below: sells.">
+          <LineKey color={colors.macd ?? "#38BDF8"}>MACD</LineKey>{" "}
+          {macd == null ? (
+            <span className="text-slate-400">— (not ready)</span>
+          ) : (
+            <>
+              <span className="text-slate-100">{macd.line.toFixed(2)}</span>
+              <span className="text-slate-400"> sig {macd.signal.toFixed(2)} hist </span>
+              <span className={macd.hist >= 0 ? "text-emerald-300" : "text-rose-300"}>
+                {macd.hist >= 0 ? "+" : ""}
+                {macd.hist.toFixed(2)}
+              </span>
+            </>
+          )}
+        </span>
+      ) : null}
       {(() => {
         const height = ohlc.high - ohlc.low;
         const times = atr != null && atr > 0 ? height / atr : null;
