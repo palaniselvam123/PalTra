@@ -498,3 +498,27 @@ def test_skipping_the_opening_candles_drops_a_trend_made_only_by_them():
     assert skipped.vwap is not None and plain.vwap is not None and skipped.vwap < plain.vwap  # VWAP after the skip
     assert skipped.trend_by_minutes[5] is None
     assert chop_scan.skip_minutes(99, 5) == chop_scan.MAX_SKIP_CANDLES * 5 and chop_scan.skip_minutes(None, 5) == 0
+
+
+def test_the_pick_backtests_read_the_trend_with_the_opening_candles_skipped():
+    """Old days can be backtested with the skip: the strong-trend pick read and the auto-arm read follow the card."""
+    import auto_arm
+    import trend_picks
+
+    frame = _drop_then_flat()
+    at = dt.time(9, 55)
+    plain = trend_picks.read_at(frame, DAY, trend_picks.TrendPickRule(pick_time=at, minutes=5), "GAP")
+    skipped = trend_picks.read_at(frame, DAY, trend_picks.TrendPickRule(pick_time=at, minutes=5, skip_candles=3), "GAP")
+    assert plain["trend"] == "STRONG_BEARISH" and skipped["trend"] is None
+    assert trend_picks.TrendPickRule(skip_candles=3).as_dict()["skip_candles"] == 3
+
+    read = auto_arm.strong_read(frame, DAY, at, 5, 9, 21)
+    read_skip = auto_arm.strong_read(frame, DAY, at, 5, 9, 21, skip=15)
+    assert read["trend"] == "STRONG_BEARISH"
+    assert read_skip["trend"] is None and read_skip["trend_skip_min"] == 15 and "skip" in read_skip["trend_notes"]
+
+    import scalp_picks
+
+    rule = scalp_picks.rule_from_dict({"kind": "AUTOARM", "skip_candles": 3, "candles": "NORMAL"})
+    assert rule.skip_candles == 3
+    assert scalp_picks.rule_from_dict({"kind": "TREND", "skip_candles": 2}).skip_candles == 2

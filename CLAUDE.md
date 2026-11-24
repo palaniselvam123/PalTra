@@ -1444,6 +1444,11 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   only from 09:15 + N candles; a strong trend also needs the price to have moved `SKIP_MOVE_ATR` (1) × ATR its way since the
   last skipped candle's close (`_moved_since_skip`, note `trend_notes.skip`), on every size (`_crosses_on(..., skip_from)`).
   Rows carry `trend_skip_min`. The SMAs still run over the opening candles. Display only; nothing in the strategy reads it.
+  **Backtests too** (old days; saved scans keep their own read): `skip_candles` on `TrendPickRule` (`read_at` →
+  `analyze(skip=)`), `AutoArmRule` (`strong_read(..., skip=)`: same view, VWAP and 1-ATR gate), `trend_picks.AutoSettings`
+  and the comparison (`TrendPickStart`, `AutoArmStart` (so the backtest queue too), `TrendCompareStart`, `TrendPicksAuto`);
+  saved in the run's `scalp_pick`, restored on Resume (`scalp_picks.rule_from_dict`), shown in the run detail / PDF. The
+  Backtest tab's forms have "Skip today's first candles" (`lib/skipFirst.ts`).
   **Candles: Normal / Heikin Ashi** (`candles` `NORMAL` default | `HA` on `POST /api/chop-scan/start`, `ChopAutoUpdate` and
   `chop_auto.AutoSettings`; the card's "Candles" menu, kept by the auto re-scan; `Status.candles`, saved in the run's
   `meta.candles`): with `HA`, `chop_scan.ha_bars` turns the closed candles of every size into Heikin Ashi ones

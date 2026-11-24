@@ -1,5 +1,6 @@
 "use client";
 
+import { SKIP_FIRST_CHOICES, SKIP_FIRST_HELP, skipFirstLabel } from "@/lib/skipFirst";
 import { NewTag } from "@/components/ui/NewTag";
 import { DAY_CLOSE, PICK_TIMES, fitUntil, untilAfter } from "@/lib/pickWindow";
 import { Bot, Loader2 } from "lucide-react";
@@ -40,6 +41,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
   const [every, setEvery] = useState(5);
   const [minutes, setMinutes] = useState(5);
   const [candles, setCandles] = useState<"NORMAL" | "HA">("NORMAL");
+  const [skipFirst, setSkipFirst] = useState(0);
   const [bot, setBot] = useState(1);
   const [speed, setSpeed] = useState(300);
   const [handoffs, setHandoffs] = useState(true);
@@ -102,6 +104,7 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
       every_min: every,
       minutes,
       candles,
+      skip_candles: skipFirst,
       until: fitUntil(until, last),
       play_handoffs: handoffs,
       min_checks: th.min_checks,
@@ -267,6 +270,18 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
                 <option value="HA">Heikin Ashi</option>
               </select>
             </label>
+            <label className="flex flex-col gap-1" title={SKIP_FIRST_HELP}>
+          <span>
+            Skip today&apos;s first candles <NewTag id="tq-skip-backtest" />
+          </span>
+          <select value={skipFirst} onChange={(e) => setSkipFirst(Number(e.target.value))} className={select}>
+            {SKIP_FIRST_CHOICES.map((n) => (
+              <option key={n} value={n}>
+                {skipFirstLabel(n, minutes)}
+              </option>
+            ))}
+          </select>
+        </label>
           </>
         ) : null}
         {source !== "ACTIVE" && scanCandle && (scanCandle.minutes !== minutes || scanCandle.candles !== candles) ? (

@@ -83,6 +83,7 @@ export function TrendPickCompare({
   direction,
   minutes,
   candles = "NORMAL",
+  skipCandles = 0,
   until = DAY_CLOSE,
   bot,
   playHandoffs,
@@ -96,6 +97,8 @@ export function TrendPickCompare({
   minutes: number;
   /** NORMAL = real candles, HA = the trend read on Heikin Ashi candles (strong-trend picks only). */
   candles?: "NORMAL" | "HA";
+  /** Today's first N candles left out of the trend read (strong-trend picks only, 0 = none). */
+  skipCandles?: number;
   /** Each run stops trading here ("HH:MM"); 15:30 = the usual close. Times at or after it are left out. */
   until?: string;
   bot: number;
@@ -179,6 +182,7 @@ export function TrendPickCompare({
         direction,
         minutes,
         candles,
+        skip_candles: skipCandles,
         until,
         bot,
         lists,

@@ -72,6 +72,9 @@ class TrendPickRule:
     sma_slow: int = 21
     #: NORMAL = the real candles; HA = Heikin Ashi candles (the Trend quality card's "Candles" menu, chop_scan.ha_bars).
     candles: str = "NORMAL"
+    #: Today's first N candles left out of the trend read (chop_scan `skip`, 0 = none; the card's "Skip today's first
+    #: candles").
+    skip_candles: int = 0
     #: Trading stops here each day (positions squared off, the day ends); None = the usual 15:30 close.
     until: dt.time | None = None
     kind: str = KIND
@@ -86,6 +89,7 @@ class TrendPickRule:
             "sma_fast": self.sma_fast,
             "sma_slow": self.sma_slow,
             "candles": self.candles,
+            "skip_candles": self.skip_candles,
             "until": self.until.strftime("%H:%M") if self.until else None,
         }
 
@@ -98,7 +102,7 @@ def _known_at(frame: pd.DataFrame, day: dt.date, at: dt.time) -> pd.DataFrame:
 
 def read_at(frame: pd.DataFrame, day: dt.date, rule: TrendPickRule, symbol: str = "") -> dict | None:
     """One stock's Trend quality read as it stood at the pick time, or None (no candles that day / too few)."""
-    from chop_scan import analyze
+    from chop_scan import analyze, skip_minutes
 
     part = _known_at(frame, day, rule.pick_time)
     if part.empty:
@@ -107,7 +111,8 @@ def read_at(frame: pd.DataFrame, day: dt.date, rule: TrendPickRule, symbol: str 
     if last_day != day:
         return None
     now = dt.datetime.combine(day, rule.pick_time, tzinfo=IST)
-    row = analyze(part, rule.sma_fast, rule.sma_slow, rule.minutes, now, symbol=symbol, ha=rule.candles == "HA")
+    row = analyze(part, rule.sma_fast, rule.sma_slow, rule.minutes, now, symbol=symbol, ha=rule.candles == "HA",
+                  skip=skip_minutes(rule.skip_candles, rule.minutes))
     return None if row is None else row.as_dict()
 
 
@@ -165,6 +170,7 @@ class AutoSettings:
     top_n: int = 10
     minutes: int = 5
     candles: str = "NORMAL"  # NORMAL | HA (Heikin Ashi)
+    skip_candles: int = 0  # today's first N candles left out of the trend read (0 = none)
     until: str = "15:30"  # trading stops here each day
     bot: int = 1
     lists: list = field(default_factory=lambda: ["fno"])
@@ -219,6 +225,10 @@ def load() -> AutoSettings:
     s.top_n = max(1, min(MAX_TOP_N, int(s.top_n or 10)))
     s.minutes = int(s.minutes) if int(s.minutes or 0) in SIZES else 5
     s.candles = "HA" if str(s.candles).upper() == "HA" else "NORMAL"
+    try:
+        s.skip_candles = max(0, min(12, int(s.skip_candles or 0)))
+    except (TypeError, ValueError):
+        s.skip_candles = 0
     s.bot = max(1, min(4, int(s.bot or 1)))
     s.lists = [str(x) for x in (s.lists or ["fno"])] or ["fno"]
     s.on = bool(s.on)
