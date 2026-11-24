@@ -1408,7 +1408,9 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   and `activity` (volume, speed) from `cross_scan.activity`, and `chop_scan.score_for`
   labels the stock `TRENDING` (0-1 crosses, long run), `CHOPPY` (CHOP_MIN_CROSSES+ or
   average gap under CHOP_SHORT_GAP_MIN min) or `MIXED`. Information only: nothing in the
-  strategy reads it. Lifecycle mirrors `CrossScanner` (manual Scan now, one pass at a
+  strategy reads it. "Today" is the session of the last closed candle (on a holiday, a weekend or before the day's
+  first candle closes the last session is read; minutes since a cross count to its last candle; owner's case: on the
+  24 Nov holiday every stock read TRENDING with 0 crosses). Lifecycle mirrors `CrossScanner` (manual Scan now, one pass at a
   time, `CROSS_SCAN_CONCURRENCY` downloads in parallel). `POST /api/chop-scan/start`
   (symbols, minutes, force) and `GET /api/chop-scan` on the SMA terminal.
   **Quiet runner alert**: when a stock had crosses earlier today and has stayed quiet
