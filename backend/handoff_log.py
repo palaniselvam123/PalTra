@@ -176,6 +176,78 @@ GROUP_WORDS = {
 }
 
 
+# A cut trade closes within this many seconds of its hand-off row (the replay notes the row right after the close).
+MATCH_SEC = 120
+
+
+def _naive(when):
+    if when is None:
+        return None
+    if isinstance(when, str):
+        try:
+            when = dt.datetime.fromisoformat(when)
+        except ValueError:
+            return None
+    return when.replace(tzinfo=None) if when.tzinfo else when
+
+
+def _pnl(t) -> dict:
+    return {
+        "trade_id": int(t.id),
+        "side": t.direction,
+        "entry_time": t.entry_time.isoformat() if t.entry_time else None,
+        "exit_time": t.exit_time.isoformat() if t.exit_time else None,
+        "exit_reason": t.exit_reason,
+        "gross": round(float(t.gross_pnl or 0), 2),
+        "net": round(float(t.net_pnl or 0), 2),
+    }
+
+
+def with_pnl(rows: list[dict], trades: list) -> list[dict]:
+    """A run's hand-off rows with the P&L on each side (display only): `from_trade` = the trade the sending bot
+    closed for it (its `trade_id`, else for a fast move the FAST_MOVE_HANDOFF exit on that stock within MATCH_SEC),
+    `to_trade` = the first closed trade the receiving bot's settings opened on that stock at or after the hand-off
+    (a FAST_MOVE entry for Bot 5, else a trade played as that bot, "…@B2"). Either is None when not found."""
+    from fast_bot import ENTRY_REASON, EXIT_REASON
+    from handoff_chain import played_as
+
+    closed = sorted((t for t in trades if t.exit_time is not None and t.entry_time is not None), key=lambda t: t.entry_time)
+    by_id = {int(t.id): t for t in closed}
+    used_from: set[int] = set()
+    used_to: set[int] = set()
+    out = []
+    # Oldest first, so two hand-offs of one stock each take their own trades.
+    for row in sorted(rows, key=lambda r: r.get("at") or ""):
+        at = _naive(row.get("at"))
+        sym = row.get("symbol")
+        src = None
+        if row.get("trade_id") is not None:
+            src = by_id.get(int(row["trade_id"]))
+        elif at is not None and row.get("kind") == "FAST_MOVE":
+            near = [
+                t for t in closed
+                if t.symbol == sym and t.exit_reason == EXIT_REASON and int(t.id) not in used_from
+                and abs((_naive(t.exit_time) - at).total_seconds()) <= MATCH_SEC
+            ]
+            src = min(near, key=lambda t: abs((_naive(t.exit_time) - at).total_seconds()), default=None)
+        dst = None
+        if row.get("moved") and at is not None:
+            for t in closed:
+                if t.symbol != sym or int(t.id) in used_to or _naive(t.entry_time) < at - dt.timedelta(seconds=MATCH_SEC):
+                    continue
+                reason = t.entry_reason or ""
+                if (reason.startswith(ENTRY_REASON) if row.get("to_bot") == 5 else played_as(reason) == row.get("to_bot")):
+                    dst = t
+                    break
+        if src is not None:
+            used_from.add(int(src.id))
+        if dst is not None:
+            used_to.add(int(dst.id))
+        out.append({**row, "from_trade": _pnl(src) if src else None, "to_trade": _pnl(dst) if dst else None})
+    keyed = {r.get("id"): r for r in out}
+    return [keyed[r.get("id")] for r in rows] if len(keyed) == len(rows) else out
+
+
 def by_regime(trades: list) -> list[dict]:
     """Closed trades totalled by the trend at entry: count, wins, P&L before and after charges."""
     groups: dict[str, dict] = {}

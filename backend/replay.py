@@ -1105,7 +1105,7 @@ def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
         out["stocks"] = _stock_rows(trades, out["symbols"])
         # Choppy / trending at each trade's entry, and where each stock was handed (handoff_log.py; display only).
         out["by_regime"] = handoff_log.by_regime(trades)
-        out["handoff_trail"] = handoff_log.rows(run_id=run.id)
+        out["handoff_trail"] = handoff_log.with_pnl(handoff_log.rows(run_id=run.id), trades)
         # Each day's highest / lowest P&L on the run's own P&L log, with when and which came first (display only).
         out["day_swings"] = open_pnl_log.replay_swings(run.id)
     return out

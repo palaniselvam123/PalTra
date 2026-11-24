@@ -1516,7 +1516,7 @@ function RunDetailBody({
           <div className="mb-1 px-2 text-xs uppercase tracking-wider text-slate-400">
             Hand-offs in this run ({(run.handoff_trail ?? []).length}) · where each stock was sent
           </div>
-          <HandoffTable rows={[...(run.handoff_trail ?? [])].reverse()} showDay={run.start_date !== run.end_date} />
+          <HandoffTable rows={[...(run.handoff_trail ?? [])].reverse()} showDay={run.start_date !== run.end_date} basis={basis} />
         </div>
       ) : null}
       <div className="overflow-x-auto">
