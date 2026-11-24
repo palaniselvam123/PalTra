@@ -250,7 +250,7 @@ class AutoArmRule:
         return {
             "kind": KIND, "source": self.source, "pick_time": self.first.strftime("%H:%M"),
             "first": self.first.strftime("%H:%M"), "last": self.last.strftime("%H:%M"), "every_min": self.every_min,
-            "minutes": self.minutes, "candles": self.candles, "min_checks": self.min_checks, "side": self.side, "pct": self.pct,
+            "minutes": self.minutes, "sma_fast": self.sma_fast, "sma_slow": self.sma_slow, "candles": self.candles, "min_checks": self.min_checks, "side": self.side, "pct": self.pct,
             "pressure_side": self.pressure_side, "min_value_cr": self.min_value_cr, "min_rvol": self.min_rvol,
             "basis": self.basis, "flow_pct": self.flow_pct,
             "max_day": self.max_day,
@@ -262,13 +262,19 @@ class AutoArmRule:
 
 def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fast: int, slow: int,
                 ha: bool = False) -> dict | None:
-    """One stock's strong-trend read as the Trend quality card had it at `at` (candles closed before it)."""
+    """One stock's strong-trend read as the Trend quality card had it at `at` (candles closed before it).
+
+    The tape is cut to what the live scan downloads (`WARMUP_DAYS` calendar days from midnight, chop_scan
+    `ChopScanner._run`), so the morning volume check compares today with the same earlier sessions and the Wilder ATR
+    starts from the same candle: a longer tape (a multi-day run carries every earlier day) read differently."""
     import trend_strength
-    from chop_scan import _vwap_today, closed_bars, ha_bars
+    from chop_scan import WARMUP_DAYS, _vwap_today, closed_bars, ha_bars
     from indicators import enrich
 
     cut = int(dt.datetime.combine(day, at, tzinfo=IST).timestamp())
-    part = frame[frame["ts"].astype("int64") < cut]
+    start = int(dt.datetime.combine(day - dt.timedelta(days=WARMUP_DAYS), dt.time(0, 0), tzinfo=IST).timestamp())
+    ts = frame["ts"].astype("int64")
+    part = frame[(ts >= start) & (ts < cut)]
     if part.empty:
         return None
     last_day = dt.datetime.fromtimestamp(int(part["ts"].iloc[-1]), IST).date()
@@ -278,7 +284,8 @@ def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fa
     bars = closed_bars(part, minutes, now)
     if len(bars) < max(int(slow), 2) + 1:
         return None
-    real_close = float(part["close"].iloc[-1])
+    # The last closed candle's close, before any Heikin Ashi change (chop_scan.analyze): the price VWAP is compared with.
+    real_close = float(bars["close"].iloc[-1])
     if ha:  # as the Trend quality card reads them: the Heikin Ashi candles' own trend (ha_trend), VWAP on real prices
         import ha_trend
 
