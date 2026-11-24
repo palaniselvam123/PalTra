@@ -320,7 +320,12 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
     if ha:
         bars = ha_bars(bars)
     enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), sma_fast, sma_slow)
-    today = _ist_day(int(now.timestamp()))
+    # "Today" is the session of the last closed candle: on a holiday, a weekend or before the first candle of the day
+    # has closed, the last session is read (owner's case: on the 24 Nov holiday every stock read "Trending" with 0
+    # crosses, because the calendar day had no candles). Minutes since a cross then count to that session's last candle.
+    today = _ist_day(int(enriched.iloc[-1]["ts"]))
+    clock = now if today == _ist_day(int(now.timestamp())) else dt.datetime.fromtimestamp(
+        int(enriched.iloc[-1]["ts"]) + int(minutes) * 60, IST)
     by_colour = bool(ha or colour)
     # Heikin Ashi: the trend is read from the candles (colour runs, flips, wicks; ha_trend.py), never the SMA cross.
     hits = ha_trend.flips(enriched, today) if by_colour else _crosses(enriched, today)
@@ -331,7 +336,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
     last_side: str | None = None
     if hits:
         last_ts = hits[-1]["ts"]
-        minutes_since = max(0.0, (int(now.timestamp()) - last_ts) / 60)
+        minutes_since = max(0.0, (int(clock.timestamp()) - last_ts) / 60)
         last_side = hits[-1]["side"]
         if len(hits) >= 2:
             gaps = [(hits[i]["ts"] - hits[i - 1]["ts"]) / 60 for i in range(1, len(hits))]
@@ -399,7 +404,8 @@ def _side(enriched: pd.DataFrame) -> str | None:
 def _crosses_on(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime, sma_fast: int, sma_slow: int, today: int,
                 vwap: float | None = None, ha: bool = False, colour: bool = False):
     """(crosses today, side, last cross ts, last cross side, run since ts, run candles, gap %, widest gap %,
-    strong trend) on `minutes`-long candles; Nones when too short. `colour`: read by colour (Heikin Ashi always is)."""
+    strong trend) on `minutes`-long candles; Nones when too short. `colour`: read by colour (Heikin Ashi always is).
+    `today` is the session the main read used (the last closed candle's day)."""
     bars = closed_bars(frame_1m, minutes, now)
     if len(bars) < max(int(sma_slow), 2) + 1:
         return (None,) * 9

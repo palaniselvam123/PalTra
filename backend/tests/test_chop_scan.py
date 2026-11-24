@@ -452,3 +452,18 @@ def test_colour_mode_reads_the_real_candles_by_colour():
     assert normal.trend_mode != chop_scan.COLOUR_MODE
     assert colour.crosses_today >= 5 and colour.score == chop_scan.CHOPPY  # colour flips, not SMA crosses
     assert colour.crosses_by_minutes[5] == colour.crosses_today
+
+
+def test_a_holiday_scan_reads_the_last_session_not_an_empty_day():
+    """Owner's case (24 Nov holiday): with no candles on the calendar day every stock read TRENDING with 0 crosses.
+    The read now uses the session of the last closed candle."""
+    tape = [100 + ((i // 10) % 2) * 2 for i in range(360)]  # a choppy session, 09:15 to 15:15
+    frame = _minutes(tape)
+    same_day = chop_scan.analyze(frame, 9, 21, 5, _at(15, 20), symbol="CHOP")
+    holiday = chop_scan.analyze(frame, 9, 21, 5, _at(13, 30, DAY + dt.timedelta(days=1)), symbol="CHOP")
+    assert holiday is not None and same_day is not None
+    assert holiday.crosses_today == same_day.crosses_today >= chop_scan.CHOP_MIN_CROSSES
+    assert holiday.score == chop_scan.CHOPPY
+    assert holiday.crosses_by_minutes[5] == same_day.crosses_by_minutes[5]
+    # Minutes since the last cross count to the session's last candle, not across the night.
+    assert holiday.minutes_since_last_cross is not None and holiday.minutes_since_last_cross < 60
