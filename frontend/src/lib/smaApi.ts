@@ -3816,12 +3816,20 @@ export const smaApi = {
     return request<TrendReadsResult>(`/api/replay/runs/${id}/trend-reads${q.toString() ? `?${q}` : ""}`);
   },
   /** Put the strategy a backtest run played with onto a bot (Trade list, mode and name stay). No order is placed. */
-  applyRunStrategy: (id: number, toDesk: "1" | "2" | "3" | "4" | "5" | "research", reset: boolean, withStocks: boolean, confirmLive = false) =>
+  /** source "bot5" = the Bot 5 settings the run's fast-mover hand-off played with, not the replayed bot's strategy. */
+  applyRunStrategy: (
+    id: number,
+    toDesk: "1" | "2" | "3" | "4" | "5" | "research",
+    reset: boolean,
+    withStocks: boolean,
+    confirmLive = false,
+    source: "run" | "bot5" = "run"
+  ) =>
     request<{ desk: string; changed: string[]; notes: string[]; run_id: number }>(
       `/api/replay/runs/${id}/apply`,
       {
         method: "POST",
-        body: JSON.stringify({ to_desk: toDesk, reset, stock_settings: withStocks, confirm_live: confirmLive }),
+        body: JSON.stringify({ to_desk: toDesk, reset, stock_settings: withStocks, confirm_live: confirmLive, source }),
       },
       15000,
       false

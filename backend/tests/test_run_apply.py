@@ -100,3 +100,29 @@ def test_a_real_snapshot_applies_whole(tmp_path, monkeypatch):
         got = client.get("/api/bots/4/config").json()
         assert got["qty"] == 21 and got["candle_minutes"] == 5
     database.reset_engine()
+
+
+def test_bot5_settings_of_the_run_apply_instead_of_the_replayed_bots(tmp_path, monkeypatch):
+    """source=bot5 copies the run's fast-mover snapshot (Bot 5's fields and per-stock settings), not its strategy."""
+    database, client = _client(tmp_path, monkeypatch)
+    with client:
+        client.get("/api/bots/2/config")
+        run_id = _run(database, {
+            "bot": 1, "qty": 7, "entry_mode": "COLOUR",
+            "fast_bot": {
+                "settings": {"on": True},
+                "bot5": {"qty": 1000, "use_vwap": True, "rsi_long_max": 90.0, "tall_pullback": True},
+                "bot5_stocks": {"SBIN": {"qty": 250}},
+            },
+        })
+        res = client.post(f"/api/replay/runs/{run_id}/apply", json={"to_desk": "1", "reset": True, "source": "bot5"})
+        assert res.status_code == 200, res.text
+        got = client.get("/api/config").json()
+        assert got["qty"] == 1000 and got["use_vwap"] is True and got["rsi_long_max"] == 90 and got["tall_pullback"] is True
+        assert got["entry_mode"] != "COLOUR"  # the replayed bot's own strategy is not copied
+        assert client.get("/api/config/stock/SBIN").json()["qty"] == 250
+        # A run without the hand-off kept no Bot 5 settings.
+        plain = _run(database, {"bot": 1, "qty": 7})
+        res = client.post(f"/api/replay/runs/{plain}/apply", json={"to_desk": "1", "source": "bot5"})
+        assert res.status_code == 400 and "fast-mover" in res.text
+    database.reset_engine()

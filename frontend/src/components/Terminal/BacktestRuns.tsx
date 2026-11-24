@@ -1557,7 +1557,7 @@ swing: <td className="px-2 py-2" />
           </div>
         </dl>
         {/* A real backtest run (a live book has a negative id and no saved strategy of its own). */}
-        {run.id > 0 && !settingsRows ? <ApplyRunStrategy runId={run.id} runBot={Number(run.settings.bot ?? 1) || 1} /> : null}
+        {run.id > 0 && !settingsRows ? <ApplyRunStrategy runId={run.id} runBot={Number(run.settings.bot ?? 1) || 1} hasBot5={Boolean(fastBotOf(run.settings)?.bot5)} /> : null}
       </div>
     </section>
   );
