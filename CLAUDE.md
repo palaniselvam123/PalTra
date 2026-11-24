@@ -574,6 +574,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `STOCK_FIELDS`; dropped ones named in `notes`), or with `reset` and them off are cleared. Trade list, mode and name stay;
   a LIVE bot needs `confirm_live` (409 without); refused while that bot's replay is loading / playing / paused (a fresh
   run reads the bot's row each day). No order is placed.
+  **Bot 5's settings instead** (`RunApply.source` `run` default | `bot5`, `main.bot5_saved`; the card's Copy menu, shown only
+  for a run with a `fast_bot` snapshot): copies the Bot 5 fields and per-stock settings the run's fast-mover hand-off
+  played with (the run detail's "Bot 5 · …" rows), not the replayed bot's strategy; 400 for a run without the hand-off.
   **Rewind / fast-forward** (`ReplaySession.seek`, `POST /api/replay/control {action: "seek", at: "HH:MM"}`; only
   while PLAYING or PAUSED, the pause state kept; `info().seeking` while it moves): forward sets `_seek` and
   `_fast_forward` ticks the same 10-second grid as fast as its CPU share allows up to the target (same trades, only

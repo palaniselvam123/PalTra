@@ -3931,6 +3931,19 @@ class RunApply(BaseModel):
     stock_settings: bool = True
     # The bot trades real money: the page asked first.
     confirm_live: bool = False
+    # Which settings of the run: "run" = the replayed bot's strategy; "bot5" = the Bot 5 settings the run's
+    # fast-mover hand-off played with (its `fast_bot` snapshot: Bot 5's strategy fields and per-stock settings).
+    source: Literal["run", "bot5"] = "run"
+
+
+def bot5_saved(saved: dict) -> dict | None:
+    """A run's Bot 5 snapshot (fast_bot.replay_snapshot) in the shape `run_apply_data` reads, or None when the run
+    did not play the fast-mover hand-off."""
+    snap = saved.get("fast_bot")
+    if not isinstance(snap, dict) or not isinstance(snap.get("bot5"), dict) or not snap["bot5"]:
+        return None
+    stocks = snap.get("bot5_stocks")
+    return {**snap["bot5"], "stock_settings": stocks if isinstance(stocks, dict) else {}}
 
 
 def run_apply_data(saved: dict, reset: bool, with_stocks: bool) -> tuple[dict, list[str]]:
@@ -3985,6 +3998,10 @@ async def replay_run_apply(run_id: int, body: RunApply):
     saved = await asyncio.to_thread(_saved)
     if saved is None:
         raise HTTPException(404, "No such replay run")
+    if body.source == "bot5":
+        saved = bot5_saved(saved)
+        if saved is None:
+            raise HTTPException(400, f"Run #{run_id} did not play the fast-mover hand-off, so it kept no Bot 5 settings")
     if not any(k in saved for k in ConfigUpdate.model_fields):
         raise HTTPException(400, f"Run #{run_id} did not save its strategy settings")
     if body.to_desk != "research":
