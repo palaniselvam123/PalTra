@@ -11,7 +11,8 @@ import { Badge, Skeleton, pnlTone } from "./ui";
 import { chartHref } from "./StockTabs";
 import { BacktestRuns, RunDetail, filtersShort, stopShort, strategyLabel, type Settings } from "./BacktestRuns";
 import { strategiesUsed, summarizeBook } from "@/lib/bookSummary";
-import { entryReasonLong, entryReasonShort } from "@/lib/entryReason";
+import { entryPlayedAs, entryReasonLong, entryReasonShort } from "@/lib/entryReason";
+import { NewTag } from "@/components/ui/NewTag";
 import { matchesTrend, trendColor, trendGroup, trendShort, trendText, type TrendFilter } from "@/lib/trendAtEntry";
 import { TextFilter, matchesText } from "@/components/ui/tableTools";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
@@ -119,6 +120,7 @@ type SortKey =
   | "entry"
   | "entry_reason"
   | "trend"
+  | "bot"
   | "exit_time"
   | "exit"
   | "high"
@@ -141,6 +143,7 @@ const SORT_CHOICES: { key: SortKey; label: string }[] = [
   { key: "reason", label: "Exit reason" },
   { key: "entry_reason", label: "Entry reason" },
   { key: "trend", label: "Trend at entry" },
+  { key: "bot", label: "Bot" },
   { key: "strategy", label: "Strategy" },
   { key: "entry", label: "Entry price" },
   { key: "exit", label: "Exit price" },
@@ -153,6 +156,20 @@ const SORT_CHOICES: { key: SortKey; label: string }[] = [
 const BY_TIME: (SortKey | undefined)[] = [undefined, "id", "entry_time", "exit_time"];
 
 const NOT_RECORDED = "__none__";
+
+/** Which bot a trade belongs to: its book's bot (`bot`, NULL = 1) and, in a backtest, the bot it was played as after a
+ * hand-off ("…@B2" entry reason) or a fast move (FAST_MOVE entry = Bot 5's settings). */
+function botOf(trade: TradeRow): { book: number; as: number | null } {
+  const book = Number(trade.bot ?? 1) || 1;
+  const reason = trade.entry_reason || "";
+  const played = entryPlayedAs(reason) ?? (reason.startsWith("FAST_MOVE") ? 5 : null);
+  return { book, as: played != null && played !== book ? played : null };
+}
+
+function botLabel(trade: TradeRow): string {
+  const { book, as } = botOf(trade);
+  return as ? `Bot ${book} → ${as}` : `Bot ${book}`;
+}
 
 type RunSettings = Map<number, Settings>;
 
@@ -199,6 +216,10 @@ function sortValue(trade: TradeRow, key: SortKey, state: SmaState | null, runs: 
       return entryReasonShort(trade.entry_reason) ?? "";
     case "trend":
       return trendShort(trade.entry_regime, trade.direction) ?? "";
+    case "bot": {
+      const { book, as } = botOf(trade);
+      return (as ?? book) * 10 + (as ? book : 0);
+    }
     case "exit_time":
       return epoch(trade.exit_time);
     case "exit":
@@ -393,6 +414,8 @@ export function TradeHistoryTable({
   const [maxPnl, setMaxPnl] = useState("");
   const [side, setSide] = useState<SideFilter>("ALL");
   const [trendPick, setTrendPick] = useState<TrendFilter>("ALL");
+  // "ALL" or a bot number: the trade's own book bot or the bot it was played as (a hand-off / fast move in a backtest).
+  const [botPick, setBotPick] = useState("ALL");
   const [reason, setReason] = useState("ALL");
   const [strategy, setStrategy] = useState("ALL");
   const [sort, setSort] = useState<Sort>(null);
@@ -424,10 +447,11 @@ export function TradeHistoryTable({
   const inBook = full.rows;
   // The lists below cover the whole book (up to 20,000 trades), so they are
   // rebuilt only when the book changes, not on every price tick.
-  const { closedInBook, openInBook, symbols, reasons, strategies } = useMemo(() => {
+  const { closedInBook, openInBook, symbols, reasons, strategies, botsInBook } = useMemo(() => {
     const closed: TradeRow[] = [];
     const open: TradeRow[] = [];
     const names = new Set<string>();
+    const botSet = new Set<number>();
     const why = new Set<string>();
     const labels = new Set<string>();
     for (const trade of inBook) {
@@ -435,8 +459,12 @@ export function TradeHistoryTable({
       names.add(trade.symbol.toUpperCase());
       if (trade.exit_price != null) why.add(trade.exit_reason || "");
       labels.add(strategyOf(trade, runs) ?? NOT_RECORDED);
+      const who = botOf(trade);
+      botSet.add(who.book);
+      if (who.as) botSet.add(who.as);
     }
     return {
+      botsInBook: Array.from(botSet).sort((a, b) => a - b),
       closedInBook: closed,
       openInBook: open,
       symbols: Array.from(names).sort(),
@@ -450,6 +478,7 @@ export function TradeHistoryTable({
   const pickedList = stockFilter ? stockFilter.split(",") : [];
   const reasonFilter = reasons.includes(reason) ? reason : "ALL";
   const strategyFilter = strategies.includes(strategy) ? strategy : "ALL";
+  const botFilter = botsInBook.includes(Number(botPick)) ? botPick : "ALL";
   const min = minPnl.trim() === "" ? null : Number(minPnl);
   const max = maxPnl.trim() === "" ? null : Number(maxPnl);
   const keep = (trade: TradeRow, pnl: number | null): boolean => {
@@ -457,6 +486,10 @@ export function TradeHistoryTable({
     if (!matchesText(query, trade.symbol)) return false;
     if (side !== "ALL" && trade.direction !== side) return false;
     if (!matchesTrend(trendPick, trendGroup(trade.entry_regime, trade.direction))) return false;
+    if (botFilter !== "ALL") {
+      const who = botOf(trade);
+      if (who.book !== Number(botFilter) && who.as !== Number(botFilter)) return false;
+    }
     if (reasonFilter !== "ALL" && (trade.exit_price == null || (trade.exit_reason || "") !== reasonFilter)) return false;
     if (strategyFilter !== "ALL" && (strategyOf(trade, runs) ?? NOT_RECORDED) !== strategyFilter) return false;
     const day = tradeDay(trade);
@@ -827,6 +860,22 @@ export function TradeHistoryTable({
           </select>
         </label>
         <label
+          className="flex min-w-[7rem] flex-col gap-1 text-xs uppercase tracking-wider text-slate-400"
+          title="The bot whose book the trade is in, or (in a backtest) the bot it was played as after a hand-off or fast move"
+        >
+          <span className="flex items-center gap-1">
+            Bot <NewTag id="blotter-bot" link={false} />
+          </span>
+          <select value={botFilter} onChange={(e) => setBotPick(e.target.value)} className="min-h-11 rounded-md border border-white/15 bg-black/40 px-2 text-sm normal-case tracking-normal text-slate-100 sm:min-h-9">
+            <option value="ALL">All bots</option>
+            {botsInBook.map((n) => (
+              <option key={n} value={String(n)}>
+                Bot {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label
           className="flex min-w-[8.5rem] flex-col gap-1 text-xs uppercase tracking-wider text-slate-400"
           title="Choppy or trending when the trade opened (on the bot's own candle). Saved for trades opened after this was added."
         >
@@ -1036,7 +1085,7 @@ export function TradeHistoryTable({
 
 type Col = { key: SortKey | "action"; label: string; num?: boolean };
 type ColKey = Col["key"];
-const COLUMN_KEYS: ColKey[] = ["id", "stock", "side", "entry_time", "entry", "entry_reason", "trend", "exit_time", "exit", "high", "low", "points", "reason", "strategy", "charges", "net", "action"];
+const COLUMN_KEYS: ColKey[] = ["id", "stock", "side", "entry_time", "entry", "entry_reason", "trend", "bot", "exit_time", "exit", "high", "low", "points", "reason", "strategy", "charges", "net", "action"];
 const COLUMNS: Col[] = [
   { key: "id", label: "Trade ID" },
   { key: "stock", label: "Stock" },
@@ -1045,6 +1094,7 @@ const COLUMNS: Col[] = [
   { key: "entry", label: "Entry", num: true },
   { key: "entry_reason", label: "Entry reason" },
   { key: "trend", label: "Trend at entry" },
+  { key: "bot", label: "Bot" },
   { key: "exit_time", label: "Exit time" },
   { key: "exit", label: "Exit", num: true },
   { key: "high", label: "Max high", num: true },
@@ -1748,6 +1798,12 @@ entry_reason: <td className="px-3 py-2">
       </td>,
 trend: <td className="px-3 py-2">
         <TrendAtEntryBadge trade={t} />
+      </td>,
+bot: <td
+        className="whitespace-nowrap px-3 py-2 text-xs text-slate-300"
+        title={botOf(t).as ? `In Bot ${botOf(t).book}'s book, played with Bot ${botOf(t).as}'s settings` : undefined}
+      >
+        {botLabel(t)}
       </td>,
 exit_time: <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-slate-300">{open ? "—" : istStamp(t.exit_time)}</td>,
 exit: <td className="whitespace-nowrap px-3 py-2 text-right font-mono">
