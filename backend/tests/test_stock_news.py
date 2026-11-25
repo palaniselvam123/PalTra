@@ -68,6 +68,11 @@ async def test_both_sources_merge_newest_first_and_one_failure_stays_its_own(mon
     monkeypatch.setattr(sn, "google_news", news)
     monkeypatch.setattr(sn, "nse_announcements", nse)
     monkeypatch.setattr(sn, "_name_of", lambda s: "RELIANCE INDUSTRIES LIMITED")
+
+    async def filed(symbol, client, ref):  # the results-filings lookup is NSE too: never the real network in a test
+        return []
+
+    monkeypatch.setattr(sn, "results_filed", filed)
     out = await sn.stock_news("reliance")
     assert out["symbol"] == "RELIANCE" and out["errors"] == {"nse": "answered 403"}
     assert [i["title"] for i in out["items"]][0] == "Reliance shares rise after results"
