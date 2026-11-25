@@ -335,6 +335,45 @@ def settings_for_choice(choice: dict, base: dict | None = None) -> dict:
     return out
 
 
+def numbers_for_bot(settings: dict | None, choice: dict) -> dict:
+    """The numbers the lab read (`lab_settings`) as BotConfig fields, so a bot reset to its defaults gets them back and
+    the replay trades the same SMAs, stop distance, filter ranges and quantity the lab tested ("Reset the other settings
+    first"). The run's quantity unless the choice set one."""
+    s = settings or {}
+    if not s:
+        return {}
+    out: dict = {}
+
+    def put(field: str, key: str) -> None:
+        if s.get(key) is not None:
+            out[field] = s[key]
+
+    for key in ("sma_fast", "sma_slow", "atr_period", "atr_multiplier", "candle_minutes", "max_trades_per_stock",
+                "adx_threshold", "volume_min_ratio", "density_min_pct", "rsi_long_min", "rsi_long_max", "rsi_short_min",
+                "rsi_short_max", "bb_period", "bb_std", "bb_min_width_pct", "gap_long_min", "gap_long_max", "gap_short_min",
+                "gap_short_max", "candle_dir_count", "candle_dir_rule", "ema_fast", "ema_slow", "cvd_lookback",
+                "cvd_div_lookback", "st_period", "st_mult", "level_line", "counter_rule", "counter_need_fast",
+                "counter_min_body", "slope_lookback", "slope_turn_pct", "vturn_move_pct", "vturn_turn_pct", "vturn_within",
+                "tsl_mode", "vwap_stop_atr"):
+        put(key, key)
+    put("entry_cutoff_time", "entry_cutoff")
+    put("square_off_time", "square_off")
+    out["qty"] = int(choice.get("qty") or s.get("qty") or 1)
+    macd_len = s.get("macd") or []
+    for field, value in zip(("macd_fast", "macd_slow", "macd_signal"), macd_len):
+        out[field] = value
+    for prefix, key in (("", "tsl_points"), ("", "tsl_pcts"), ("", "tsl_atrs")):
+        vals = s.get(key) or []
+        unit = {"tsl_points": "points", "tsl_pcts": "pct", "tsl_atrs": "atr"}[key]
+        for field, value in zip((f"tsl_sl_{unit}", f"tsl_trail_{unit}", f"tsl_target_{unit}"), vals):
+            out[field] = value
+    for k, v in (s.get("decel") or {}).items():
+        out[f"decel_{k}"] = v
+    # The lab only opens trades on SMA crosses.
+    out["entry_mode"] = "SMA"
+    return out
+
+
 # ----------------------------------------------------------------------------------------------------------------
 # Candle cache
 # ----------------------------------------------------------------------------------------------------------------
