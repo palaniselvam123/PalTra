@@ -3484,8 +3484,8 @@ export const smaApi = {
     request<{ job: StrategyLabJob; result: StrategyLabResult; rules: StrategyLabRules }>(`/api/strategy-lab/${encodeURIComponent(id)}`, undefined, 30000, false),
   strategyLabEvaluate: (id: string, choice: StrategyLabChoice) =>
     request<StrategyLabResult>(`/api/strategy-lab/${encodeURIComponent(id)}/evaluate`, { method: "POST", body: JSON.stringify(choice) }, 30000, false),
-  strategyLabRecommend: (id: string, choice: StrategyLabChoice) =>
-    request<StrategyLabRecommend>(`/api/strategy-lab/${encodeURIComponent(id)}/recommend`, { method: "POST", body: JSON.stringify(choice) }, 60000, false),
+  strategyLabRecommend: (id: string, choice: StrategyLabChoice, judge: StrategyLabJudge = "NET") =>
+    request<StrategyLabRecommend>(`/api/strategy-lab/${encodeURIComponent(id)}/recommend`, { method: "POST", body: JSON.stringify({ ...choice, judge }) }, 60000, false),
   /** Put the lab's choice on the run's bot (with `reset`, every other strategy setting back to its default first). */
   strategyLabApply: (id: string, body: StrategyLabChoice & { reset?: boolean; stop_replay?: boolean; confirm_live?: boolean; to_bot?: number }) =>
     request<{ changed?: string[]; bot: number; reset: boolean }>(`/api/strategy-lab/${encodeURIComponent(id)}/apply`, { method: "POST", body: JSON.stringify(body) }, 30000, false),
@@ -4131,14 +4131,25 @@ export type StrategyLabRecommendRow = {
   win_pct_changed: number;
   profit_factor_changed: number | null;
   green_pct_changed: number;
+  /** The most margin in use at one moment, and net ÷ it in % (null without trades). */
+  capital_now?: number;
+  capital_changed?: number;
+  roc_now?: number | null;
+  roc_changed?: number | null;
+  delta_roc?: number | null;
 };
+/** How the lab's search judges a set of rules: the most P&L after charges, or the best return on capital. */
+export type StrategyLabJudge = "NET" | "ROC";
+/** Totals plus the capital they needed (`peak_margin`, `peak_value`) and the return on it (`roc`, %). */
+export type StrategyLabBrief = StrategyLabTotals & { peak_margin?: number; peak_value?: number; roc?: number | null };
 export type StrategyLabRecommend = {
-  now: StrategyLabTotals;
+  judge?: StrategyLabJudge;
+  now: StrategyLabBrief;
   rows: StrategyLabRecommendRow[];
   best: {
     choice: Required<StrategyLabChoice>;
-    totals: StrategyLabTotals;
-    steps: { kind: string; name: string; net_before: number; net_after: number; trades: number }[];
+    totals: StrategyLabBrief;
+    steps: { kind: string; name: string; net_before: number; net_after: number; trades: number; roc_before?: number | null; roc_after?: number | null }[];
     settings: Record<string, unknown>;
   };
 };

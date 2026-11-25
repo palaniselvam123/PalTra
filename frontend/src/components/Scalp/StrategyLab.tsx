@@ -12,6 +12,7 @@ import {
   type StrategyLabCapital,
   type StrategyLabChoice,
   type StrategyLabJob,
+  type StrategyLabJudge,
   type StrategyLabRecommend,
   type StrategyLabResult,
   type StrategyLabRules,
@@ -56,6 +57,7 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
   const [choice, setChoice] = useState<StrategyLabChoice>(EMPTY);
   const [result, setResult] = useState<StrategyLabResult | null>(null);
   const [rec, setRec] = useState<StrategyLabRecommend | null>(null);
+  const [judge, setJudge] = useState<StrategyLabJudge>("ROC");
   const [recFor, setRecFor] = useState<StrategyLabChoice | null>(null);
   const [busy, setBusy] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
@@ -203,7 +205,7 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
     if (!openId) return;
     setRecBusy(true);
     try {
-      setRec(await smaApi.strategyLabRecommend(openId, choice));
+      setRec(await smaApi.strategyLabRecommend(openId, choice, judge));
       setRecFor(choice);
     } catch (e: unknown) {
       setNote({ ok: false, text: e instanceof Error ? e.message : "Could not work out the rules" });
@@ -409,6 +411,15 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
           )}
 
           {/* Rules */}
+          <BestFound
+            rec={rec}
+            stale={Boolean(recStale)}
+            judge={judge}
+            onJudge={(j) => setJudge(j)}
+            busy={recBusy}
+            onFind={recommend}
+            onUse={useBest}
+          />
           <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
             <RuleBox title="Checks before entering" hint="A trade is taken only when every ticked check agrees at the signal candle." rules={rules.entries} picked={choice.entries} onToggle={(n) => toggle("entries", n)} onAll={() => setAll("entries", rules.entries.map((r) => r.name))} onNone={() => setAll("entries", [])} />
             <RuleBox title="Exits" hint="The trade ends at the earliest ticked exit, the stop, a target or the square-off." rules={rules.exits} picked={choice.exits} onToggle={(n) => toggle("exits", n)} onAll={() => setAll("exits", rules.exits.map((r) => r.name))} onNone={() => setAll("exits", [])} />
@@ -546,6 +557,7 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                     {rec.best.steps.length > 0 ? (
                       <button type="button" onClick={useBest} className="rounded-md px-2 py-1 text-xs font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-400/40 hover:bg-emerald-500/10">
                         Use the best found: {money(rec.best.totals.net, true)} after charges, {rec.best.totals.trades} trades
+                        {rec.best.totals.roc != null ? `, ${pct(rec.best.totals.roc)} on ${money(rec.best.totals.peak_margin ?? 0)} capital` : ""}
                       </button>
                     ) : (
                       <span className="text-slate-500">No single change beats this choice.</span>
@@ -553,7 +565,15 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                   </div>
                   {rec.best.steps.length > 0 && (
                     <p className="text-xs text-slate-500">
-                      Found by changing one rule at a time: {rec.best.steps.map((s) => `${s.kind === "stop" ? "stop → " : ""}${ruleLabel(rules, s.kind, s.name)} (${money(s.net_before, true)} → ${money(s.net_after, true)})`).join("; ")}.
+                      Found by changing one rule at a time{rec.judge === "ROC" ? " (judged by return on capital)" : " (judged by P&L after charges)"}:{" "}
+                      {rec.best.steps
+                        .map((s) =>
+                          rec.judge === "ROC" && s.roc_after != null
+                            ? `${s.kind === "stop" ? "stop → " : ""}${ruleLabel(rules, s.kind, s.name)} (${s.roc_before == null ? "—" : pct(s.roc_before)} → ${pct(s.roc_after)}, ${money(s.net_after, true)})`
+                            : `${s.kind === "stop" ? "stop → " : ""}${ruleLabel(rules, s.kind, s.name)} (${money(s.net_before, true)} → ${money(s.net_after, true)})`
+                        )
+                        .join("; ")}
+                      .
                     </p>
                   )}
                   <div className="overflow-x-auto">
@@ -564,6 +584,8 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                           <th className="px-2 py-1">Now</th>
                           <th className="px-2 py-1 text-right">P&L if changed</th>
                           <th className="px-2 py-1 text-right">Adds (after charges)</th>
+                          <th className="px-2 py-1 text-right" title="The most margin in use at one moment with this change (the Margin % box)">Capital</th>
+                          <th className="px-2 py-1 text-right" title="P&L after charges ÷ that capital">Return on capital</th>
                           <th className="px-2 py-1 text-right">Trades</th>
                           <th className="px-2 py-1 text-right">Win %</th>
                           <th className="px-2 py-1 text-right">Profit factor</th>
@@ -580,6 +602,10 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                             <td className="px-2 py-1 text-slate-400">{r.kind === "stop" ? "—" : r.on ? "on → off" : "off → on"}</td>
                             <td className={clsx("px-2 py-1 text-right tabular-nums", r.net_changed >= 0 ? "text-emerald-300" : "text-rose-300")}>{money(r.net_changed, true)}</td>
                             <td className={clsx("px-2 py-1 text-right font-semibold tabular-nums", r.delta_net > 0 ? "text-emerald-300" : r.delta_net < 0 ? "text-rose-300" : "text-slate-400")}>{money(r.delta_net, true)}</td>
+                            <td className="px-2 py-1 text-right tabular-nums text-slate-300">{r.capital_changed == null ? "—" : money(r.capital_changed)}</td>
+                            <td className={clsx("px-2 py-1 text-right tabular-nums", r.roc_changed == null ? "text-slate-500" : r.roc_changed >= 0 ? "text-emerald-300" : "text-rose-300")}>
+                              {r.roc_changed == null ? "—" : pct(r.roc_changed)}
+                            </td>
                             <td className="px-2 py-1 text-right tabular-nums text-slate-300">{r.trades_changed}</td>
                             <td className="px-2 py-1 text-right tabular-nums text-slate-300">{pct(r.win_pct_changed)}</td>
                             <td className="px-2 py-1 text-right tabular-nums text-slate-300">{r.profit_factor_changed == null ? "—" : num(r.profit_factor_changed)}</td>
@@ -641,6 +667,80 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
 function ruleLabel(rules: StrategyLabRules, kind: string, name: string): string {
   const list = kind === "entry" ? rules.entries : kind === "exit" ? rules.exits : kind === "target" ? rules.targets : rules.stops;
   return list.find((r) => r.name === name)?.label ?? name;
+}
+
+/** The best set of rules found, shown next to the rule ticks: its P&L after charges, trades, the capital it needs
+ * and the return on it, with "Use it" and a "Judge by" switch (P&L or return on capital). */
+function BestFound({
+  rec,
+  stale,
+  judge,
+  onJudge,
+  busy,
+  onFind,
+  onUse,
+}: {
+  rec: StrategyLabRecommend | null;
+  stale: boolean;
+  judge: StrategyLabJudge;
+  onJudge: (j: StrategyLabJudge) => void;
+  busy: boolean;
+  onFind: () => void;
+  onUse: () => void;
+}) {
+  const best = rec?.best;
+  const now = rec?.now;
+  const better = Boolean(best && best.steps.length);
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs">
+      <span className="inline-flex items-center gap-1 font-semibold text-slate-200">
+        Best found <NewTag id="lab-best-capital" link={false} />
+      </span>
+      <label className="inline-flex items-center gap-1 text-slate-400">
+        Judge by
+        <select
+          value={judge}
+          onChange={(e) => onJudge(e.target.value as StrategyLabJudge)}
+          className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
+          title="Return on capital: P&L after charges ÷ the most margin in use at one moment, so a set that makes a little less with far less money can win. P&L: the most rupees after charges."
+        >
+          <option value="ROC">Return on capital</option>
+          <option value="NET">P&amp;L after charges</option>
+        </select>
+      </label>
+      {rec && best && now ? (
+        <>
+          <span className="text-slate-300">
+            {better ? "Best" : "Now (nothing beats it)"}:{" "}
+            <b className={clsx("tabular-nums", best.totals.net >= 0 ? "text-emerald-300" : "text-rose-300")}>{money(best.totals.net, true)}</b> after charges ·{" "}
+            {best.totals.trades} trades · capital <b className="tabular-nums text-slate-200">{money(best.totals.peak_margin ?? 0)}</b> · return{" "}
+            <b className={clsx("tabular-nums", (best.totals.roc ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300")}>{best.totals.roc == null ? "—" : pct(best.totals.roc)}</b>
+          </span>
+          {better ? (
+            <span className="text-slate-500">
+              (now {money(now.net, true)}, {now.roc == null ? "—" : pct(now.roc)} on {money(now.peak_margin ?? 0)})
+            </span>
+          ) : null}
+          {stale || rec.judge !== judge ? <span className="text-amber-300">The ticks or Judge by changed: find it again.</span> : null}
+          {better && !stale && rec.judge === judge ? (
+            <button type="button" onClick={onUse} className="rounded-md px-2 py-1 font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-400/40 hover:bg-emerald-500/10">
+              Use it
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <span className="text-slate-500">Not worked out yet for these ticks.</span>
+      )}
+      <button
+        type="button"
+        onClick={onFind}
+        disabled={busy}
+        className="inline-flex items-center gap-1 rounded-md px-2 py-1 font-semibold text-accentSky ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10 disabled:opacity-50"
+      >
+        {busy ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} {rec ? "Find again" : "Find the best"}
+      </button>
+    </div>
+  );
 }
 
 function RuleBox({

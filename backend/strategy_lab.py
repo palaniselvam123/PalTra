@@ -1312,13 +1312,38 @@ def _toggles(choice: dict) -> list[tuple[str, str, dict]]:
     return out
 
 
-def recommend(trades: list[dict], choice: dict, settings: dict | None = None) -> dict:
-    """What each rule adds on top of the current choice, and the best combination a greedy search finds."""
+JUDGES = ("NET", "ROC")
+
+
+def _roc(out: dict) -> float | None:
+    """Return on capital: net P&L after charges ÷ the most margin in use at one moment, in %. None without trades."""
+    margin = (out.get("capital") or {}).get("peak_margin") or 0.0
+    return round(out["totals"]["net"] / margin * 100, 2) if margin > 0 else None
+
+
+def _brief(out: dict) -> dict:
+    """The totals plus the capital they needed and the return on it."""
+    cap = out.get("capital") or {}
+    return {**out["totals"], "peak_margin": cap.get("peak_margin", 0.0), "peak_value": cap.get("peak_value", 0.0), "roc": _roc(out)}
+
+
+def _score(brief: dict, judge: str) -> float:
+    if judge == "ROC":
+        return brief["roc"] if brief["roc"] is not None else float("-inf")
+    return brief["net"]
+
+
+def recommend(trades: list[dict], choice: dict, settings: dict | None = None, judge: str = "NET") -> dict:
+    """What each rule adds on top of the current choice, and the best combination a greedy search finds.
+
+    `judge` NET ranks by P&L after charges; ROC by return on capital (net ÷ the most margin in use at once), so a set
+    that makes a little less with far less money can win."""
+    judge = judge if judge in JUDGES else "NET"
     choice = clean_choice(choice)
-    now = evaluate(trades, choice, settings, with_trades=False)["totals"]
+    now = _brief(evaluate(trades, choice, settings, with_trades=False))
     rows = []
     for kind, name, changed in _toggles(choice):
-        got = evaluate(trades, changed, settings, with_trades=False)["totals"]
+        got = _brief(evaluate(trades, changed, settings, with_trades=False))
         on_now = (
             name in choice["entries"] if kind == "entry" else name in choice["exits"] if kind == "exit" else name in choice["targets"] if kind == "target" else False
         )
@@ -1341,26 +1366,37 @@ def recommend(trades: list[dict], choice: dict, settings: dict | None = None) ->
                 "win_pct_changed": got["win_pct"],
                 "profit_factor_changed": got["profit_factor"],
                 "green_pct_changed": got["green_pct"],
+                "capital_now": now["peak_margin"],
+                "capital_changed": got["peak_margin"],
+                "roc_now": now["roc"],
+                "roc_changed": got["roc"],
+                "delta_roc": round(got["roc"] - now["roc"], 2) if got["roc"] is not None and now["roc"] is not None else None,
             }
         )
-    rows.sort(key=lambda r: -r["delta_net"])
-    # Greedy: from the current choice, take the single change that adds the most net, until nothing adds.
+    if judge == "ROC":
+        rows.sort(key=lambda r: -(r["roc_changed"] if r["roc_changed"] is not None else float("-inf")))
+    else:
+        rows.sort(key=lambda r: -r["delta_net"])
+    # Greedy: from the current choice, take the single change that adds the most (net or return on capital), until
+    # nothing adds; a set left with fewer than SEARCH_MIN_TRADES trades is never picked.
     best_choice = dict(choice)
     best = now
     steps: list[dict] = []
     for _ in range(SEARCH_STEPS):
         candidates = []
         for kind, name, changed in _toggles(best_choice):
-            got = evaluate(trades, changed, settings, with_trades=False)["totals"]
-            if got["trades"] >= SEARCH_MIN_TRADES and got["net"] > best["net"] + 1e-9:
-                candidates.append((got["net"], kind, name, changed, got))
+            got = _brief(evaluate(trades, changed, settings, with_trades=False))
+            if got["trades"] >= SEARCH_MIN_TRADES and _score(got, judge) > _score(best, judge) + 1e-9:
+                candidates.append((_score(got, judge), kind, name, changed, got))
         if not candidates:
             break
         candidates.sort(key=lambda c: -c[0])
         _, kind, name, changed, got = candidates[0]
-        steps.append({"kind": kind, "name": name, "net_before": best["net"], "net_after": got["net"], "trades": got["trades"]})
+        steps.append({"kind": kind, "name": name, "net_before": best["net"], "net_after": got["net"], "trades": got["trades"],
+                      "roc_before": best["roc"], "roc_after": got["roc"]})
         best_choice, best = changed, got
     return {
+        "judge": judge,
         "now": now,
         "rows": rows,
         "best": {"choice": best_choice, "totals": best, "steps": steps, "settings": settings_for_choice(best_choice, settings)},
