@@ -133,6 +133,10 @@ export function pickRuleRows(run: { settings: Settings; days_total?: number; sta
     if (s("until")) rows.push(["Trade until", `${s("until")} IST (squared off there)`]);
     rows.push(["Price range", n("price_min") || n("price_max") ? `${rupee(n("price_min"))} to ${rupee(n("price_max"))}` : "any"]);
     rows.push(["At most", `${n("max_day") ?? 10} stocks a day`]);
+    if (r.force_strong || r.force_pressure) {
+      const which = r.force_strong && r.force_pressure ? "every armed stock" : r.force_strong ? "Trend quality stocks" : "Most active stocks";
+      rows.push(["Force order when armed", `on (${which}): entered at once at the arm minute, side from the bot's entry rule`]);
+    }
     return rows;
   }
   if (pick.kind === "SAVED") {

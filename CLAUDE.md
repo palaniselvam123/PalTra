@@ -616,6 +616,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the SMA lines run on); the rest stay. A dotted line draws the smaller candles' own SMA 9. `DrillPanel` lists each smaller
   candle (OHLC, SMA 9, slope in % per candle and in ATR per candle, flat < 0.01 / steep ≥ 0.03 %/candle) with the average and
   steepest slope and whether SMA 9 turned inside them, and "Back to N-min candles". A new stock, size or range clears it.
+  **ADX bars** (display only): the ADX 14 strip draws bars under its line (`adxBarsRef`, `chartStyle.adxReads`: ADX with
+  +DI / −DI, Wilder), green while +DI ≥ −DI, red while below, faint under the ADX check's level (20 when off); the reading
+  line adds "+DI … −DI …". The MACD strip already has its histogram. Both strips show on Auto only while the bot uses them;
+  Indicators → On shows them always.
   The chart's **Indicators** panel (`components/Terminal/ChartIndicators.tsx`, `lib/chartStyle.ts`, kept in the
   browser) shows or hides SMA fast / slow, VWAP, EMA, Bollinger, Supertrend, ATR and RSI (`Auto` = while the strategy
   uses it, the old behaviour) and sets each line's colour, thickness and pattern and the candle colours; an EMA the
@@ -1576,7 +1580,17 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   scanner; the desk arms its own bots; the backtest server its own unless **Arm on: the main desk's bots** (`arm_on` `here`
   default | `desk`, needs `SCANNER_LINK_TOKEN`; the card's choice is shown when the view's `desk_link` is true; owner's case:
   auto-arm ran on the backtest server and the main desk got nothing)). One Telegram per run that armed something (quiet
-  channel). `GET /api/scalp-alerts` carries `auto_arm` (recent runs, today's arms). **Auto-arm replay** (`AutoArmRule`,
+  channel). `GET /api/scalp-alerts` carries `auto_arm` (recent runs, today's arms). **Force order when armed** (`arm_strong_force` /
+  `arm_pressure_force`, off by default, per source; the tick box under each "Also arm them on" row; owner's request): right
+  after each new auto-arm, `auto_arm.after_scan`'s `force` hook (`main._auto_arm_force`) has the bot enter at once through
+  `StrategyEngine.force_order(symbol, auto=True)`: candle-colour mode (`entry_mode = "COLOUR"`) on the last closed colour
+  candle (`colour_force.side`, whatever `colour_force` says), any other mode on the SMA side; entry checks skipped like
+  Force, market hours / cut-off / caps / loss lock / one LIVE bot per stock apply, a bot that is not RUNNING is never started
+  (refused, the stock stays armed); entry reason `AUTO_ARM_FORCE`; the run's record carries `forced` (placed, note) and the
+  Telegram says so. Over the link the desk's `POST /api/link/force` (`routes_link.desk_force`, token, `confirm_live` for a
+  LIVE bot) runs the bot's own Force path with `auto`. With `arm_live` on, turning it on needs `confirm_live` (409 without).
+  The auto-arm replay plays it (`AutoArmRule.force_strong` / `force_pressure`, `auto_arm.force_symbols`,
+  `ReplayEngine.force_on_arm`: once per stock at its arm minute); the form's "Force order when armed" tick box. **Auto-arm replay** (`AutoArmRule`,
   kind `AUTOARM`, dispatched by `scalp_picks.picks_for_day`; `POST /api/replay/auto-arm`, the Scalp Backtest tab's
   `components/Scalp/AutoArmReplay.tsx`; practice money, works after hours): `picks_for_day` gives each stock the minute it
   would have been armed: Trend quality every `every_min` minutes from `first` to `last` (`strong_read`: the same

@@ -141,6 +141,9 @@ async def desk_armed(server: Server = "desk"):
 # Trade list; the bot orders on its next SMA cross, as when armed on the desk.
 
 ARM_PATH = "/api/link/arm"
+# Auto-arm's "Force order when armed" (auto_arm.py): the scanner / backtest server asks the desk's bot to enter at
+# once on a stock it just armed there. Its entry rule picks the side; a LIVE bot needs confirm_live.
+FORCE_PATH = "/api/link/force"
 # News watch lists (news_lists.py) live on the desk: the scanner's Scalp page reads and adds to them here.
 NEWS_LISTS = "/api/link/news-lists"
 NEWS_LISTS_ADD = "/api/link/news-lists/add"
@@ -151,7 +154,7 @@ LIVE_REFUSED = "That bot is LIVE: confirm the LIVE arm first (confirm_live)."
 def token_path(path: str) -> bool:
     """Desk paths that check a link token themselves (exempt from the Google lock)."""
     return path in (
-        ARMED_PATH, ARM_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, BACKTEST_EXPORT, BACKTEST_ACTIVE, BACKTEST_SAVED_PICKS,
+        ARMED_PATH, ARM_PATH, FORCE_PATH, BACKTEST_SETTINGS, BACKTEST_GROWW, BACKTEST_SCANS, BACKTEST_EXPORT, BACKTEST_ACTIVE, BACKTEST_SAVED_PICKS,
         BACKTEST_QUEUE_DUE,
         NEWS_LISTS, NEWS_LISTS_ADD
     ) or path.startswith(
@@ -454,6 +457,26 @@ async def desk_arm(body: ArmRequest, request: Request):
     if server_role.is_backtest() and res.status_code == 200:
         _remember_scanner_arm(t, body.symbol)
     return res
+
+
+def _force_path(target: int | str) -> str:
+    if target == "research":
+        return "/api/research/bot/force"
+    return "/api/bot/force" if target == 1 else f"/api/bots/{target}/bot/force"
+
+
+class ForceRequest(BaseModel):
+    target: str
+    symbol: str = Field(pattern=_SYMBOL)
+    confirm_live: bool = False
+
+
+@router.post(FORCE_PATH)
+async def desk_force(body: ForceRequest, request: Request):
+    """Desk side of auto-arm's force order: the bot's own Force path with `auto` (entry rule decides the side, a bot
+    that is not running is never started). A LIVE bot needs confirm_live."""
+    t = _desk_guard(request, body.target, body.confirm_live)
+    return await _terminal("POST", _force_path(t), {"symbol": body.symbol, "auto": True})
 
 
 async def _first_sync() -> None:

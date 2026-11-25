@@ -463,3 +463,61 @@ def test_the_why_names_the_candle_and_rules_read():
         "strong down, 5 of 7 checks on 15-min candles (morning rules, before 10:00); missed: run, volume")
     ha = auto_arm.AutoArmRule(minutes=5, candles="HA")
     assert auto_arm.strong_why({"trend_checks": {"a": True}}, "UP", ha) == "strong up, 1 of 1 checks on 5-min Heikin Ashi candles"
+
+
+@pytest.mark.asyncio
+async def test_force_order_when_armed_runs_right_after_each_new_arm():
+    """"Force order when armed": the bot enters at once on each stock it was just armed with, per source."""
+    rows = [_strong("UP"), _strong("DN", "STRONG_BEARISH")]
+    scalp_alerts.save({"arm_strong_on": True, "arm_strong_bot": 1, "strong_min_checks": 6})
+    forced: list = []
+
+    async def force(bot, symbol, live):
+        forced.append((bot, symbol, live))
+        return (symbol == "UP"), ("BUY 1 UP" if symbol == "UP" else "the bot is stopped")
+
+    bots, arm, calls = _hooks(armed=["DN"])
+    rec = await auto_arm.after_scan("strong", {"rows": rows}, bots=bots, arm=arm, now=NOW, check_market=False, force=force)
+    assert forced == [] and rec["forced"] == []  # switch off: arming only
+    auto_arm._DONE["strong"].clear()
+    auto_arm._SEEN["strong"].clear()
+    scalp_alerts.save({"arm_strong_force": True})
+    bots, arm, calls = _hooks()
+    sent: list[str] = []
+
+    async def notify(text):
+        sent.append(text)
+
+    rec = await auto_arm.after_scan("strong", {"rows": rows}, bots=bots, arm=arm, now=NOW, check_market=False,
+                                    force=force, notify=notify)
+    assert forced == [(1, "UP", False), (1, "DN", False)]
+    assert rec["forced"] == [{"symbol": "UP", "placed": True, "note": "BUY 1 UP"},
+                             {"symbol": "DN", "placed": False, "note": "the bot is stopped"}]
+    assert "Force order: UP" in sent[0] and "No force order: DN" in sent[0]
+    # The other source's switch is its own.
+    assert auto_arm.forced("pressure", scalp_alerts.load()) is False
+
+
+def test_force_with_a_live_bot_allowed_needs_confirm(monkeypatch):
+    import main
+    from fastapi.testclient import TestClient
+
+    client = TestClient(main.app)
+    assert client.put("/api/scalp-alerts", json={"arm_strong_force": True}).status_code == 200  # PAPER only: no ask
+    client.put("/api/scalp-alerts", json={"arm_strong_force": False})
+    assert client.put("/api/scalp-alerts", json={"arm_live": True, "confirm_live": True}).status_code == 200
+    res = client.put("/api/scalp-alerts", json={"arm_pressure_force": True})
+    assert res.status_code == 409 and scalp_alerts.load().arm_pressure_force is False
+    res = client.put("/api/scalp-alerts", json={"arm_pressure_force": True, "confirm_live": True})
+    assert res.status_code == 200 and scalp_alerts.load().arm_pressure_force is True
+
+
+def test_replay_forces_only_the_picked_sources_switched_on():
+    rule = auto_arm.AutoArmRule(force_strong=True)
+    picked = [{"symbol": "a", "source": "Trend quality"}, {"symbol": "B", "source": "Most active"}]
+    assert auto_arm.force_symbols(rule, picked) == {"A"}
+    assert auto_arm.force_symbols(auto_arm.AutoArmRule(), picked) == set()
+    import scalp_picks
+
+    back = scalp_picks.rule_from_dict(auto_arm.AutoArmRule(force_pressure=True).as_dict(), 9, 21)
+    assert back.force_pressure is True and back.force_strong is False

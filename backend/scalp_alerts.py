@@ -83,6 +83,11 @@ class Settings:
     arm_pressure_on: bool = False
     arm_pressure_bot: int = 1
     arm_max_day: int = 10
+    # Force order when armed (owner's request; off by default, per source): right after the auto-arm puts a stock on
+    # the bot, the bot enters at once (StrategyEngine.force_order(auto=True)): candle-colour mode on the last closed
+    # colour candle's colour, any other mode on the SMA side. A bot that is not RUNNING places nothing.
+    arm_strong_force: bool = False
+    arm_pressure_force: bool = False
     # Auto-arm only stocks priced inside this range (₹, 0 = no bound), live and in the auto-arm replay.
     arm_price_min: float = 0.0
     arm_price_max: float = 0.0
@@ -128,6 +133,8 @@ def clean(raw: dict) -> Settings:
         pass
     s.arm_strong_on = bool(raw.get("arm_strong_on", s.arm_strong_on))
     s.arm_pressure_on = bool(raw.get("arm_pressure_on", s.arm_pressure_on))
+    s.arm_strong_force = bool(raw.get("arm_strong_force", s.arm_strong_force))
+    s.arm_pressure_force = bool(raw.get("arm_pressure_force", s.arm_pressure_force))
     s.arm_strong_bot = _bot(raw.get("arm_strong_bot"), s.arm_strong_bot)
     s.arm_pressure_bot = _bot(raw.get("arm_pressure_bot"), s.arm_pressure_bot)
     s.arm_live = bool(raw.get("arm_live", s.arm_live))
