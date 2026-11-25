@@ -4101,6 +4101,8 @@ export type StrategyLabResult = {
   totals: StrategyLabTotals;
   per_day: { day: string; trades: number; gross: number; net: number; cum_gross: number }[];
   per_stock: { symbol: string; trades: number; win_pct: number; gross: number; net: number; days: number; green_days: number; per_trade: number }[];
+  /** Each stock on each day (older results have none). */
+  per_stock_day?: { symbol: string; day: string; trades: number; wins: number; gross: number; net: number }[];
   by_reason: { reason: string; trades: number; gross: number; wins: number }[];
   skipped: { refused: number; in_position: number; outside_window: number; stock_cap: number; unticked?: number };
   base_trades: number;

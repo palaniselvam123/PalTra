@@ -1232,6 +1232,16 @@ def _summarize(kept: list[dict]) -> dict:
             }
         )
     stock_rows.sort(key=lambda r: -r["gross"])
+    # Each stock on each day (the By day rows open into their stocks, the By stock rows into their days).
+    pairs: dict[tuple[str, str], dict] = {}
+    for k in kept:
+        p = pairs.setdefault((k["symbol"], k["day"]), {"symbol": k["symbol"], "day": k["day"], "trades": 0, "wins": 0, "gross": 0.0, "net": 0.0})
+        p["trades"] += 1
+        p["wins"] += 1 if k["gross"] > 0 else 0
+        p["gross"] += k["gross"]
+        p["net"] += k["net"]
+    pair_rows = [{**p, "gross": round(p["gross"], 2), "net": round(p["net"], 2)} for p in pairs.values()]
+    pair_rows.sort(key=lambda r: (r["day"], -r["gross"]))
     reasons: dict[str, dict] = {}
     for k in kept:
         r = reasons.setdefault(k["reason"], {"reason": k["reason"], "trades": 0, "gross": 0.0, "wins": 0})
@@ -1263,6 +1273,7 @@ def _summarize(kept: list[dict]) -> dict:
         },
         "per_day": day_rows,
         "per_stock": stock_rows,
+        "per_stock_day": pair_rows,
         "by_reason": reason_rows,
     }
 

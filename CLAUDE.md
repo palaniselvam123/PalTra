@@ -1959,7 +1959,7 @@ spinning top), body and range) / Matched / Call columns
   skipped, one that starts while the previous kept trade on that stock is open is skipped (crosses only open trades while
   flat), the trade ends at the earliest of its chosen exits / stop / targets / square-off (same minute: stop, target,
   exit), P&L before charges and after (`charges.calculate_charges`), per stock, per day (running total), by exit reason,
-  skipped counts, the trades (`MAX_TRADES_OUT`), and `settings` = the BotConfig fields of that choice
+  skipped counts, `per_stock_day` (each stock on each day: the By day rows open into their stocks and the By stock rows into their days, Open all / Close all), the trades (`MAX_TRADES_OUT`), and `settings` = the BotConfig fields of that choice
   (`settings_for_choice`). **Capital** (`capital`, `out["capital"]`; display only): each kept trade's full value
   (qty × entry price), the most in use at one moment (`peak_value`: trades open together add up, one closing at a minute
   frees its money before another opens then; `peak_at`, `peak_open`), the margin an intraday account blocks for it

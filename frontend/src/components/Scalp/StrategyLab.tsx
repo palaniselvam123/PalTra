@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { Check, FlaskConical, Loader2, Play, Square, Trash2, Wand2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from "@/components/Scalp/ScanLists";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
 import { money, num, pct } from "@/lib/format";
@@ -623,8 +623,8 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                   onArmMany={onArmMany}
                 />
               )}
-              {show === "stocks" && <StockTable rows={result.per_stock} />}
-              {show === "days" && <DayTable rows={result.per_day} />}
+              {show === "stocks" && <StockTable rows={result.per_stock} pairs={result.per_stock_day ?? []} />}
+              {show === "days" && <DayTable rows={result.per_day} pairs={result.per_stock_day ?? []} />}
               {show === "reasons" && <ReasonTable rows={result.by_reason} />}
               {show === "trades" && <TradeTable rows={result.trades ?? []} cut={result.trades_cut ?? 0} />}
             </div>
@@ -743,13 +743,99 @@ function Equity({ days }: { days: StrategyLabResult["per_day"] }) {
   );
 }
 
+type Pair = NonNullable<StrategyLabResult["per_stock_day"]>[number];
+
+/** Rows that open: a set of open keys plus Open all / Close all. */
+function useOpenRows() {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggle = (k: string) =>
+    setOpen((was) => {
+      const next = new Set(was);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  return { open, toggle, setAll: (keys: string[]) => setOpen(new Set(keys)) };
+}
+
+function OpenAllBar({ any, count, onOpen, onClose, what }: { any: boolean; count: number; onOpen: () => void; onClose: () => void; what: string }) {
+  if (!any) return null;
+  return (
+    <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+      <span>
+        Click a row to see its {what}. <NewTag id="lab-nested-rows" link={false} />
+      </span>
+      <button type="button" onClick={onOpen} className="rounded px-1.5 py-0.5 text-accentSky ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10">
+        Open all ({count})
+      </button>
+      <button type="button" onClick={onClose} className="rounded px-1.5 py-0.5 text-slate-300 ring-1 ring-inset ring-slate-700 hover:bg-slate-800">
+        Close all
+      </button>
+    </div>
+  );
+}
+
+/** The inner rows under an opened day (its stocks) or stock (its days). */
+function PairRows({ rows, label, cols }: { rows: Pair[]; label: (p: Pair) => string; cols: number }) {
+  return (
+    <tr className="bg-slate-900/40">
+      <td colSpan={cols} className="px-2 py-1">
+        <table className="ml-5 text-xs">
+          <thead className="text-left text-slate-500">
+            <tr>
+              <th className="px-2 py-0.5 font-normal">{label === pairDay ? "Day" : "Stock"}</th>
+              <th className="px-2 py-0.5 text-right font-normal">Trades</th>
+              <th className="px-2 py-0.5 text-right font-normal">Won</th>
+              <th className="px-2 py-0.5 text-right font-normal">Before charges</th>
+              <th className="px-2 py-0.5 text-right font-normal">After charges</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p) => (
+              <tr key={`${p.symbol}:${p.day}`} className="border-t border-slate-800/40">
+                <td className="px-2 py-0.5 text-slate-300">{label(p)}</td>
+                <td className="px-2 py-0.5 text-right tabular-nums text-slate-400">{p.trades}</td>
+                <td className="px-2 py-0.5 text-right tabular-nums text-slate-400">{p.wins}</td>
+                <td className={clsx("px-2 py-0.5 text-right tabular-nums", p.gross >= 0 ? "text-emerald-300" : "text-rose-300")}>{money(p.gross, true)}</td>
+                <td className={clsx("px-2 py-0.5 text-right tabular-nums", p.net >= 0 ? "text-emerald-300" : "text-rose-300")}>{money(p.net, true)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </td>
+    </tr>
+  );
+}
+
+const pairDay = (p: Pair) => p.day;
+const pairStock = (p: Pair) => p.symbol;
+
+function groupPairs(pairs: Pair[], key: (p: Pair) => string): Map<string, Pair[]> {
+  const out = new Map<string, Pair[]>();
+  for (const p of pairs) {
+    const k = key(p);
+    const list = out.get(k);
+    if (list) list.push(p);
+    else out.set(k, [p]);
+  }
+  return out;
+}
+
 type StockKey = "symbol" | "trades" | "win_pct" | "gross" | "net" | "days" | "green_days" | "per_trade";
 
-function StockTable({ rows }: { rows: StrategyLabResult["per_stock"] }) {
+function StockTable({ rows, pairs }: { rows: StrategyLabResult["per_stock"]; pairs: Pair[] }) {
   const { sorted, sort, onSort } = useSort<StrategyLabResult["per_stock"][number], StockKey>(rows, (r, k) => r[k]);
+  const byStock = useMemo(() => {
+    const m = groupPairs(pairs, pairStock);
+    m.forEach((list) => list.sort((a, b) => a.day.localeCompare(b.day)));
+    return m;
+  }, [pairs]);
+  const { open, toggle, setAll } = useOpenRows();
   if (!rows.length) return <p className="text-xs text-slate-500">No trades with this choice.</p>;
   return (
-    <div className="max-h-96 overflow-auto rounded-lg border border-slate-800">
+    <>
+    <OpenAllBar any={byStock.size > 0} count={rows.length} what="days" onOpen={() => setAll(rows.map((r) => r.symbol))} onClose={() => setAll([])} />
+    <div className="max-h-[32rem] overflow-auto rounded-lg border border-slate-800">
       <table className="min-w-full text-xs">
         <thead className="sticky top-0 bg-card text-left text-slate-500">
           <tr>
@@ -765,8 +851,16 @@ function StockTable({ rows }: { rows: StrategyLabResult["per_stock"] }) {
         </thead>
         <tbody>
           {sorted.map((r) => (
-            <tr key={r.symbol} className="border-t border-slate-800/60">
-              <td className="px-2 py-1 font-semibold text-slate-200">{r.symbol}</td>
+            <Fragment key={r.symbol}>
+            <tr
+              className={clsx("border-t border-slate-800/60", byStock.has(r.symbol) && "cursor-pointer hover:bg-slate-800/40")}
+              onClick={() => byStock.has(r.symbol) && toggle(r.symbol)}
+              aria-expanded={byStock.has(r.symbol) ? open.has(r.symbol) : undefined}
+            >
+              <td className="px-2 py-1 font-semibold text-slate-200">
+                {byStock.has(r.symbol) ? <span className="mr-1 inline-block w-3 text-slate-500">{open.has(r.symbol) ? "▾" : "▸"}</span> : null}
+                {r.symbol}
+              </td>
               <td className="px-2 py-1 text-right tabular-nums text-slate-300">{r.trades}</td>
               <td className="px-2 py-1 text-right tabular-nums text-slate-300">{pct(r.win_pct)}</td>
               <td className={clsx("px-2 py-1 text-right tabular-nums", r.gross >= 0 ? "text-emerald-300" : "text-rose-300")}>{money(r.gross, true)}</td>
@@ -775,17 +869,28 @@ function StockTable({ rows }: { rows: StrategyLabResult["per_stock"] }) {
               <td className="px-2 py-1 text-right tabular-nums text-slate-300">{r.days}</td>
               <td className="px-2 py-1 text-right tabular-nums text-slate-300">{r.green_days}</td>
             </tr>
+            {open.has(r.symbol) && byStock.get(r.symbol) ? <PairRows rows={byStock.get(r.symbol) ?? []} label={pairDay} cols={8} /> : null}
+            </Fragment>
           ))}
         </tbody>
       </table>
     </div>
+    </>
   );
 }
 
-function DayTable({ rows }: { rows: StrategyLabResult["per_day"] }) {
+function DayTable({ rows, pairs }: { rows: StrategyLabResult["per_day"]; pairs: Pair[] }) {
+  const byDay = useMemo(() => {
+    const m = groupPairs(pairs, pairDay);
+    m.forEach((list) => list.sort((a, b) => b.gross - a.gross));
+    return m;
+  }, [pairs]);
+  const { open, toggle, setAll } = useOpenRows();
   if (!rows.length) return <p className="text-xs text-slate-500">No trades with this choice.</p>;
   return (
-    <div className="max-h-96 overflow-auto rounded-lg border border-slate-800">
+    <>
+    <OpenAllBar any={byDay.size > 0} count={rows.length} what="stocks" onOpen={() => setAll(rows.map((r) => r.day))} onClose={() => setAll([])} />
+    <div className="max-h-[32rem] overflow-auto rounded-lg border border-slate-800">
       <table className="min-w-full text-xs">
         <thead className="sticky top-0 bg-card text-left text-slate-500">
           <tr>
@@ -798,17 +903,29 @@ function DayTable({ rows }: { rows: StrategyLabResult["per_day"] }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.day} className="border-t border-slate-800/60">
-              <td className="px-2 py-1 text-slate-200">{r.day}</td>
+            <Fragment key={r.day}>
+            <tr
+              className={clsx("border-t border-slate-800/60", byDay.has(r.day) && "cursor-pointer hover:bg-slate-800/40")}
+              onClick={() => byDay.has(r.day) && toggle(r.day)}
+              aria-expanded={byDay.has(r.day) ? open.has(r.day) : undefined}
+            >
+              <td className="px-2 py-1 text-slate-200">
+                {byDay.has(r.day) ? <span className="mr-1 inline-block w-3 text-slate-500">{open.has(r.day) ? "▾" : "▸"}</span> : null}
+                {r.day}
+                {byDay.has(r.day) ? <span className="ml-1 text-slate-500">({byDay.get(r.day)?.length} stocks)</span> : null}
+              </td>
               <td className="px-2 py-1 text-right tabular-nums text-slate-300">{r.trades}</td>
               <td className={clsx("px-2 py-1 text-right tabular-nums", r.gross >= 0 ? "text-emerald-300" : "text-rose-300")}>{money(r.gross, true)}</td>
               <td className={clsx("px-2 py-1 text-right tabular-nums", r.net >= 0 ? "text-emerald-300" : "text-rose-300")}>{money(r.net, true)}</td>
               <td className={clsx("px-2 py-1 text-right tabular-nums", r.cum_gross >= 0 ? "text-emerald-300" : "text-rose-300")}>{money(r.cum_gross, true)}</td>
             </tr>
+            {open.has(r.day) && byDay.get(r.day) ? <PairRows rows={byDay.get(r.day) ?? []} label={pairStock} cols={5} /> : null}
+            </Fragment>
           ))}
         </tbody>
       </table>
     </div>
+    </>
   );
 }
 
