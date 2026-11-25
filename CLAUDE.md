@@ -616,6 +616,10 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   the SMA lines run on); the rest stay. A dotted line draws the smaller candles' own SMA 9. `DrillPanel` lists each smaller
   candle (OHLC, SMA 9, slope in % per candle and in ATR per candle, flat < 0.01 / steep ≥ 0.03 %/candle) with the average and
   steepest slope and whether SMA 9 turned inside them, and "Back to N-min candles". A new stock, size or range clears it.
+  **ADX bars** (display only): the ADX 14 strip draws bars under its line (`adxBarsRef`, `chartStyle.adxReads`: ADX with
+  +DI / −DI, Wilder), green while +DI ≥ −DI, red while below, faint under the ADX check's level (20 when off); the reading
+  line adds "+DI … −DI …". The MACD strip already has its histogram. Both strips show on Auto only while the bot uses them;
+  Indicators → On shows them always.
   The chart's **Indicators** panel (`components/Terminal/ChartIndicators.tsx`, `lib/chartStyle.ts`, kept in the
   browser) shows or hides SMA fast / slow, VWAP, EMA, Bollinger, Supertrend, ATR and RSI (`Auto` = while the strategy
   uses it, the old behaviour) and sets each line's colour, thickness and pattern and the candle colours; an EMA the

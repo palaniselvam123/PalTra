@@ -60,7 +60,7 @@ export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: 
   st: { name: "Supertrend", auto: "while the Supertrend check or exit is on", color2: "down" },
   atr: { name: "ATR 14 (strip)", auto: "while the stop type is ATR" },
   rsi: { name: "RSI 14 (strip)", auto: "while the RSI check is ticked" },
-  adx: { name: "ADX 14 (strip)", auto: "while the ADX check is ticked" },
+  adx: { name: "ADX 14 with bars (strip)", auto: "while the ADX check is ticked" },
   macd: { name: "MACD with histogram (strip)", auto: "while the MACD check or exit is on", color2: "signal" },
   cvd: { name: "Cumulative delta (strip)", auto: "while the cumulative delta check or divergence exit is on" },
   pressure: { name: "Buyers waiting % (strip)", auto: "while a Most active scan has read the stock" },
@@ -282,6 +282,12 @@ export function smoothFlows(reads: (FlowRead | null)[], n: number): (FlowRead | 
  * where the server sent no `adx14` (candles merged in the browser, an older server).
  */
 export function adxValues(rows: { high: number; low: number; close: number }[], n = 14): (number | null)[] {
+  return adxReads(rows, n).map((r) => (r ? r.adx : null));
+}
+
+/** ADX 14 with +DI / −DI (Wilder), the same arithmetic as adxValues: +DI above −DI = the trend is up, below = down.
+ * The chart's ADX bars take their colour from it. Null until ADX is formed. */
+export function adxReads(rows: { high: number; low: number; close: number }[], n = 14): ({ adx: number; pdi: number; mdi: number } | null)[] {
   const a = 1 / n;
   let atr: number | null = null;
   let plus: number | null = null;
@@ -305,7 +311,7 @@ export function adxValues(rows: { high: number; low: number; close: number }[], 
     const dx = (100 * Math.abs(pdi - mdi)) / (pdi + mdi);
     adx = adx == null ? dx : adx + a * (dx - adx);
     dxSeen += 1;
-    return dxSeen >= n ? adx : null;
+    return dxSeen >= n ? { adx, pdi, mdi } : null;
   });
 }
 
