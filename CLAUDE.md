@@ -1968,7 +1968,15 @@ spinning top), body and range) / Matched / Call columns
   stock; `out["universe"]` = every stock of the run with its signals, `skipped.unticked`): the result's **Stocks** tab
   (`StrategyLab.StockPicker`: tick boxes, Tick all / Untick all / Invert / Only winners / losers / with trades / armed now /
   Top N by P&L, search, sortable; each stock's P&L with the same rules and every stock in) keeps only the ticked stocks in
-  every number, "Backtest this in the replay" replays only them, and **Arm ticked** opens the usual Arm ticked prompt. `recommend` (`POST …/recommend`): every rule toggled one at a time against the choice ("what
+  every number, "Backtest this in the replay" replays only them, and **Arm ticked** opens the usual Arm ticked prompt.
+  **Backtest this in the replay** (`POST /api/strategy-lab/{id}/apply`, `StrategyLabApply`: the choice plus `reset`,
+  `stop_replay`, `confirm_live`; then `replayStart` on the run's or ticked stocks and days): the switches of
+  `settings_for_choice` go on the run's bot through `_import_desk` (dry run first, Save's checks; Trade list, PAPER/LIVE,
+  name and per-stock settings stay); with **Reset the bot's other settings first** (`reset`, the tick box next to the
+  button) every other strategy field goes back to its default (`strategy_defaults`) and the lab's numbers are put on
+  (`numbers_for_bot`: SMAs, ATR, quantity, candle, cut-off / square-off, filter ranges, TSL / VWAP / decel numbers,
+  `entry_mode` SMA), so the replay trades only what the lab tested. A backtest already playing on that bot is stopped only
+  with `stop_replay` (the page asks), else 409. `recommend` (`POST …/recommend`): every rule toggled one at a time against the choice ("what
   each rule adds", `delta_net`) and a greedy climb (`SEARCH_STEPS`, `SEARCH_MIN_TRADES`) to the best found.
   `choice_from_cfg` is the bot's own switches, the run's starting choice. `GET /api/strategy-lab` (runs, `rules` with
   labels), `GET /api/strategy-lab/{id}` (the run's choice evaluated), `POST /api/strategy-lab/stop`, `DELETE

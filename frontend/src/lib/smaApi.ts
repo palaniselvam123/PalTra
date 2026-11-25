@@ -3486,6 +3486,9 @@ export const smaApi = {
     request<StrategyLabResult>(`/api/strategy-lab/${encodeURIComponent(id)}/evaluate`, { method: "POST", body: JSON.stringify(choice) }, 30000, false),
   strategyLabRecommend: (id: string, choice: StrategyLabChoice) =>
     request<StrategyLabRecommend>(`/api/strategy-lab/${encodeURIComponent(id)}/recommend`, { method: "POST", body: JSON.stringify(choice) }, 60000, false),
+  /** Put the lab's choice on the run's bot (with `reset`, every other strategy setting back to its default first). */
+  strategyLabApply: (id: string, body: StrategyLabChoice & { reset?: boolean; stop_replay?: boolean; confirm_live?: boolean }) =>
+    request<{ changed?: string[]; bot: number; reset: boolean }>(`/api/strategy-lab/${encodeURIComponent(id)}/apply`, { method: "POST", body: JSON.stringify(body) }, 30000, false),
   strategyLabDelete: (id: string) => request<StrategyLabView>(`/api/strategy-lab/${encodeURIComponent(id)}`, { method: "DELETE" }, 20000, false),
   /** Saved scans: the days, and one day's runs (latest day when none is given). */
   /** A desk's open P&L through a day, one point a minute ("1"-"4" or "research"; latest day when none is given). */

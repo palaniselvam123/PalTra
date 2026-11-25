@@ -273,6 +273,28 @@ def test_api_starts_evaluates_recommends_and_deletes(tmp_path, monkeypatch):
         rec = client.post(f"/api/strategy-lab/{job_id}/recommend", json={"entries": [], "exits": ["cross"], "stop": "ATR"})
         assert rec.status_code == 200 and rec.json()["rows"] and "best" in rec.json()
         assert client.get("/api/strategy-lab/nope").status_code == 404
+        # "Backtest this in the replay": the lab's switches go on the bot; with reset the rest goes back to its default
+        from models import BotConfig as Cfg
+
+        with database.session_factory()() as db:
+            row = db.get(Cfg, 1)
+            row.use_vwap, row.always_in, row.sma_fast, row.flip_orders = True, True, 7, True
+            db.commit()
+        keep = client.post(f"/api/strategy-lab/{job_id}/apply", json={"entries": [], "exits": ["cross"], "stop": "ATR"})
+        assert keep.status_code == 200, keep.text
+        with database.session_factory()() as db:
+            row = db.get(Cfg, 1)
+            assert row.use_vwap is False and row.always_in is True and row.sma_fast == 7 and row.flip_orders is True
+            row.sma_fast = 9  # the number the run read
+            db.commit()
+        reset = client.post(f"/api/strategy-lab/{job_id}/apply", json={"entries": ["rsi"], "exits": ["cross"], "stop": "TSL", "qty": 250, "reset": True})
+        assert reset.status_code == 200, reset.text
+        with database.session_factory()() as db:
+            row = db.get(Cfg, 1)
+            assert row.use_rsi is True and row.use_stop is True and row.stop_type == "TSL" and row.cross_exit is True
+            assert row.always_in is False and row.flip_orders is False and row.entry_mode == "SMA"  # back to defaults
+            assert row.sma_fast == 9 and row.sma_slow == 21 and row.qty == 250  # the lab's numbers put back
+        assert client.post("/api/strategy-lab/nope/apply", json={}).status_code == 404
         assert client.delete(f"/api/strategy-lab/{job_id}").status_code == 200
         assert client.get(f"/api/strategy-lab/{job_id}").status_code == 404
     database.reset_engine()

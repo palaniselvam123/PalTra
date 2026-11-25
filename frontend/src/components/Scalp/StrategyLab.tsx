@@ -9,7 +9,6 @@ import { money, num, pct } from "@/lib/format";
 import {
   replayActive,
   smaApi,
-  type SmaConfig,
   type StrategyLabCapital,
   type StrategyLabChoice,
   type StrategyLabJob,
@@ -62,6 +61,8 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
   const [evaluating, setEvaluating] = useState(false);
   const [recBusy, setRecBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  // "Backtest this in the replay": every other strategy setting back to its default first (off = only the switches).
+  const [resetFirst, setResetFirst] = useState(false);
   const [show, setShow] = useState<"pick" | "stocks" | "days" | "trades" | "reasons">("stocks");
   // Every stock's P&L with the same rules but all stocks in (the Stocks tab shows it for unticked ones too).
   const [allStocks, setAllStocks] = useState<StrategyLabResult["per_stock"] | null>(null);
@@ -220,17 +221,22 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
     const target = job.bot as 1 | 2 | 3 | 4;
     const picked = (choice.symbols ?? []).filter((x) => x !== NO_STOCK);
     const stocks = picked.length ? picked : job.symbols;
-    const text = `Save these switches on Bot ${target} (the numbers behind them stay as they are) and replay ${stocks.length} stock(s)${picked.length ? " (the ticked ones)" : ""}, ${job.first} → ${job.last}, through the real bot? Practice money; no order is sent.`;
+    const what = resetFirst
+      ? `Reset Bot ${target}'s other strategy settings to their defaults, then put on these switches and the numbers the lab read (SMAs, stop, filter ranges, quantity, candle). The Trade list, PAPER/LIVE, name and per-stock settings stay.`
+      : `Save these switches on Bot ${target} (its numbers and every other setting stay as they are).`;
+    const text = `${what}\n\nThen replay ${stocks.length} stock(s)${picked.length ? " (the ticked ones)" : ""}, ${job.first} → ${job.last}, through the real bot? Practice money; no order is sent. The old settings stay in Settings → Strategy → Saved strategies & history.`;
     if (!window.confirm(text)) return;
     setBusy(true);
     try {
       const current = (await smaApi.replayAll().catch(() => null))?.[String(target)] ?? null;
-      if (current && replayActive(current) && current.status !== "FINISHED") {
-        if (!window.confirm(`Bot ${target}'s replay is already running. Stop it and start this one instead?`)) return;
-      }
-      await smaApi.saveConfigOn(target, result.settings as Partial<SmaConfig>);
-      await smaApi.replayStart(job.first, "09:15", 0, job.last, stocks, target, false, true);
-      setNote({ ok: true, text: `Saved on Bot ${target} and started the replay. Its trades build up in the terminal's Backtests tab; compare them with the lab's ${result.totals.trades} trade(s) and ${money(result.totals.gross, true)}.` });
+      const playing = Boolean(current && replayActive(current) && current.status !== "FINISHED");
+      if (playing && !window.confirm(`Bot ${target}'s replay is already running. Stop it and start this one instead?`)) return;
+      await smaApi.strategyLabApply(job.id, { ...choice, reset: resetFirst, stop_replay: playing });
+      await smaApi.replayStart(job.first, "09:15", 300, job.last, stocks, target, false, true);
+      setNote({
+        ok: true,
+        text: `${resetFirst ? "Reset and saved" : "Saved"} on Bot ${target} and started the replay. Its trades build up in the terminal's Backtests tab; compare them with the lab's ${result.totals.trades} trade(s) and ${money(result.totals.gross, true)}.`,
+      });
     } catch (e: unknown) {
       setNote({ ok: false, text: e instanceof Error ? e.message : "Could not start the replay" });
     } finally {
@@ -455,6 +461,13 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                 <button type="button" onClick={backtest} disabled={busy} className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-400/40 hover:bg-emerald-500/10 disabled:opacity-50">
                   <Play size={13} /> Backtest this in the replay
                 </button>
+                <label
+                  className="inline-flex items-center gap-1.5 text-xs text-slate-300"
+                  title="Off: only the lab's switches change on the bot; its other settings (entry mode, pullbacks, smart stop, hand-offs…) stay and play in the replay too. On: every other strategy setting goes back to its default first and the lab's numbers are put on, so the replay trades only what the lab tested. The Trade list, PAPER/LIVE, name and per-stock settings stay."
+                >
+                  <input type="checkbox" checked={resetFirst} onChange={(e) => setResetFirst(e.target.checked)} disabled={busy} />
+                  Reset the bot&apos;s other settings first <NewTag id="lab-replay-reset" />
+                </label>
                 <button type="button" onClick={exportCsv} disabled={!result.trades?.length} className="min-h-9 rounded-md px-3 text-xs text-slate-300 ring-1 ring-inset ring-slate-700 hover:bg-slate-800 disabled:opacity-50">
                   CSV
                 </button>

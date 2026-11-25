@@ -6037,6 +6037,50 @@ async def strategy_lab_recommend(job_id: str, body: StrategyLabChoice):
     return await asyncio.to_thread(strategy_lab.recommend, rows, body.model_dump(), job.get("settings"))
 
 
+class StrategyLabApply(StrategyLabChoice):
+    #: Every other strategy setting back to its default first, then the lab's switches and numbers (the replay then
+    #: trades only what the lab tested). Off = only the lab's switches change; everything else stays as the bot has it.
+    reset: bool = False
+    #: That bot's backtest is loading / playing / paused and the page asked to stop it first.
+    stop_replay: bool = False
+    confirm_live: bool = False
+
+
+@app.post("/api/strategy-lab/{job_id}/apply")
+async def strategy_lab_apply(job_id: str, body: StrategyLabApply):
+    """Put the lab's choice on the run's bot ("Backtest this in the replay"): the switches of `settings_for_choice`
+    and, with `reset`, every other strategy field back at its default with the lab's numbers on top. One write, checked
+    like Save (dry run first). The Trade list, PAPER/LIVE, name and per-stock settings stay. No order is placed."""
+    job, _rows = _lab_job_or_404(job_id)
+    bot = int(job.get("bot") or 1)
+    desk = str(bot)
+    eng = _desk_engine(desk)
+    if (eng.load_config().trading_mode or "PAPER").upper() == "LIVE" and not body.confirm_live:
+        raise HTTPException(409, f"{_desk_label(desk)} is LIVE: confirm before changing its settings")
+    session = replays.get(bot)
+    if session is not None and session.status in ("LOADING", "PLAYING", "PAUSED"):
+        if not body.stop_replay:
+            raise HTTPException(409, f"Bot {bot}'s backtest is playing: stop it or let it finish first")
+        await session.stop()
+    choice = strategy_lab.clean_choice(body.model_dump())
+    settings = job.get("settings") or {}
+    fields = dict(strategy_lab.settings_for_choice(choice, settings))
+    if body.reset:
+        defaults = {k: v for k, v in strategy_defaults().items() if v is not None}
+        fields = {**defaults, **strategy_lab.numbers_for_bot(settings, choice), **fields}
+    allowed = set(ConfigUpdate.model_fields) - COPY_SKIP
+    fields = {k: v for k, v in fields.items() if k in allowed}
+    if isinstance(fields.get("review_check_minutes"), str):
+        fields["review_check_minutes"] = [int(x) for x in fields["review_check_minutes"].split(",") if x.strip().isdigit()] or None
+        if fields["review_check_minutes"] is None:
+            fields.pop("review_check_minutes")
+    data = {"settings": fields, "stock_settings": {}}
+    write = SettingsImport(file={}, stock_settings=False, confirm_live=body.confirm_live)
+    await asyncio.to_thread(_import_desk, desk, data, write, True)
+    result = await asyncio.to_thread(_import_desk, desk, data, write)
+    return {**result, "bot": bot, "reset": body.reset}
+
+
 @app.delete("/api/strategy-lab/{job_id}")
 async def strategy_lab_delete(job_id: str):
     if strategy_lab.lab().running and (strategy_lab.lab().current or {}).get("id") == job_id:
