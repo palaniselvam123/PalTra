@@ -758,6 +758,10 @@ class ConfigUpdate(BaseModel):
     macd_fast: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
     macd_slow: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
     macd_signal: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
+    use_macd_grow: bool | None = None
+    macd_grow_candles: int | None = Field(default=None, ge=1, le=macd.MAX_RUN)
+    macd_shrink_exit: bool | None = None
+    macd_shrink_candles: int | None = Field(default=None, ge=1, le=macd.MAX_RUN)
     use_cvd: bool | None = None
     cvd_lookback: int | None = Field(default=None, ge=1, le=cum_delta.MAX_LOOKBACK)
     cvd_div_exit: bool | None = None
@@ -2004,6 +2008,10 @@ def _gap_dict(row) -> dict:
         "macd_fast": macd.lengths(row)[0],
         "macd_slow": macd.lengths(row)[1],
         "macd_signal": macd.lengths(row)[2],
+        "use_macd_grow": macd.grow_on(row),
+        "macd_grow_candles": macd.grow_candles(row),
+        "macd_shrink_exit": macd.shrink_on(row),
+        "macd_shrink_candles": macd.shrink_candles(row),
         "use_cvd": cum_delta.entry_on(row),
         "cvd_lookback": cum_delta.lookback(row),
         "cvd_div_exit": cum_delta.exit_on(row),

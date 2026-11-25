@@ -233,6 +233,11 @@ export type SmaConfig = {
   macd_fast?: number;
   macd_slow?: number;
   macd_signal?: number;
+  /** MACD histogram (macd.py): entry only while it grows the trade's way N candles; exit once it moves against N candles. */
+  use_macd_grow?: boolean;
+  macd_grow_candles?: number;
+  macd_shrink_exit?: boolean;
+  macd_shrink_candles?: number;
   /** Cumulative delta (cum_delta.py): entry only while it moves the trade's way; exit on a price / delta divergence. */
   use_cvd?: boolean;
   cvd_lookback?: number;
@@ -1877,6 +1882,11 @@ export type ChartFilters = {
   macd_fast?: number;
   macd_slow?: number;
   macd_signal?: number;
+  /** MACD histogram (macd.py): entry only while it grows the trade's way N candles; exit once it moves against N candles. */
+  use_macd_grow?: boolean;
+  macd_grow_candles?: number;
+  macd_shrink_exit?: boolean;
+  macd_shrink_candles?: number;
   /** Draw the Supertrend line (its check or exit on) and its settings. */
   st_line?: boolean;
   st_period?: number;

@@ -916,6 +916,16 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   cancels a LIVE stop first) on a candle closed after the entry on which MACD crossed its signal line against it; once per
   closed candle (`pos.macd_bar`); a LIVE position restored without its stop id is left to that stop. Settings → 2. Checks
   before entering (numbers) and 3. When to exit. The stock research baseline keeps both off.
+  **Histogram growing / shrinking** (owner's request; per bot and per stock, PAPER and LIVE, replays too): **entry check**
+  (`use_macd_grow`, `macd_grow_candles` 1-5, default 2; through `_entry_block`, check name `macd_grow`, chart ✕ "MACD"): a
+  buy only after the histogram rose that many closed candles in a row (each bar higher than the one before), a sell only
+  after it fell (`grow_reason`; the bars' side is the MACD check's job). **Exit** (`macd_shrink_exit`, `macd_shrink_candles`
+  1-5, default 2): `StrategyEngine._watch_macd_shrink`, once per closed candle (`pos.macd_shrink_bar`), closes the trade
+  (`MACD_SHRINK`, via `_exit_now`, LIVE stop cancelled first; a LIVE position restored without its stop id is left to that
+  stop) once the histogram moved against it that many candles in a row, every step ending on a candle closed after the
+  entry (`shrunk_against`): for a buy each bar lower (green shrinking or red growing), for a sell each higher. Groupable in
+  "How exits combine" (key `MACD`), confirmable by the executed volume (`flow_exit.CONFIRM_REASONS`), counts as an exit for
+  `strategyChecks.noExitOn`. Settings anchors `#sma-macd-hist` / `#sma-macd-shrink`. The Strategy lab does not know them.
 - `backend/cum_delta.py` – cumulative delta (CVD) check and divergence exit (off by default, per bot and per stock, PAPER
   and LIVE, replays too). Groww gives no buy / sell split, so each candle's delta is estimated (owner's choice): volume ×
   (close − open) ÷ (high − low) (0 for no range or no volume), summed from each IST session's first candle (`series`).

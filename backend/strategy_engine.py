@@ -301,6 +301,8 @@ class OpenPosition:
     ema_bar: int | None = None
     # MACD exit (macd.py): the last closed candle read.
     macd_bar: int | None = None
+    # MACD histogram shrinking exit (macd.py): the last closed candle read.
+    macd_shrink_bar: int | None = None
     # Cumulative delta divergence exit (cum_delta.py): the last closed candle read.
     cvd_bar: int | None = None
     # Last exit candle read by the mixed-candle exit (exit_candle.py), memory only.
@@ -418,7 +420,7 @@ SNAPSHOT_FIELDS = (
     "counter_exit_count", "counter_entry", "counter_rule", "counter_need_fast", "counter_min_body",
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
-    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours", "ha_scope",
+    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "use_macd_grow", "macd_grow_candles", "macd_shrink_exit", "macd_shrink_candles", "ha_colours", "ha_scope",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "reverse_on_exit", "reverse_colour_exit", "reverse_settings",
     "exit_join", "exit_group", "exit_need", "exit_within",
@@ -750,6 +752,10 @@ def _entry_block(
         m = macd.entry_reason(frame, direction, cfg)
         if m:
             reason = f"{reason}; {m}" if reason else m
+    if on("macd_grow"):
+        mg = macd.grow_reason(frame, direction, cfg)
+        if mg:
+            reason = f"{reason}; {mg}" if reason else mg
     if on("cvd"):
         cv = cum_delta.entry_reason(frame, direction, cfg)
         if cv:
@@ -944,7 +950,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
-    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("macd", "MACD"), ("cvd", "Cumulative delta"), ("supertrend", "Supertrend"), ("level", "Price level"), ("fresh", "Fresh trend"),
+    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("macd", "MACD"), ("macd_grow", "MACD histogram"), ("cvd", "Cumulative delta"), ("supertrend", "Supertrend"), ("level", "Price level"), ("fresh", "Fresh trend"),
     ("high52", "52w high"),
     ("or_volume", "Opening volume"), ("or_vwap", "Opening VWAP"), ("or_spread", "Opening SMA spread"), ("or_break", "Opening break"),
 )
@@ -995,6 +1001,8 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             return ema_filter.passed_text(frame, direction, cfg)
         if name == "macd":
             return macd.passed_text(frame, direction, cfg)
+        if name == "macd_grow":
+            return macd.grow_passed_text(frame, direction, cfg)
         if name == "cvd":
             return cum_delta.passed_text(frame, direction, cfg)
         if name == "supertrend":
@@ -1077,6 +1085,11 @@ def chart_filters(cfg) -> dict:
         "macd_fast": macd.lengths(cfg)[0],
         "macd_slow": macd.lengths(cfg)[1],
         "macd_signal": macd.lengths(cfg)[2],
+        # MACD histogram growing check / shrinking exit (macd.py): the strip shows on Auto while either is on.
+        "use_macd_grow": macd.grow_on(cfg),
+        "macd_grow_candles": macd.grow_candles(cfg),
+        "macd_shrink_exit": macd.shrink_on(cfg),
+        "macd_shrink_candles": macd.shrink_candles(cfg),
         # Cumulative delta strip (cum_delta.py): drawn while its entry check or divergence exit is on.
         "use_cvd": cum_delta.entry_on(cfg),
         "cvd_div_exit": cum_delta.exit_on(cfg),
@@ -1165,7 +1178,7 @@ _FILTER_KEYS = (
     "use_gap_long", "gap_long_min", "gap_long_max", "use_gap_short", "gap_short_min", "gap_short_max",
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
-    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "ha_colours", "ha_scope",
+    "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "use_macd_grow", "macd_grow_candles", "macd_shrink_exit", "macd_shrink_candles", "ha_colours", "ha_scope",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -2128,6 +2141,7 @@ class StrategyEngine:
         await self._watch_counter_candles(symbol_cfg)
         await self._watch_ema_exit(symbol_cfg)
         await self._watch_macd_exit(symbol_cfg)
+        await self._watch_macd_shrink(symbol_cfg)
         await self._watch_cvd_exit(symbol_cfg)
         await self._watch_exit_candle(symbol_cfg)
         await self._watch_small_candles(symbol_cfg)
@@ -5852,6 +5866,35 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} MACD cross exit — {note}"
         await self._exit_now(cfg, self.ltp, macd.EXIT_REASON)
 
+    async def _watch_macd_shrink(self, cfg: BotConfig) -> None:
+        """Once per closed candle: exit once the MACD histogram has moved against the trade N candles in a row, every
+        one of them closed after the entry (macd.py)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or not macd.shrink_on(cfg) or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._exit_frame(symbol, cfg)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.macd_shrink_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        minutes = self._exit_minutes(symbol, cfg)
+        closed = frame.iloc[:-1]
+        # How many closed candles (counted from the end) closed after the entry.
+        ends = pd.to_numeric(closed["ts"], errors="coerce") + minutes * 60
+        after = int((ends > opened.timestamp()).sum())
+        if after <= 0:
+            return
+        pos.macd_shrink_bar = closed_ts
+        hit, note = macd.shrunk_against(closed, pos.signal_direction, cfg, after)
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} MACD histogram exit — {note}"
+        await self._exit_now(cfg, self.ltp, macd.SHRINK_REASON)
+
     async def _watch_cvd_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit on a price / cumulative delta divergence against the trade (cum_delta.py)."""
         pos = self.position
@@ -6475,6 +6518,7 @@ class StrategyEngine:
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
                     "MACD_CROSS": "MACD crossed its signal line against the trade — flat",
+                    "MACD_SHRINK": "MACD histogram moved against the trade — flat",
                     "CVD_DIVERGENCE": "price made a new extreme without the cumulative delta — flat",
                     "SUPERTREND": "Supertrend turned against the trade — flat",
                     "SMA9_BEND": "SMA 9 bent — flat",
@@ -8269,6 +8313,7 @@ _ALERT_REASON = {
     "COUNTER_CANDLES": "candles turned against the trade",
     "EMA_CROSS": "EMA cross against the trade",
     "MACD_CROSS": "MACD cross against the trade",
+    "MACD_SHRINK": "MACD histogram against the trade",
     "MANUAL_REVERSE": "reversed by hand",
     "CVD_DIVERGENCE": "price / cumulative delta divergence",
     "SUPERTREND": "Supertrend turned against the trade",
@@ -8765,7 +8810,7 @@ def _stop_reason(pos: "OpenPosition") -> str:
 
 
 _TAKEN_EXITS = (
-    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", cum_delta.EXIT_REASON, "SUPERTREND",
+    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", "MACD_SHRINK", cum_delta.EXIT_REASON, "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST", "SMA9_DECEL",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
     "BREAKOUT_STOP", "PIVOT_TARGET", day_target.EXIT_REASON, target_net.EXIT_REASON, stop_plan.EXIT_REASON, small_candles.REASON,
@@ -8793,6 +8838,8 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("EMA")
     if bool(getattr(cfg, "use_macd", False)):
         checked.append("MACD")
+    if macd.grow_on(cfg):
+        checked.append("MACD histogram")
     if cum_delta.entry_on(cfg):
         checked.append("cumulative delta")
     if bool(getattr(cfg, "use_supertrend", False)):

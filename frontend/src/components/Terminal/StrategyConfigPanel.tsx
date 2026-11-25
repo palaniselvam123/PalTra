@@ -448,6 +448,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     macd_fast: Math.min(200, Math.max(1, Math.round(Number(form.macd_fast ?? 12)) || 12)),
     macd_slow: Math.min(200, Math.max(1, Math.round(Number(form.macd_slow ?? 26)) || 26)),
     macd_signal: Math.min(200, Math.max(1, Math.round(Number(form.macd_signal ?? 9)) || 9)),
+    use_macd_grow: Boolean(form.use_macd_grow),
+    macd_grow_candles: Math.min(5, Math.max(1, Math.round(Number(form.macd_grow_candles ?? 2)) || 2)),
+    macd_shrink_exit: Boolean(form.macd_shrink_exit),
+    macd_shrink_candles: Math.min(5, Math.max(1, Math.round(Number(form.macd_shrink_candles ?? 2)) || 2)),
     use_cvd: Boolean(form.use_cvd),
     cvd_lookback: Math.min(50, Math.max(1, Math.round(Number(form.cvd_lookback ?? 5)) || 5)),
     cvd_div_exit: Boolean(form.cvd_div_exit),
@@ -2103,6 +2107,38 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("use_macd") && <OwnTag />}
             Buy only while MACD is above its signal line, sell only while below
           </label>
+          <div id="sma-macd-hist" className="mt-2 flex scroll-mt-24 flex-wrap items-center gap-2 text-sm text-slate-300">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={Boolean(form.use_macd_grow)}
+                onChange={(e) => set("use_macd_grow", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("use_macd_grow") && <OwnTag />}
+              Enter only while the MACD histogram is growing the trade&apos;s way for
+            </label>
+            <select
+                value={String(form.macd_grow_candles ?? 2)}
+                onChange={(e) => set("macd_grow_candles", Number(e.target.value))}
+                aria-label="Histogram growing for how many candles"
+                className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+              >
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={n}>
+                    {n} candle{n > 1 ? "s" : ""}
+                  </option>
+                ))}
+              </select>
+            {isOwn("macd_grow_candles") && <OwnTag />}
+            <NewTag id="macd-histogram-rules" />
+            <InfoTip label="About the histogram growing check">
+              Momentum building, not just on the right side: a buy only after the histogram bars have risen that many
+              closed candles in a row (each bar higher than the one before), a sell only after they have fallen that many in a
+              row. It does not look at which side of zero the bars are: tick the MACD check above for that too. Otherwise the
+              signal is skipped (✕ &quot;MACD&quot; on the chart) and late entry can still take it a candle later.
+            </InfoTip>
+          </div>
           <div className="mt-4 flex items-center gap-1 text-sm text-slate-300">
             Cumulative delta (check here; the divergence exit is in step 3)
             <InfoTip label="About cumulative delta">
@@ -2599,6 +2635,38 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             {isOwn("macd_exit") && <OwnTag />}
             Close when MACD crosses its signal line against the trade (numbers set in step 2)
           </label>
+          <div id="sma-macd-shrink" className="mt-2 flex scroll-mt-24 flex-wrap items-center gap-2 text-sm text-slate-300">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={Boolean(form.macd_shrink_exit)}
+                onChange={(e) => set("macd_shrink_exit", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("macd_shrink_exit") && <OwnTag />}
+              Close when the MACD histogram moves against the trade for
+            </label>
+            <select
+                value={String(form.macd_shrink_candles ?? 2)}
+                onChange={(e) => set("macd_shrink_candles", Number(e.target.value))}
+                aria-label="Histogram against the trade for how many candles"
+                className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+              >
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={n}>
+                    {n} candle{n > 1 ? "s" : ""}
+                  </option>
+                ))}
+              </select>
+            {isOwn("macd_shrink_candles") && <OwnTag />}
+            <NewTag id="macd-histogram-rules" />
+            <InfoTip label="About the histogram shrinking exit">
+              Closes before the MACD cross: once the histogram bars have moved against the trade that many closed candles in a
+              row, all of them closed after the entry. For a buy each bar lower than the one before (green bars shrinking, or
+              red bars growing); for a sell each bar higher. Reason &quot;MACD histogram&quot; in the blotter. 1 candle reacts
+              fastest but closes on any wobble; 2-3 waits for a real fade. MACD numbers are set in step 2.
+            </InfoTip>
+          </div>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"
@@ -4014,6 +4082,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   check("use_candle_dir", f.use_candle_dir, `Last ${n(f.candle_dir_count, 2)} candles must move the trade's way`);
   check("use_ema", f.use_ema, `EMA ${n(f.ema_fast, 9)} must be on the trade's side of EMA ${n(f.ema_slow, 200)}`);
   check("use_macd", f.use_macd, `MACD ${n(f.macd_fast, 12)}/${n(f.macd_slow, 26)}/${n(f.macd_signal, 9)} must be on the trade's side of its signal line`);
+  check("use_macd_grow", f.use_macd_grow, `MACD histogram must have grown the trade's way ${n(f.macd_grow_candles, 2)} candle(s) in a row`);
   check("use_cvd", f.use_cvd, `Cumulative delta must have moved the trade's way over the last ${n(f.cvd_lookback, 5)} candles`);
   check("use_supertrend", f.use_supertrend, "Supertrend must point the trade's way");
   check(
@@ -4080,6 +4149,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (n(f.counter_exit_count, 0) > 0 && f.counter_reenter) add({ group: "enter", key: "counter_reenter", text: `Re-enter after a counter-candle exit when a candle breaks the exit candle (up to ${n(f.counter_reenter_max, 3)} per SMA run)`, off: { counter_reenter: false } });
   if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
   if (f.macd_exit) add({ group: "exit", key: "macd_exit", text: `Close when MACD ${n(f.macd_fast, 12)}/${n(f.macd_slow, 26)}/${n(f.macd_signal, 9)} crosses its signal line against the trade`, off: { macd_exit: false } });
+  if (f.macd_shrink_exit) add({ group: "exit", key: "macd_shrink_exit", text: `Close when the MACD histogram moves against the trade ${n(f.macd_shrink_candles, 2)} candle(s) in a row`, off: { macd_shrink_exit: false } });
   if (f.cvd_div_exit) add({ group: "exit", key: "cvd_div_exit", text: `Close when price makes a new high / low over ${n(f.cvd_div_lookback, 10)} candles without the cumulative delta`, off: { cvd_div_exit: false } });
   if (f.reverse_on_exit)
     add({
