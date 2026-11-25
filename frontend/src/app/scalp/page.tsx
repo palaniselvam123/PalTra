@@ -27,6 +27,7 @@ import { CloseOrders } from "@/components/Scalp/CloseOrders";
 import { TurnScan } from "@/components/Scalp/TurnScan";
 import { MorningStudy } from "@/components/Scalp/MorningStudy";
 import { SecondCandle } from "@/components/Scalp/SecondCandle";
+import { TrendHold } from "@/components/Scalp/TrendHold";
 import { High52Scan } from "@/components/Scalp/High52Scan";
 import { RegimeStudy } from "@/components/Scalp/RegimeStudy";
 import type { ScanStatus } from "@/components/Scalp/scanStatus";
@@ -97,6 +98,7 @@ const TABS = [
   { id: "high52", group: "now", label: "52-week high", ask: "Which stocks are at their highest price of the year?", use: "Stocks breaking, or close to, their 52-week high or low.", next: "A new high with volume is a strong-trend candidate to arm." },
   { id: "monitor", group: "now", label: "Monitor", ask: "Which stocks are easy and cheap to scalp right now?", use: "Live score of every stock: moves enough each minute, tight spread, plenty of money flowing.", next: "Arm the ones marked Scalp-ready." },
   { id: "second", group: "test", label: "Second candle", ask: "Does buying a green second candle (selling a red one) work?", use: "Tests on past days one simple opening rule: read the day's 2nd candle, trade its colour.", next: "If the numbers look good, switch the bot to 'Enter on: Second candle' in Settings." },
+  { id: "trendhold", group: "test", label: "Trend hold", ask: "Does a strong trend or strong phase keep going to the end of the day?", use: "Picks stocks the moment Trend quality reads them strong (7 of 7, 6 of 7…) or in a strong phase on past days, holds them to the close and shows how far they went, as a table and price lines.", next: "If strong reads keep going, arm them on a trend bot and hold; if they fade, book early." },
   { id: "backtest", group: "test", label: "Backtest", ask: "Would my bot have made money on these stocks?", use: "Replays past days with your bot's real settings on the stocks a scan would have picked, and ranks the stocks.", next: "Keep the stocks and pick times that won; drop the rest." },
   { id: "lab", group: "test", label: "Strategy lab", ask: "Which checks and exits actually help?", use: "Switch each rule on and off and see at once how the profit changes. Much faster than a backtest.", next: "Use the best set, then prove it with a Backtest." },
   { id: "sideways", group: "test", label: "Sideways test", ask: "Which stocks trend and which stay sideways?", use: "Reads past days per stock and suggests the right bot: trend bot, chop bot or the main one.", next: "Arm each stock on the bot it suggests." },
@@ -157,6 +159,8 @@ export default function ScalpPage() {
   const onMorningTestStatus = useCallback((st: ScanStatus) => setMorningTestStatus(st), []);
   const [secondStatus, setSecondStatus] = useState<ScanStatus | null>(null);
   const onSecondStatus = useCallback((st: ScanStatus) => setSecondStatus(st), []);
+  const [trendHoldStatus, setTrendHoldStatus] = useState<ScanStatus | null>(null);
+  const onTrendHoldStatus = useCallback((st: ScanStatus) => setTrendHoldStatus(st), []);
   const onActiveStatus = useCallback((st: ScanStatus) => setActiveStatus(st), []);
   const cols = useColumnOrder<MonitorCol>("scalp.cols.monitor", MONITOR_COLUMNS);
   const [error, setError] = useState<string | null>(null);
@@ -401,6 +405,7 @@ export default function ScalpPage() {
     sideways: sidewaysStatus,
     morningtest: morningTestStatus,
     second: secondStatus,
+    trendhold: trendHoldStatus,
     afterclose: null,
     history: null,
     alerts: alerts?.last_run ? { when: alerts.last_run, running: false } : null,
@@ -805,6 +810,9 @@ export default function ScalpPage() {
         </div>
         <div hidden={tab !== "second"}>
           <SecondCandle armed={armed} arming={arming} onArm={(s) => arm(s, "Second candle test")} onArmMany={(list) => armSeveral(list, "Second candle test")} paused={paused} onStatus={onSecondStatus} />
+        </div>
+        <div hidden={tab !== "trendhold"}>
+          <TrendHold armed={armed} onArm={(s) => arm(s, "Trend hold test")} onArmMany={(list) => armSeveral(list, "Trend hold test")} onStatus={onTrendHoldStatus} />
         </div>
         <div hidden={tab !== "morningtest"}>
           <MorningStudy armed={armed} arming={arming} onArm={(s) => arm(s, "Morning test")} onArmMany={(list) => armSeveral(list, "Morning test")} paused={paused} onStatus={onMorningTestStatus} />

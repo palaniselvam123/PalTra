@@ -1108,6 +1108,33 @@ export type SecondCandleReport = {
   stopped?: boolean;
 };
 export type SecondCandleStock = { symbol: string; best_trail_pct: number | null; best_trail_total: number | null } & SecondCandleGroup;
+/** Trend hold test (backend trend_hold.py): does a strong trend / phase keep going to the end of the day? */
+export type TrendHoldKind = "TREND" | "PHASE" | "EITHER" | "BOTH";
+export type TrendHoldRow = {
+  symbol: string; day: string; at: string; side: "LONG" | "SHORT"; price: number; passed: number; of: number;
+  trend: string | null; phase: string | null; phase_candles: number; why: string;
+  entry: number; exit: number; exit_at: string; points: number; pct: number; pnl: number; charges: number; net: number;
+  best_pts: number; best_pct: number; best_at: string; worst_pts: number; worst_pct: number; worst_at: string;
+  best_rs: number; worst_rs: number; lost_at: string | null; held_to_end: boolean; strong_reads: number; after_reads: number;
+  lost_pts: number | null; lost_pnl: number | null; minutes: number; curve: number[];
+};
+export type TrendHoldReport = {
+  trades: number; days?: number; stocks?: number; held?: number; held_pct?: number; wins?: number; win_pct?: number;
+  pnl?: number; net?: number; lost_pnl?: number; avg_pct?: number | null; avg_best_pct?: number | null; avg_worst_pct?: number | null;
+  by_day?: { day: string; trades: number; pnl: number; net: number; held: number; wins: number; running: number }[];
+  by_checks?: { passed: number; trades: number; win_pct: number; held_pct: number; avg_pct: number | null; avg_best_pct: number | null; pnl: number }[];
+  answer: string[]; stopped?: boolean;
+};
+export type TrendHoldView = {
+  status: "IDLE" | "RUNNING" | "DONE" | "FAILED"; done: number; total: number; errors: { symbol: string; error: string }[];
+  params: Record<string, unknown>; started_at: string | null; finished_at: string | null; report: TrendHoldReport | null; rows: TrendHoldRow[];
+};
+export type TrendHoldStart = {
+  symbols: string[]; date: string; end_date?: string; bot: number; kind: TrendHoldKind; min_checks: number; strong_only: boolean;
+  phase_min: number; side: "BOTH" | "UP" | "DOWN"; minutes: number; candles: "NORMAL" | "HA"; first: string; last: string;
+  every_min: number; square_off: string; qty: number; price_min: number; price_max: number; max_day: number;
+};
+export type TrendHoldChart = { symbol: string; day: string; minutes: [number, number, number, number, number][]; seconds: [number, number][] };
 export type SecondCandleView = {
   status: "IDLE" | "RUNNING" | "DONE" | "FAILED";
   done: number;
@@ -3435,6 +3462,15 @@ export const smaApi = {
     dir_rule?: CandleDirRule;
     ha?: boolean;
   }) => request<SecondCandleView>("/api/second-candle/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
+  /** Trend hold test (trend_hold.py; arithmetic on real candles, no order). */
+  trendHold: (rows = true) => request<TrendHoldView>(`/api/trend-hold${rows ? "" : "?rows=false"}`, undefined, 30000, false),
+  trendHoldStart: (body: TrendHoldStart) => request<TrendHoldView>("/api/trend-hold/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
+  trendHoldStop: () => request<TrendHoldView>("/api/trend-hold/stop", { method: "POST" }, 20000, false),
+  trendHoldChart: (symbol: string, day: string, start: string, end: string, seconds: boolean) =>
+    request<TrendHoldChart>(
+      `/api/trend-hold/chart?symbol=${encodeURIComponent(symbol)}&day=${day}&start=${start}&end=${end}&seconds=${seconds}`,
+      undefined, 60000, false
+    ),
   secondCandleStop: () => request<SecondCandleView>("/api/second-candle/stop", { method: "POST" }, 20000, false),
   regimeStudyStart: (body: { symbols: string[]; days: number; minutes: number; window: number }) =>
     request<RegimeStudy>("/api/regime-study/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),

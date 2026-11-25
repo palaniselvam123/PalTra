@@ -1821,6 +1821,26 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   **No stall while it runs**: the page polls `?rows=false` during a run and loads the rows once at the end; `GET
   /api/second-candle` sends `SecondCandle.view_json` (the rows encoded in a worker thread, cached per finished run), the
   report is saved off the loop, and `strategy_lab.load_tape` reads / writes / joins the cached day files in a thread.
+- `backend/trend_hold.py` – **Trend hold test** (read-only research; the Scalp page's "Trend hold" tab, group 3 Test an idea,
+  `components/Scalp/TrendHold.tsx`; no order path, nothing armed or read by the strategy; owner's request: does a strong
+  trend / strong phase keep going to the end of the day?). Past days (From / To, at most `MAX_DAYS` 30 weekdays) of the
+  picked stocks (scan lists, up to `MAX_STOCKS` 250) on the cached 1-minute candles (`strategy_lab.load_tape`), read on a
+  bot's (1-5) SMA periods and candle (`minutes` 0 = the bot's) the way the Trend quality card reads them (`day_reads`: the
+  7 checks of `trend_strength.read`, or `ha_trend.checks` on Heikin Ashi, and the phase now; the day is enriched once and
+  each minute reads the candles closed by then, same answers as `auto_arm.strong_read`). Every `every_min` from `first`
+  to `last`, `qualifies`: `kind` TREND (at least `min_checks` of 7 for the SMAs' side; `strong_only` = the card's Strong
+  label too) / PHASE (BULL / BEAR, not too early, ≥ `phase_min` candles) / EITHER / BOTH, `side`, LTP inside
+  `price_min`..`price_max`. Each stock once a day at its first qualifying read (at most `max_day` a day, `cap_days`),
+  entered at that minute's open the trend's way with `qty` (0 = the bot's), held to `square_off` (`follow`: points, %,
+  ₹ before / after charges, best / worst and when, `curve` = signed % per minute); the read keeps being taken: `lost_at`
+  the first that no longer passes, `held_to_end`, `lost_pnl` (closing there). `summarize`: totals, by day, by checks
+  passed, plain-words `answer`. `TrendHold` (one at a time, after `groww_pressure.wait_for_bots`, last run in
+  `trend_hold.json` next to the SMA DB, `TREND_HOLD_FILE`, keeps the backtest server awake). `GET /api/trend-hold`,
+  `POST /api/trend-hold/start` (same hours rule as the Second candle test), `POST /api/trend-hold/stop`,
+  `GET /api/trend-hold/chart?symbol=&day=&start=&end=&seconds=` (the day's 1-minute candles; with `seconds` the bots'
+  recorded per-second prices, `tick_store.between`, when there are any). The tab: summary cards, an average-move line
+  (minutes after the pick, % or ₹, all / stayed strong / lost), running P&L by day, the clicked pick's price by minute or
+  second with in / lost / best / worst / out marks, by-checks table, sortable picks table, filters, CSV, Arm / Arm ticked.
 - `backend/first_candles.py` – **First candles** on the Most active card (read-only; `components/Scalp/FirstCandles.tsx`; no
   order path, nothing in the strategy reads it): "Read first candles" reads, for the stocks the card's filters show (up to
   200), the latest session's first N candles (`candle_no` 1-6, `minutes` 1/3/5/10/15, closed candles only) from the 1-minute
