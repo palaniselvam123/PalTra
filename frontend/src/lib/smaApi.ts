@@ -3117,6 +3117,9 @@ export type AutoArmBody = {
   flow_pct?: number;
   price_min?: number;
   price_max?: number;
+  /** "Force order when armed" per source: the replayed bot enters at once at each arm minute (entry rule picks the side). */
+  force_strong?: boolean;
+  force_pressure?: boolean;
 };
 
 export type QueueItem = {
@@ -4160,6 +4163,10 @@ export type ScalpAlerts = {
   arm_strong_bot: number;
   arm_pressure_on: boolean;
   arm_pressure_bot: number;
+  /** Force order when armed: the bot enters at once on each auto-armed stock (colour mode reads the last closed colour
+   * candle, else the SMA side). With "Also arm a LIVE bot" on, turning it on needs confirm_live. */
+  arm_strong_force?: boolean;
+  arm_pressure_force?: boolean;
   /** At most this many stocks a day per scan. */
   arm_max_day: number;
   /** Auto-arm only stocks priced inside this range (₹, 0 = no bound), live and in the auto-arm replay. */
@@ -4174,7 +4181,7 @@ export type ScalpAlerts = {
   /** True on a backtest server that can reach the main desk (the "Arm on" choice is shown). */
   desk_link?: boolean;
   auto_arm?: {
-    recent: { at: string; source: "strong" | "pressure"; bot: number; bot_name?: string; live?: boolean; armed: string[]; already: string[]; skipped: { symbol: string; why: string }[]; error: string | null }[];
+    recent: { at: string; source: "strong" | "pressure"; bot: number; bot_name?: string; live?: boolean; armed: string[]; already: string[]; skipped: { symbol: string; why: string }[]; error: string | null; forced?: { symbol: string; placed: boolean; note: string }[] }[];
     today: { strong: string[]; pressure: string[] };
   };
   recent: { at: string; kind: "strong" | "pressure"; symbol: string; side: string; price?: number | null; passed?: number; of?: number; pct?: number; failed?: string }[];

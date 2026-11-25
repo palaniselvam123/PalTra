@@ -93,6 +93,11 @@ def candidates(kind: str, rows: list[dict], s, now: dt.datetime) -> list[dict]:
     return [p for p in found if price_ok(p.get("price"), lo, hi)]
 
 
+def forced(kind: str, s) -> bool:
+    """"Force order when armed" for this source (scalp_alerts arm_strong_force / arm_pressure_force)."""
+    return bool(s.arm_strong_force if kind == "strong" else s.arm_pressure_force)
+
+
 def wanted(kind: str, s) -> tuple[bool, int]:
     if kind == "strong":
         return bool(s.arm_strong_on), int(s.arm_strong_bot)
@@ -100,9 +105,11 @@ def wanted(kind: str, s) -> tuple[bool, int]:
 
 
 async def after_scan(kind: str, snapshot: dict, *, bots, arm, notify=None, now: dt.datetime | None = None,
-                     check_market: bool = True) -> dict | None:
+                     check_market: bool = True, force=None) -> dict | None:
     """Arm the stocks a finished scan picks. `bots()` → {bot: {"mode", "armed", "name"}}, `arm(bot, symbol, source)`
-    → None when armed else why not. Returns the run's record, or None when nothing was to be done. Never raises."""
+    → None when armed else why not. With "Force order when armed" on for this source, `force(bot, symbol, live)` →
+    (placed, note) runs right after each new arm (the bot's entry rule picks the side). Returns the run's record, or
+    None when nothing was to be done. Never raises."""
     import scalp_alerts
     from groww_client import market_is_open
 
@@ -123,8 +130,9 @@ async def after_scan(kind: str, snapshot: dict, *, bots, arm, notify=None, now: 
             return None
         record: dict = {
             "at": now.isoformat(timespec="seconds"), "source": kind, "bot": bot, "matched": len(found),
-            "armed": [], "already": [], "skipped": [], "error": None,
+            "armed": [], "already": [], "skipped": [], "error": None, "forced": [],
         }
+        do_force = force is not None and forced(kind, s)
         try:
             book = await bots()
             info = book.get(bot)
@@ -160,6 +168,12 @@ async def after_scan(kind: str, snapshot: dict, *, bots, arm, notify=None, now: 
                     armed.add(sym)
                     done.append(sym)
                     room -= 1
+                    if do_force:
+                        try:
+                            placed, note = await force(bot, sym, live)
+                        except Exception as exc:  # noqa: BLE001
+                            placed, note = False, str(exc) or type(exc).__name__
+                        record["forced"].append({"symbol": sym, "placed": bool(placed), "note": str(note)[:200]})
                 else:
                     record["skipped"].append({"symbol": sym, "why": str(why)[:200]})
         except Exception as exc:  # noqa: BLE001
@@ -190,7 +204,17 @@ def text(record: dict) -> str:
              + (" — LIVE: real Groww orders on its next signal." if record.get("live") else ".")]
     if record["skipped"]:
         lines.append("Not armed: " + "; ".join(f"{x['symbol']} ({x['why']})" for x in record["skipped"][:8]))
-    lines.append("Arming only: the bot trades them on its own next signal.")
+    done = record.get("forced") or []
+    if done:
+        placed = [x for x in done if x["placed"]]
+        if placed:
+            lines.append("Force order: " + "; ".join(f"{x['symbol']} {x['note']}" for x in placed[:8])
+                         + (" — LIVE: real Groww orders." if record.get("live") else "."))
+        missed = [x for x in done if not x["placed"]]
+        if missed:
+            lines.append("No force order: " + "; ".join(f"{x['symbol']} ({x['note']})" for x in missed[:8]))
+    else:
+        lines.append("Arming only: the bot trades them on its own next signal.")
     return "\n".join(lines)
 
 
@@ -237,6 +261,10 @@ class AutoArmRule:
     #: Only stocks priced inside this range when armed (₹, 0 = no bound): the tape's last close before the arm minute.
     price_min: float = 0.0
     price_max: float = 0.0
+    #: "Force order when armed" per source (scalp_alerts arm_strong_force / arm_pressure_force): at its arm minute
+    #: the replayed bot enters at once, its entry rule picking the side (StrategyEngine.force_order(auto=True)).
+    force_strong: bool = False
+    force_pressure: bool = False
     #: {IST day ISO: [(HH:MM, symbol, BUY/SELL, pct)]} from the saved Most active scans, filled before the run.
     active_hits: dict = field(default_factory=dict)
     kind: str = KIND
@@ -259,9 +287,17 @@ class AutoArmRule:
             "basis": self.basis, "flow_pct": self.flow_pct,
             "max_day": self.max_day,
             "price_min": self.price_min, "price_max": self.price_max,
+            "force_strong": self.force_strong, "force_pressure": self.force_pressure,
             "until": self.until.strftime("%H:%M") if self.until else None,
             "active_days": sorted(self.active_hits),
         }
+
+
+def force_symbols(rule, picked: list[dict]) -> set[str]:
+    """The picked stocks the replayed bot forces an entry on at their arm minute ("Force order when armed")."""
+    want = {"Trend quality": bool(getattr(rule, "force_strong", False)),
+            "Most active": bool(getattr(rule, "force_pressure", False))}
+    return {str(p.get("symbol") or "").upper() for p in picked if want.get(str(p.get("source") or ""))} - {""}
 
 
 def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fast: int, slow: int,

@@ -35,6 +35,19 @@ export function ScalpAlertsCard() {
     }
   };
 
+  // "Force order when armed": with a LIVE bot allowed it means a real Groww order the moment a stock is armed, so it
+  // asks for LIVE typed first (the server refuses it without confirm_live).
+  const setForce = (key: "arm_strong_force" | "arm_pressure_force", on: boolean) => {
+    if (!on || !view?.arm_live) {
+      void save({ [key]: on });
+      return;
+    }
+    const typed = window.prompt(
+      "\"Also arm a LIVE bot\" is on: with this ticked, a LIVE bot places a real Groww order the moment a stock is auto-armed. Type LIVE to turn it on."
+    );
+    if ((typed ?? "").trim().toUpperCase() === "LIVE") void save({ [key]: true, confirm_live: true });
+  };
+
   const box = "rounded-lg border p-3";
   const select = "h-9 rounded-md border border-slate-700 bg-surface2 px-2 text-sm text-slate-200";
   const time = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
@@ -89,6 +102,8 @@ export function ScalpAlertsCard() {
               busy={busy}
               today={view.auto_arm?.today.strong ?? []}
               onChange={(on, bot) => void save({ arm_strong_on: on, arm_strong_bot: bot })}
+              force={Boolean(view.arm_strong_force)}
+              onForce={(on) => setForce("arm_strong_force", on)}
             />
             <LastCheck row={view.last?.strong} scan="Trend quality" />
           </div>
@@ -214,6 +229,8 @@ export function ScalpAlertsCard() {
               busy={busy}
               today={view.auto_arm?.today.pressure ?? []}
               onChange={(on, bot) => void save({ arm_pressure_on: on, arm_pressure_bot: bot })}
+              force={Boolean(view.arm_pressure_force)}
+              onForce={(on) => setForce("arm_pressure_force", on)}
             />
             <LastCheck row={view.last?.pressure} scan="Most active" />
           </div>
@@ -297,6 +314,13 @@ export function ScalpAlertsCard() {
                     {r.live ? <span className="ml-1 rounded bg-rose-600 px-1 text-[10px] font-bold text-white">LIVE</span> : null}:{" "}
                     {r.error ? <span className="text-amber-300">{r.error}</span> : <b>{r.armed.join(", ") || "nothing new"}</b>}
                     {r.skipped.length ? <span className="text-slate-500"> · not armed: {r.skipped.map((x) => `${x.symbol} (${x.why})`).join("; ")}</span> : null}
+                    {r.forced?.length ? (
+                      <span className="text-slate-400">
+                        {" "}
+                        · force order:{" "}
+                        {r.forced.map((x) => `${x.symbol} ${x.placed ? "✓" : "✗"} ${x.note}`).join("; ")}
+                      </span>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -435,6 +459,8 @@ function ArmRow({
   busy,
   today,
   onChange,
+  force,
+  onForce,
 }: {
   label: string;
   on: boolean;
@@ -442,6 +468,9 @@ function ArmRow({
   busy: boolean;
   today: string[];
   onChange: (on: boolean, bot: number) => void;
+  /** "Force order when armed" (backend auto_arm.py `arm_strong_force` / `arm_pressure_force`). */
+  force: boolean;
+  onForce: (on: boolean) => void;
 }) {
   return (
     <div className={clsx("mt-3 rounded-md border px-2 py-2 text-xs", on ? "border-sky-400/40 bg-sky-400/[0.05]" : "border-slate-800")}>
@@ -469,6 +498,16 @@ function ArmRow({
       <p className="mt-1 text-slate-400">
         Same thresholds as the alert above (the alert itself can be on or off). After each {label} scan in market hours, each new
         stock goes on that bot&apos;s Trade list, once a day. A LIVE bot is armed only with &quot;Also arm a LIVE bot&quot; ticked below.
+      </p>
+      <label className="mt-2 flex min-h-9 items-center gap-2 font-semibold text-slate-200">
+        <input type="checkbox" checked={force} disabled={busy} onChange={(e) => onForce(e.target.checked)} className="accent-[#38BDF8]" />
+        Force order when armed <NewTag id="auto-arm-force" link={false} />
+      </label>
+      <p className="text-slate-400">
+        The bot enters at once on each stock it is armed with, instead of waiting for its next signal. The side follows the
+        bot&apos;s entry rule: SMA entry reads the SMA lines (fast above slow buys, below sells), candle colour entry reads the last
+        closed colour candle (green buys, red sells; no colour, no order). Entry checks are skipped like the terminal&apos;s Force
+        order; market hours, the cut-off, caps and the loss limit still apply, and a bot that is not running places nothing.
       </p>
       {on && today.length ? <p className="mt-1 text-slate-300">Armed today: {today.join(", ")}</p> : null}
     </div>

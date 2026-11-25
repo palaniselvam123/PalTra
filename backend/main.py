@@ -2612,12 +2612,14 @@ async def research_start_bot():
 
 class ForceOrder(BaseModel):
     symbol: str = ""
+    # Auto-arm's "Force order when armed": the entry rule picks the side, a stopped bot is not started.
+    auto: bool = False
 
 
 async def _force_order(eng: StrategyEngine, body: ForceOrder):
     """Manual check order. Starts the bot. Does not wait for a cross."""
     try:
-        result = await eng.force_order(body.symbol)
+        result = await eng.force_order(body.symbol, auto=body.auto)
     except ForceRefused as exc:
         code = 423 if eng.status in ("HALTED", "DAY_COMPLETED") else 400
         raise HTTPException(code, str(exc)) from exc
@@ -3013,6 +3015,9 @@ class AutoArmStart(BaseModel):
     #: Price range (₹, 0 = no bound); None = the auto-arm's own (arm_price_min / arm_price_max).
     price_min: float | None = Field(default=None, ge=0, le=1_000_000)
     price_max: float | None = Field(default=None, ge=0, le=1_000_000)
+    #: "Force order when armed" per source; None = the auto-arm's own (arm_strong_force / arm_pressure_force).
+    force_strong: bool | None = None
+    force_pressure: bool | None = None
     #: Trade until this time each day ("HH:MM", 09:20-15:30; positions squared off there); None = 15:30.
     until: str | None = None
     bot: int = Field(default=1, ge=1, le=4)
@@ -3083,6 +3088,8 @@ async def replay_auto_arm(body: AutoArmStart):
         max_day=body.max_day or alerts.arm_max_day,
         price_min=alerts.arm_price_min if body.price_min is None else body.price_min,
         price_max=alerts.arm_price_max if body.price_max is None else body.price_max,
+        force_strong=alerts.arm_strong_force if body.force_strong is None else body.force_strong,
+        force_pressure=alerts.arm_pressure_force if body.force_pressure is None else body.force_pressure,
     )
     names = list(body.universe)
     notes: list[str] = []
@@ -4481,6 +4488,9 @@ class ScalpAlertUpdate(BaseModel):
     arm_strong_bot: int | None = Field(default=None, ge=1, le=5)
     arm_pressure_on: bool | None = None
     arm_pressure_bot: int | None = Field(default=None, ge=1, le=5)
+    # Force order when armed: the bot enters at once on each auto-armed stock (its entry rule picks the side).
+    arm_strong_force: bool | None = None
+    arm_pressure_force: bool | None = None
     arm_max_day: int | None = Field(default=None, ge=1, le=50)
     # Auto-arm price range (₹, 0 = no bound).
     arm_price_min: float | None = Field(default=None, ge=0, le=1_000_000)
@@ -4505,14 +4515,23 @@ async def scalp_alerts_put(body: ScalpAlertUpdate):
     bot" needs confirm_live (409 without): auto-armed stocks on a LIVE bot are traded with real Groww orders."""
     raw = body.model_dump(exclude_none=True)
     confirm = bool(raw.pop("confirm_live", False))
-    if raw.get("arm_live") and not confirm:
-        current = await asyncio.to_thread(scalp_alerts.load)
-        if not current.arm_live:
-            raise HTTPException(
-                409,
-                "Auto-arming a LIVE bot means real Groww orders on its next signal. Confirm it on the page "
-                "(confirm_live) to turn it on.",
-            )
+    current = await asyncio.to_thread(scalp_alerts.load)
+    if raw.get("arm_live") and not confirm and not current.arm_live:
+        raise HTTPException(
+            409,
+            "Auto-arming a LIVE bot means real Groww orders on its next signal. Confirm it on the page "
+            "(confirm_live) to turn it on.",
+        )
+    # With a LIVE bot allowed, "Force order when armed" sends a real Groww order the moment a stock is armed.
+    live_after = bool(raw.get("arm_live", current.arm_live))
+    force_new = any(raw.get(k) and not getattr(current, k) for k in ("arm_strong_force", "arm_pressure_force"))
+    force_after = any(bool(raw.get(k, getattr(current, k))) for k in ("arm_strong_force", "arm_pressure_force"))
+    if live_after and not confirm and (force_new or (force_after and raw.get("arm_live") and not current.arm_live)):
+        raise HTTPException(
+            409,
+            "With \"Also arm a LIVE bot\" on, \"Force order when armed\" places a real Groww order the moment a stock "
+            "is auto-armed. Confirm it on the page (confirm_live) to turn it on.",
+        )
     await asyncio.to_thread(scalp_alerts.save, raw)
     return await asyncio.to_thread(scalp_alerts.view)
 
@@ -4629,6 +4648,34 @@ async def _auto_arm_arm(bot: int, symbol: str, source: str, live: bool = False) 
     return await _scan_arm_arm(bot, symbol, source, live, remote=_auto_arm_remote())
 
 
+async def _auto_arm_force(bot: int, symbol: str, live: bool = False) -> tuple[bool, str]:
+    """Auto-arm's "Force order when armed": the bot enters at once on a stock it was just armed with (its entry rule
+    picks the side: colour mode the last closed colour candle, else the SMA side). (placed, note)."""
+    if _auto_arm_remote():
+        from app.api import routes_link
+
+        try:
+            res = await routes_link._to_desk(
+                "POST", routes_link.FORCE_PATH, {"target": str(bot), "symbol": symbol, "confirm_live": live}
+            )
+        except HTTPException as exc:
+            return False, str(exc.detail)
+        try:
+            data = json.loads(res.body)
+        except (ValueError, AttributeError):
+            data = {}
+        if res.status_code == 200:
+            return True, str(data.get("last_signal") or "ordered")
+        return False, str(data.get("detail") or f"the desk answered {res.status_code}")
+    eng = _bot_engine_for(bot)
+    try:
+        result = await eng.force_order(symbol, auto=True)
+    except ForceRefused as exc:
+        return False, str(exc)
+    # A check can still say no inside the order path (cap, loss lock, one LIVE bot per stock): placed = now held.
+    return symbol.upper() in eng.positions, str(result)
+
+
 async def _auto_arm_notify(message: str) -> None:
     from app.services.alert_notifier import alert_notifier
 
@@ -4646,7 +4693,9 @@ def pressure_note(snapshot: dict) -> int:
 
 async def auto_arm_after(kind: str, snapshot: dict) -> dict | None:
     """Auto-arm after a finished Trend quality pass (`strong`) or Most active scan (`pressure`). Never raises."""
-    return await auto_arm.after_scan(kind, snapshot, bots=_auto_arm_bots, arm=_auto_arm_arm, notify=_auto_arm_notify)
+    return await auto_arm.after_scan(
+        kind, snapshot, bots=_auto_arm_bots, arm=_auto_arm_arm, notify=_auto_arm_notify, force=_auto_arm_force
+    )
 
 
 def _scan_arm_hooks() -> dict:
