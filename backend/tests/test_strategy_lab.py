@@ -294,6 +294,14 @@ def test_api_starts_evaluates_recommends_and_deletes(tmp_path, monkeypatch):
             assert row.use_rsi is True and row.use_stop is True and row.stop_type == "TSL" and row.cross_exit is True
             assert row.always_in is False and row.flip_orders is False and row.entry_mode == "SMA"  # back to defaults
             assert row.sma_fast == 9 and row.sma_slow == 21 and row.qty == 250  # the lab's numbers put back
+        # "Apply to bot": another bot, no replay
+        import bots
+
+        other = client.post(f"/api/strategy-lab/{job_id}/apply", json={"entries": ["vwap"], "exits": ["cross"], "stop": "ATR", "to_bot": 3})
+        assert other.status_code == 200 and other.json()["bot"] == 3, other.text
+        with database.session_factory()() as db:
+            assert db.get(Cfg, bots.config_id_for(3)).use_vwap is True and db.get(Cfg, 1).use_vwap is False
+        assert client.post(f"/api/strategy-lab/{job_id}/apply", json={"to_bot": 9}).status_code == 422
         assert client.post("/api/strategy-lab/nope/apply", json={}).status_code == 404
         assert client.delete(f"/api/strategy-lab/{job_id}").status_code == 200
         assert client.get(f"/api/strategy-lab/{job_id}").status_code == 404
