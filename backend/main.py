@@ -5939,6 +5939,10 @@ class StrategyLabChoice(BaseModel):
     entry_from: str = "09:20"
     entry_to: str = "15:30"
     qty: int = Field(default=0, ge=0, le=1_000_000)
+    #: Only these stocks count (the Stocks tab's tick boxes); empty = every stock of the run.
+    symbols: list[str] = Field(default_factory=list, max_length=strategy_lab.MAX_STOCKS)
+    #: Intraday margin % of a trade's value, for the capital it needs (20 = Groww MIS 5x).
+    margin_pct: float = Field(default=strategy_lab.DEFAULT_MARGIN_PCT, ge=1, le=100)
 
 
 def _lab_job_or_404(job_id: str) -> tuple[dict, list[dict]]:

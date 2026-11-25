@@ -968,6 +968,12 @@ def clean_choice(raw: dict | None) -> dict:
         qty = max(0, int(raw.get("qty") or 0))
     except (TypeError, ValueError):
         qty = 0
+    # Only these stocks count (the lab's Stocks tab); empty = every stock of the run.
+    symbols = sorted({str(x).strip().upper() for x in (raw.get("symbols") or []) if str(x).strip()})
+    try:
+        margin = float(raw.get("margin_pct") or DEFAULT_MARGIN_PCT)
+    except (TypeError, ValueError):
+        margin = DEFAULT_MARGIN_PCT
     return {
         "entries": sorted(set(entries)),
         "exits": sorted(set(exits)),
@@ -976,6 +982,54 @@ def clean_choice(raw: dict | None) -> dict:
         "entry_from": entry_from.strftime("%H:%M"),
         "entry_to": entry_to.strftime("%H:%M"),
         "qty": qty,
+        "symbols": symbols,
+        "margin_pct": round(min(100.0, max(1.0, margin)), 2),
+    }
+
+
+#: Intraday margin blocked per trade, % of its value (Groww MIS, 5x); the practice wallet's default too.
+DEFAULT_MARGIN_PCT = 20.0
+
+
+def capital(kept: list[dict], margin_pct: float = DEFAULT_MARGIN_PCT) -> dict:
+    """The money the kept trades needed: each trade's full value (qty × entry price), the most in use at one moment
+    (trades open at the same time add up; one that closes at a minute frees its money before another opens then),
+    the busiest day, and the intraday margin that blocks (`margin_pct` of the value)."""
+    if not kept:
+        return {"peak_value": 0.0, "peak_margin": 0.0, "peak_at": None, "peak_open": 0, "max_trade_value": 0.0,
+                "avg_trade_value": 0.0, "margin_pct": margin_pct, "return_pct": None, "return_on_margin_pct": None,
+                "per_day": []}
+    events: list[tuple[int, int, float]] = []
+    for k in kept:
+        value = float(k["qty"]) * float(k["entry_price"])
+        events.append((int(k["entry_ts"]), 1, value))
+        events.append((int(k["exit_ts"]), 0, -value))
+    events.sort()
+    used = peak = 0.0
+    open_now = peak_open = 0
+    peak_at = None
+    day_peak: dict[str, float] = {}
+    for ts, kind, value in events:
+        used += value
+        open_now += 1 if kind else -1
+        day = dt.datetime.fromtimestamp(ts, IST).date().isoformat()
+        day_peak[day] = max(day_peak.get(day, 0.0), used)
+        if used > peak + 1e-9:
+            peak, peak_at, peak_open = used, ts, open_now
+    values = [float(k["qty"]) * float(k["entry_price"]) for k in kept]
+    gross = sum(k["gross"] for k in kept)
+    margin = peak * margin_pct / 100.0
+    return {
+        "peak_value": round(peak, 2),
+        "peak_margin": round(margin, 2),
+        "peak_at": dt.datetime.fromtimestamp(peak_at, IST).isoformat(timespec="minutes") if peak_at else None,
+        "peak_open": peak_open,
+        "max_trade_value": round(max(values), 2),
+        "avg_trade_value": round(sum(values) / len(values), 2),
+        "margin_pct": margin_pct,
+        "return_pct": round(gross / peak * 100, 2) if peak else None,
+        "return_on_margin_pct": round(gross / margin * 100, 2) if margin else None,
+        "per_day": [{"day": d, "peak_value": round(v, 2), "peak_margin": round(v * margin_pct / 100.0, 2)} for d, v in sorted(day_peak.items())],
     }
 
 
@@ -1014,8 +1068,15 @@ def evaluate(trades: list[dict], choice: dict, settings: dict | None = None, wit
     from_min = _time_minutes(_hhmm(choice["entry_from"], "09:20"))
     to_min = _time_minutes(_hhmm(choice["entry_to"], "15:30"))
     cap = int((settings or {}).get("max_trades_per_stock") or 0)
+    wanted = set(choice["symbols"])
     by_symbol: dict[str, list[dict]] = {}
+    universe: dict[str, int] = {}
+    excluded = 0
     for t in trades:
+        universe[t["symbol"]] = universe.get(t["symbol"], 0) + 1
+        if wanted and t["symbol"] not in wanted:
+            excluded += 1
+            continue
         by_symbol.setdefault(t["symbol"], []).append(t)
     kept: list[dict] = []
     refused = held = window = capped = 0
@@ -1065,8 +1126,12 @@ def evaluate(trades: list[dict], choice: dict, settings: dict | None = None, wit
             per_day[t["day"]] = per_day.get(t["day"], 0) + 1
     kept.sort(key=lambda r: (r["entry_ts"], r["symbol"]))
     out = _summarize(kept)
-    out["skipped"] = {"refused": refused, "in_position": held, "outside_window": window, "stock_cap": capped}
+    out["skipped"] = {"refused": refused, "in_position": held, "outside_window": window, "stock_cap": capped,
+                      "unticked": excluded}
     out["base_trades"] = len(trades)
+    out["capital"] = capital(kept, choice["margin_pct"])
+    # Every stock of the run with its base trades (signals), for the Stocks tab's tick boxes.
+    out["universe"] = [{"symbol": sym, "signals": n} for sym, n in sorted(universe.items())]
     out["choice"] = choice
     out["settings"] = settings_for_choice(choice, settings)
     if with_trades:

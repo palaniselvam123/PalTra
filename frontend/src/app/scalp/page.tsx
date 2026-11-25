@@ -803,7 +803,7 @@ export default function ScalpPage() {
           </div>
         </div>
         <div hidden={tab !== "lab"}>
-          <StrategyLab armed={armed} />
+          <StrategyLab armed={armed} onArmMany={(list) => armSeveral(list, "Strategy lab")} />
         </div>
         <div hidden={tab !== "sideways"}>
           <RegimeStudy armed={armed} arming={arming} onArm={(s) => arm(s, "Sideways test")} onArmMany={(list) => armSeveral(list, "Sideways test")} paused={paused} onStatus={onSidewaysStatus} />

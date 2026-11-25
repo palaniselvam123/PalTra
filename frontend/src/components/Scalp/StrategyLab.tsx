@@ -10,6 +10,7 @@ import {
   replayActive,
   smaApi,
   type SmaConfig,
+  type StrategyLabCapital,
   type StrategyLabChoice,
   type StrategyLabJob,
   type StrategyLabRecommend,
@@ -19,6 +20,7 @@ import {
   type StrategyLabView,
 } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
+import { NewTag } from "@/components/ui/NewTag";
 import { GuideBar } from "./GuideBar";
 
 /**
@@ -33,15 +35,17 @@ const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
 const BOTS = [1, 2, 3, 4];
 const LAB_CANDLES = [1, 2, 3, 5, 10, 15];
 const TIMES = ["09:20", "09:30", "09:45", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30"];
-const EMPTY: StrategyLabChoice = { entries: [], exits: ["cross"], stop: "ATR", targets: [], entry_from: "09:20", entry_to: "15:30", qty: 0 };
+const EMPTY: StrategyLabChoice = { entries: [], exits: ["cross"], stop: "ATR", targets: [], entry_from: "09:20", entry_to: "15:30", qty: 0, symbols: [], margin_pct: 20 };
+/** Sent as the stock list when every stock is unticked: matches no stock, so nothing is traded. */
+const NO_STOCK = "-";
 
 const sameChoice = (a: StrategyLabChoice, b: StrategyLabChoice) =>
-  JSON.stringify([a.entries, a.exits, a.stop, a.targets, a.entry_from, a.entry_to, a.qty]) ===
-  JSON.stringify([b.entries, b.exits, b.stop, b.targets, b.entry_from, b.entry_to, b.qty]);
+  JSON.stringify([a.entries, a.exits, a.stop, a.targets, a.entry_from, a.entry_to, a.qty, a.symbols ?? [], a.margin_pct ?? 20]) ===
+  JSON.stringify([b.entries, b.exits, b.stop, b.targets, b.entry_from, b.entry_to, b.qty, b.symbols ?? [], b.margin_pct ?? 20]);
 
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
 
-export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
+export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>; onArmMany?: (symbols: string[]) => void }) {
   const [lists, setLists] = useScanLists("sma.lab.lists", ["armed"]);
   const [days, setDays] = useState(10);
   const [bot, setBot] = useState(1);
@@ -58,7 +62,9 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
   const [evaluating, setEvaluating] = useState(false);
   const [recBusy, setRecBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
-  const [show, setShow] = useState<"stocks" | "days" | "trades" | "reasons">("stocks");
+  const [show, setShow] = useState<"pick" | "stocks" | "days" | "trades" | "reasons">("stocks");
+  // Every stock's P&L with the same rules but all stocks in (the Stocks tab shows it for unticked ones too).
+  const [allStocks, setAllStocks] = useState<StrategyLabResult["per_stock"] | null>(null);
   const latest = useRef(0);
 
   const rules: StrategyLabRules | null = view?.rules ?? null;
@@ -107,6 +113,7 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
         setJob(v.job);
         setChoice({ ...EMPTY, ...(v.job.choice ?? {}) });
         setResult(v.result);
+        setAllStocks(v.result.per_stock);
         setRec(null);
         setRecFor(null);
       })
@@ -124,8 +131,15 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
       const mine = ++latest.current;
       setEvaluating(true);
       try {
-        const v = await smaApi.strategyLabEvaluate(openId, next);
-        if (mine === latest.current) setResult(v);
+        const filtered = (next.symbols ?? []).length > 0;
+        const [v, all] = await Promise.all([
+          smaApi.strategyLabEvaluate(openId, next),
+          filtered ? smaApi.strategyLabEvaluate(openId, { ...next, symbols: [] }) : Promise.resolve(null),
+        ]);
+        if (mine === latest.current) {
+          setResult(v);
+          setAllStocks(all ? all.per_stock : v.per_stock);
+        }
       } catch (e: unknown) {
         if (mine === latest.current) setNote({ ok: false, text: e instanceof Error ? e.message : "Could not evaluate" });
       } finally {
@@ -204,7 +218,9 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
   const backtest = async () => {
     if (!job || !result) return;
     const target = job.bot as 1 | 2 | 3 | 4;
-    const text = `Save these switches on Bot ${target} (the numbers behind them stay as they are) and replay ${job.symbols.length} stock(s), ${job.first} → ${job.last}, through the real bot? Practice money; no order is sent.`;
+    const picked = (choice.symbols ?? []).filter((x) => x !== NO_STOCK);
+    const stocks = picked.length ? picked : job.symbols;
+    const text = `Save these switches on Bot ${target} (the numbers behind them stay as they are) and replay ${stocks.length} stock(s)${picked.length ? " (the ticked ones)" : ""}, ${job.first} → ${job.last}, through the real bot? Practice money; no order is sent.`;
     if (!window.confirm(text)) return;
     setBusy(true);
     try {
@@ -213,7 +229,7 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
         if (!window.confirm(`Bot ${target}'s replay is already running. Stop it and start this one instead?`)) return;
       }
       await smaApi.saveConfigOn(target, result.settings as Partial<SmaConfig>);
-      await smaApi.replayStart(job.first, "09:15", 0, job.last, job.symbols, target, false, true);
+      await smaApi.replayStart(job.first, "09:15", 0, job.last, stocks, target, false, true);
       setNote({ ok: true, text: `Saved on Bot ${target} and started the replay. Its trades build up in the terminal's Backtests tab; compare them with the lab's ${result.totals.trades} trade(s) and ${money(result.totals.gross, true)}.` });
     } catch (e: unknown) {
       setNote({ ok: false, text: e instanceof Error ? e.message : "Could not start the replay" });
@@ -397,6 +413,17 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
                     title="0 = the bot's own quantity"
                   />
                 </label>
+                <label className="flex items-center gap-2 text-slate-300" title="The intraday margin blocked per trade, % of its value (20% = 5x, Groww MIS). Only changes the capital figures.">
+                  Margin %
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={choice.margin_pct ?? 20}
+                    onChange={(e) => change({ ...choice, margin_pct: Math.min(100, Math.max(1, Number(e.target.value) || 20)) })}
+                    className={clsx(select, "w-16")}
+                  />
+                </label>
               </div>
             </div>
           </div>
@@ -414,9 +441,11 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
                 <Tile label="Per trade" value={money(result.totals.per_trade, true)} tone={result.totals.per_trade} />
                 <Tile label="Biggest drop" value={money(result.totals.drawdown)} tone={result.totals.drawdown} />
               </div>
+              {result.capital && <CapitalRow cap={result.capital} />}
               <p className="text-xs text-slate-500">
                 Skipped: {result.skipped.refused} refused by a check, {result.skipped.in_position} while already in a trade, {result.skipped.outside_window} outside the entry hours
-                {result.skipped.stock_cap ? `, ${result.skipped.stock_cap} over the per-stock cap` : ""}. Best trade {money(result.totals.best_trade, true)}, worst{" "}
+                {result.skipped.stock_cap ? `, ${result.skipped.stock_cap} over the per-stock cap` : ""}
+                {result.skipped.unticked ? `, ${result.skipped.unticked.toLocaleString("en-IN")} on unticked stocks` : ""}. Best trade {money(result.totals.best_trade, true)}, worst{" "}
                 {money(result.totals.worst_trade, true)}; best day {money(result.totals.best_day, true)}, worst {money(result.totals.worst_day, true)}.
               </p>
               <div className="flex flex-wrap items-center gap-2">
@@ -490,12 +519,31 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
               <Equity days={result.per_day} />
 
               <div className="flex flex-wrap gap-1 text-xs">
-                {(["stocks", "days", "reasons", "trades"] as const).map((k) => (
-                  <button key={k} type="button" onClick={() => setShow(k)} className={clsx("rounded-md px-2 py-1", show === k ? "bg-slate-700 text-slate-100" : "text-slate-400 hover:text-slate-200")}>
-                    {k === "stocks" ? "By stock" : k === "days" ? "By day" : k === "reasons" ? "By exit reason" : "Trades"}
+                {(["pick", "stocks", "days", "reasons", "trades"] as const).map((k) => (
+                  <button key={k} type="button" onClick={() => setShow(k)} className={clsx("inline-flex items-center gap-1 rounded-md px-2 py-1", show === k ? "bg-slate-700 text-slate-100" : "text-slate-400 hover:text-slate-200")}>
+                    {k === "pick"
+                      ? `Stocks (${stockCount(choice, result.universe ?? [])} of ${(result.universe ?? []).length} ticked)`
+                      : k === "stocks"
+                        ? "By stock"
+                        : k === "days"
+                          ? "By day"
+                          : k === "reasons"
+                            ? "By exit reason"
+                            : "Trades"}
+                    {k === "pick" ? <NewTag id="lab-stocks-capital" link={false} /> : null}
                   </button>
                 ))}
               </div>
+              {show === "pick" && (
+                <StockPicker
+                  universe={result.universe ?? []}
+                  perStock={allStocks ?? result.per_stock}
+                  picked={choice.symbols ?? []}
+                  armed={armed}
+                  onChange={(symbols) => change({ ...choice, symbols })}
+                  onArmMany={onArmMany}
+                />
+              )}
               {show === "stocks" && <StockTable rows={result.per_stock} />}
               {show === "days" && <DayTable rows={result.per_day} />}
               {show === "reasons" && <ReasonTable rows={result.by_reason} />}
@@ -749,6 +797,183 @@ function TradeTable({ rows, cut }: { rows: StrategyLabResult["trades"] & {}; cut
                 <td className="px-2 py-1 text-right tabular-nums text-slate-300">{t.qty}</td>
                 <td className={clsx("px-2 py-1 text-right tabular-nums", t.gross >= 0 ? "text-emerald-300" : "text-rose-300")}>{money(t.gross, true)}</td>
                 <td className={clsx("px-2 py-1 text-right tabular-nums", t.net >= 0 ? "text-emerald-300" : "text-rose-300")}>{money(t.net, true)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** How many of the run's stocks the choice keeps (empty list = all). */
+function stockCount(choice: StrategyLabChoice, universe: { symbol: string }[]): number {
+  const picked = (choice.symbols ?? []).filter((x) => x !== NO_STOCK);
+  if (!(choice.symbols ?? []).length) return universe.length;
+  return universe.filter((u) => picked.includes(u.symbol)).length;
+}
+
+/** The money the kept trades needed: the most in use at one moment, its margin and the return on it. */
+function CapitalRow({ cap }: { cap: StrategyLabCapital }) {
+  const when = cap.peak_at ? cap.peak_at.slice(0, 16).replace("T", " ") : null;
+  const busiest = cap.per_day.length ? cap.per_day.reduce((a, b) => (b.peak_value > a.peak_value ? b : a)) : null;
+  return (
+    <div className="space-y-1">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+        <Tile label="Capital needed (full value)" value={money(cap.peak_value)} />
+        <Tile label={`Margin blocked (${num(cap.margin_pct, 0)}%)`} value={money(cap.peak_margin)} />
+        <Tile label="Return on capital" value={cap.return_pct == null ? "—" : pct(cap.return_pct)} tone={cap.return_pct ?? undefined} />
+        <Tile label="Return on margin" value={cap.return_on_margin_pct == null ? "—" : pct(cap.return_on_margin_pct)} tone={cap.return_on_margin_pct ?? undefined} />
+        <Tile label="Largest trade" value={money(cap.max_trade_value)} />
+        <Tile label="Average trade" value={money(cap.avg_trade_value)} />
+      </div>
+      <p className="text-xs text-slate-500">
+        Capital = qty × entry price of the trades open at the same moment, at its most{when ? ` (${when}, ${cap.peak_open} trade(s) open)` : ""}
+        {busiest ? `; busiest day ${busiest.day}` : ""}. Margin is what an intraday (MIS) account blocks for that: the money you need in the
+        account. Returns are the P&amp;L before charges against it.
+      </p>
+    </div>
+  );
+}
+
+type PickKey = "symbol" | "signals" | "trades" | "gross" | "net" | "win_pct" | "per_trade";
+
+/**
+ * The run's stocks with tick boxes: only ticked stocks count in every number above (re-worked at once), the replay
+ * button replays only them, and Arm ticked arms them through the usual arm prompt. The P&L columns are each stock's
+ * with the same rules and every stock in, so an unticked stock still shows what it would add.
+ */
+function StockPicker({
+  universe,
+  perStock,
+  picked,
+  armed,
+  onChange,
+  onArmMany,
+}: {
+  universe: { symbol: string; signals: number }[];
+  perStock: StrategyLabResult["per_stock"];
+  picked: string[];
+  armed: Map<string, string[]>;
+  onChange: (symbols: string[]) => void;
+  onArmMany?: (symbols: string[]) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [topN, setTopN] = useState(20);
+  const all = universe.map((u) => u.symbol);
+  const ticked = useMemo(() => new Set(picked.length ? picked.filter((x) => x !== NO_STOCK) : all), [picked, all]);
+  const stat = useMemo(() => new Map(perStock.map((r) => [r.symbol, r])), [perStock]);
+  const rows = useMemo(
+    () =>
+      universe.map((u) => {
+        const st = stat.get(u.symbol);
+        return { symbol: u.symbol, signals: u.signals, trades: st?.trades ?? 0, gross: st?.gross ?? 0, net: st?.net ?? 0, win_pct: st?.win_pct ?? 0, per_trade: st?.per_trade ?? 0 };
+      }),
+    [universe, stat]
+  );
+  const shown = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    return q ? rows.filter((r) => r.symbol.includes(q)) : rows;
+  }, [rows, query]);
+  const { sorted, sort, onSort } = useSort<(typeof rows)[number], PickKey>(shown, (r, k) => r[k]);
+  const set = (next: Iterable<string>) => {
+    const list = Array.from(new Set(next));
+    // all ticked = no filter; none ticked = a list that matches nothing
+    onChange(list.length === all.length ? [] : list.length ? list : [NO_STOCK]);
+  };
+  const flip = (symbol: string) => {
+    const next = new Set(ticked);
+    if (next.has(symbol)) next.delete(symbol);
+    else next.add(symbol);
+    set(next);
+  };
+  const byPnl = [...rows].sort((a, b) => b.gross - a.gross);
+  const btn = "rounded-md px-2 py-1 ring-1 ring-inset ring-slate-700 hover:bg-white/5";
+  const tickedList = all.filter((s) => ticked.has(s));
+  const shownAll = shown.length > 0 && shown.every((r) => ticked.has(r.symbol));
+  return (
+    <div className="space-y-2 text-xs">
+      <p className="text-slate-500">
+        The run read {universe.length} stock(s). Only the ticked ones count in every number above, in &quot;Backtest this in the replay&quot; and in
+        Arm ticked. The P&amp;L columns are each stock&apos;s with these rules, ticked or not.
+      </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button type="button" className={btn} onClick={() => set(all)}>Tick all</button>
+        <button type="button" className={btn} onClick={() => set([])}>Untick all</button>
+        <button type="button" className={btn} onClick={() => set(all.filter((s) => !ticked.has(s)))}>Invert</button>
+        <button type="button" className={btn} onClick={() => set(rows.filter((r) => r.gross > 0).map((r) => r.symbol))}>Only winners</button>
+        <button type="button" className={btn} onClick={() => set(rows.filter((r) => r.gross < 0).map((r) => r.symbol))}>Only losers</button>
+        <button type="button" className={btn} onClick={() => set(rows.filter((r) => r.trades > 0).map((r) => r.symbol))}>Only with trades</button>
+        <button type="button" className={btn} onClick={() => set(rows.filter((r) => armed.has(r.symbol)).map((r) => r.symbol))}>Only armed now</button>
+        <span className="inline-flex items-center gap-1">
+          <button type="button" className={btn} onClick={() => set(byPnl.slice(0, topN).map((r) => r.symbol))}>Top</button>
+          <select value={topN} onChange={(e) => setTopN(Number(e.target.value))} className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200" aria-label="How many top stocks">
+            {[5, 10, 20, 30, 50, 100].map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+          <span className="text-slate-500">by P&amp;L</span>
+        </span>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search stock"
+          className="ml-auto rounded border border-slate-700 bg-base px-2 py-1 text-xs text-slate-200"
+        />
+        {query ? (
+          <button type="button" className={btn} onClick={() => set(shownAll ? tickedList.filter((s) => !shown.some((r) => r.symbol === s)) : [...tickedList, ...shown.map((r) => r.symbol)])}>
+            {shownAll ? "Untick" : "Tick"} the {shown.length} found
+          </button>
+        ) : null}
+        {onArmMany ? (
+          <button
+            type="button"
+            disabled={!tickedList.length}
+            onClick={() => onArmMany(tickedList)}
+            className="rounded-md bg-emerald-600 px-2.5 py-1 font-semibold text-white disabled:opacity-40"
+            title="Opens the usual Arm ticked prompt: pick the bot, quantity and stop. Nothing is ordered."
+          >
+            Arm ticked ({tickedList.length})
+          </button>
+        ) : null}
+      </div>
+      <div className="max-h-96 overflow-auto rounded-lg border border-slate-800">
+        <table className="min-w-full text-xs">
+          <thead className="sticky top-0 bg-card text-left text-slate-500">
+            <tr>
+              <th className="w-8 px-2 py-1">
+                <input
+                  type="checkbox"
+                  aria-label="Tick every stock shown"
+                  checked={shownAll}
+                  onChange={() => set(shownAll ? tickedList.filter((s) => !shown.some((r) => r.symbol === s)) : [...tickedList, ...shown.map((r) => r.symbol)])}
+                />
+              </th>
+              <SortTh label="Stock" k="symbol" sort={sort} onSort={onSort} text />
+              <SortTh label="Signals" k="signals" sort={sort} onSort={onSort} num title="SMA crosses the run found (before any check)" />
+              <SortTh label="Trades" k="trades" sort={sort} onSort={onSort} num />
+              <SortTh label="Win %" k="win_pct" sort={sort} onSort={onSort} num />
+              <SortTh label="Before charges" k="gross" sort={sort} onSort={onSort} num />
+              <SortTh label="After charges" k="net" sort={sort} onSort={onSort} num />
+              <SortTh label="Per trade" k="per_trade" sort={sort} onSort={onSort} num />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((r) => (
+              <tr key={r.symbol} onClick={() => flip(r.symbol)} className={clsx("cursor-pointer border-t border-slate-800/60 hover:bg-white/[0.03]", !ticked.has(r.symbol) && "opacity-50")}>
+                <td className="px-2 py-1">
+                  <input type="checkbox" checked={ticked.has(r.symbol)} onChange={() => flip(r.symbol)} onClick={(e) => e.stopPropagation()} aria-label={`Tick ${r.symbol}`} />
+                </td>
+                <td className="px-2 py-1 font-semibold text-slate-200">
+                  {r.symbol}
+                  {armed.has(r.symbol) ? <span className="ml-1 rounded px-1 text-[10px] font-normal text-emerald-300 ring-1 ring-inset ring-emerald-400/40">armed</span> : null}
+                </td>
+                <td className="px-2 py-1 text-right tabular-nums text-slate-300">{r.signals}</td>
+                <td className="px-2 py-1 text-right tabular-nums text-slate-300">{r.trades}</td>
+                <td className="px-2 py-1 text-right tabular-nums text-slate-300">{r.trades ? pct(r.win_pct) : "—"}</td>
+                <td className={clsx("px-2 py-1 text-right tabular-nums", r.gross > 0 ? "text-emerald-300" : r.gross < 0 ? "text-rose-300" : "text-slate-400")}>{money(r.gross, true)}</td>
+                <td className={clsx("px-2 py-1 text-right tabular-nums", r.net > 0 ? "text-emerald-300" : r.net < 0 ? "text-rose-300" : "text-slate-400")}>{money(r.net, true)}</td>
+                <td className="px-2 py-1 text-right tabular-nums text-slate-300">{r.trades ? money(r.per_trade, true) : "—"}</td>
               </tr>
             ))}
           </tbody>
