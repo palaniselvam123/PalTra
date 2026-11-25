@@ -127,9 +127,30 @@ def test_the_combiner_applies_checks_exits_stops_and_the_in_position_rule():
     # unknown names are dropped, not an error
     assert lab.clean_choice({"entries": ["nope", "rsi"], "exits": ["x"], "stop": "weird"}) == {
         "entries": ["rsi"], "exits": [], "stop": "NONE", "targets": [], "entry_from": "09:20", "entry_to": "15:30", "qty": 0,
+        "symbols": [], "margin_pct": 20.0,
     }
     # the settings the replay needs for this choice ride along
     assert stop["settings"]["use_stop"] and stop["settings"]["stop_type"] == "ATR" and stop["settings"]["cross_exit"]
+
+
+def test_ticked_stocks_and_the_capital_the_trades_needed():
+    trades = _synthetic_trades()
+    other = {**trades[0], "symbol": "Y", "entry_price": 50.0, "exits": {**trades[0]["exits"], "cross": [trades[1]["entry_ts"], 51.0]}}
+    rows = trades + [other]
+    every = lab.evaluate(rows, {"entries": [], "exits": ["cross"], "stop": "NONE"})
+    assert every["totals"]["trades"] == 3 and [u["symbol"] for u in every["universe"]] == ["X", "Y"]
+    assert every["universe"][0]["signals"] == 2
+    cap = every["capital"]
+    # X's A (10 x 100) and Y (10 x 50) are open together 10:00-11:00; both free their money at 11:00 before B
+    # (10 x 104) opens then, so the most in use at once is 1,500, not 1,000 + 500 + 1,040
+    assert cap["peak_value"] == 1500.0 and cap["peak_open"] == 2 and cap["max_trade_value"] == 1040.0
+    assert cap["peak_margin"] == 300.0 and cap["margin_pct"] == 20.0
+    assert cap["return_pct"] == round(every["totals"]["gross"] / 1500.0 * 100, 2)
+    only_y = lab.evaluate(rows, {"entries": [], "exits": ["cross"], "stop": "NONE", "symbols": ["y"], "margin_pct": 50})
+    assert only_y["totals"]["trades"] == 1 and only_y["trades"][0]["symbol"] == "Y" and only_y["skipped"]["unticked"] == 2
+    assert only_y["capital"]["peak_value"] == 500.0 and only_y["capital"]["peak_margin"] == 250.0
+    assert len(only_y["universe"]) == 2  # the tab still lists every stock of the run
+    assert lab.evaluate([], {"stop": "NONE"})["capital"]["peak_value"] == 0.0
 
 
 def test_recommend_lists_every_rule_and_climbs_to_a_better_choice(monkeypatch):

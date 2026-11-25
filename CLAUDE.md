@@ -1960,7 +1960,15 @@ spinning top), body and range) / Matched / Call columns
   flat), the trade ends at the earliest of its chosen exits / stop / targets / square-off (same minute: stop, target,
   exit), P&L before charges and after (`charges.calculate_charges`), per stock, per day (running total), by exit reason,
   skipped counts, the trades (`MAX_TRADES_OUT`), and `settings` = the BotConfig fields of that choice
-  (`settings_for_choice`). `recommend` (`POST …/recommend`): every rule toggled one at a time against the choice ("what
+  (`settings_for_choice`). **Capital** (`capital`, `out["capital"]`; display only): each kept trade's full value
+  (qty × entry price), the most in use at one moment (`peak_value`: trades open together add up, one closing at a minute
+  frees its money before another opens then; `peak_at`, `peak_open`), the margin an intraday account blocks for it
+  (`peak_margin` = `Choice.margin_pct`, default `DEFAULT_MARGIN_PCT` 20 = 5×), the return on both, the largest / average
+  trade and each day's peak; the tab's Capital tiles and "Margin %" box. **Ticked stocks** (`Choice.symbols`, empty = every
+  stock; `out["universe"]` = every stock of the run with its signals, `skipped.unticked`): the result's **Stocks** tab
+  (`StrategyLab.StockPicker`: tick boxes, Tick all / Untick all / Invert / Only winners / losers / with trades / armed now /
+  Top N by P&L, search, sortable; each stock's P&L with the same rules and every stock in) keeps only the ticked stocks in
+  every number, "Backtest this in the replay" replays only them, and **Arm ticked** opens the usual Arm ticked prompt. `recommend` (`POST …/recommend`): every rule toggled one at a time against the choice ("what
   each rule adds", `delta_net`) and a greedy climb (`SEARCH_STEPS`, `SEARCH_MIN_TRADES`) to the best found.
   `choice_from_cfg` is the bot's own switches, the run's starting choice. `GET /api/strategy-lab` (runs, `rules` with
   labels), `GET /api/strategy-lab/{id}` (the run's choice evaluated), `POST /api/strategy-lab/stop`, `DELETE

@@ -4019,6 +4019,23 @@ export type StrategyLabChoice = {
   entry_from?: string;
   entry_to?: string;
   qty?: number;
+  /** Only these stocks count (the Stocks tab's tick boxes); empty = every stock of the run. */
+  symbols?: string[];
+  /** Intraday margin % of a trade's value, for the capital it needs (20 = 5x). */
+  margin_pct?: number;
+};
+/** The money the kept trades needed (strategy_lab.capital). */
+export type StrategyLabCapital = {
+  peak_value: number;
+  peak_margin: number;
+  peak_at: string | null;
+  peak_open: number;
+  max_trade_value: number;
+  avg_trade_value: number;
+  margin_pct: number;
+  return_pct: number | null;
+  return_on_margin_pct: number | null;
+  per_day: { day: string; peak_value: number; peak_margin: number }[];
 };
 export type StrategyLabJob = {
   id: string;
@@ -4082,8 +4099,11 @@ export type StrategyLabResult = {
   per_day: { day: string; trades: number; gross: number; net: number; cum_gross: number }[];
   per_stock: { symbol: string; trades: number; win_pct: number; gross: number; net: number; days: number; green_days: number; per_trade: number }[];
   by_reason: { reason: string; trades: number; gross: number; wins: number }[];
-  skipped: { refused: number; in_position: number; outside_window: number; stock_cap: number };
+  skipped: { refused: number; in_position: number; outside_window: number; stock_cap: number; unticked?: number };
   base_trades: number;
+  capital?: StrategyLabCapital;
+  /** Every stock of the run with its base trades (signals). */
+  universe?: { symbol: string; signals: number }[];
   choice: Required<StrategyLabChoice>;
   settings: Record<string, unknown>;
   trades?: StrategyLabTrade[];
