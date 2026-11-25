@@ -1970,7 +1970,7 @@ spinning top), body and range) / Matched / Call columns
   Top N by P&L, search, sortable; each stock's P&L with the same rules and every stock in) keeps only the ticked stocks in
   every number, "Backtest this in the replay" replays only them, and **Arm ticked** opens the usual Arm ticked prompt.
   **Backtest this in the replay** (`POST /api/strategy-lab/{id}/apply`, `StrategyLabApply`: the choice plus `reset`,
-  `stop_replay`, `confirm_live`; then `replayStart` on the run's or ticked stocks and days): the switches of
+  `stop_replay`, `confirm_live`, `to_bot` 1-5 (none = the run's bot); then `replayStart` on the run's or ticked stocks and days; **Apply to bot** (a bot picker next to it) sends `to_bot` and starts no replay, so the bot trades the result on its next signals, a LIVE bot after the page asks): the switches of
   `settings_for_choice` go on the run's bot through `_import_desk` (dry run first, Save's checks; Trade list, PAPER/LIVE,
   name and per-stock settings stay); with **Reset the bot's other settings first** (`reset`, the tick box next to the
   button) every other strategy field goes back to its default (`strategy_defaults`) and the lab's numbers are put on

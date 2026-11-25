@@ -6046,15 +6046,17 @@ class StrategyLabApply(StrategyLabChoice):
     #: That bot's backtest is loading / playing / paused and the page asked to stop it first.
     stop_replay: bool = False
     confirm_live: bool = False
+    #: The bot to put it on (1-5); none = the run's own bot ("Numbers from"). "Apply to bot" picks it.
+    to_bot: int | None = Field(default=None, ge=1, le=5)
 
 
 @app.post("/api/strategy-lab/{job_id}/apply")
 async def strategy_lab_apply(job_id: str, body: StrategyLabApply):
-    """Put the lab's choice on the run's bot ("Backtest this in the replay"): the switches of `settings_for_choice`
+    """Put the lab's choice on a bot (the run's own, or `to_bot`; "Backtest this in the replay" and "Apply to bot"): the switches of `settings_for_choice`
     and, with `reset`, every other strategy field back at its default with the lab's numbers on top. One write, checked
     like Save (dry run first). The Trade list, PAPER/LIVE, name and per-stock settings stay. No order is placed."""
     job, _rows = _lab_job_or_404(job_id)
-    bot = int(job.get("bot") or 1)
+    bot = int(body.to_bot or job.get("bot") or 1)
     desk = str(bot)
     eng = _desk_engine(desk)
     if (eng.load_config().trading_mode or "PAPER").upper() == "LIVE" and not body.confirm_live:

@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { FlaskConical, Loader2, Play, Square, Trash2, Wand2 } from "lucide-react";
+import { Check, FlaskConical, Loader2, Play, Square, Trash2, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScanListPicker, resolveScanSymbols, useScanLists, type ScanList } from "@/components/Scalp/ScanLists";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
@@ -63,6 +63,7 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   // "Backtest this in the replay": every other strategy setting back to its default first (off = only the switches).
   const [resetFirst, setResetFirst] = useState(false);
+  const [applyBot, setApplyBot] = useState(0); // 0 = the run's own bot
   const [show, setShow] = useState<"pick" | "stocks" | "days" | "trades" | "reasons">("stocks");
   // Every stock's P&L with the same rules but all stocks in (the Stocks tab shows it for unticked ones too).
   const [allStocks, setAllStocks] = useState<StrategyLabResult["per_stock"] | null>(null);
@@ -213,6 +214,47 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
   const useBest = () => {
     if (!rec) return;
     change({ ...choice, ...rec.best.choice });
+  };
+
+  /** Save this choice's switches on a bot, no replay: the bot then trades them on its next signals (PAPER or LIVE as it
+   * is). A LIVE bot asks first; a backtest playing on that bot is stopped only when the person says so. */
+  const applyToBot = async () => {
+    if (!job) return;
+    const target = applyBot || job.bot;
+    const what = resetFirst
+      ? `Reset Bot ${target}'s other strategy settings to their defaults, then put on these switches and the numbers the lab read (SMAs, stop, filter ranges, quantity, candle).`
+      : `Save these switches on Bot ${target} (its numbers and every other setting stay as they are).`;
+    const text = `${what}\n\nNo replay starts and no order is placed: the bot uses them from its next signal on its armed stocks. The Trade list, PAPER/LIVE, name and per-stock settings stay; the old settings stay in Settings → Strategy → Saved strategies & history.`;
+    if (!window.confirm(text)) return;
+    setBusy(true);
+    const body = { ...choice, reset: resetFirst, to_bot: target };
+    const send = (extra: { confirm_live?: boolean; stop_replay?: boolean }) => smaApi.strategyLabApply(job.id, { ...body, ...extra });
+    try {
+      let extra: { confirm_live?: boolean; stop_replay?: boolean } = {};
+      for (let i = 0; i < 3; i++) {
+        try {
+          await send(extra);
+          setNote({
+            ok: true,
+            text: `${resetFirst ? "Reset and saved" : "Saved"} on Bot ${target}. No replay started. Arm the stocks (the Stocks tab's Arm ticked) and Start the bot in the terminal; it trades them on its next signals.`,
+          });
+          return;
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : "";
+          if (/is LIVE/i.test(msg) && !extra.confirm_live) {
+            if (!window.confirm(`Bot ${target} is LIVE: its next trades use real money with these settings. Change its settings?`)) return;
+            extra = { ...extra, confirm_live: true };
+          } else if (/backtest is playing/i.test(msg) && !extra.stop_replay) {
+            if (!window.confirm(`Bot ${target}'s backtest is playing and reads its settings each day. Stop that backtest and save?`)) return;
+            extra = { ...extra, stop_replay: true };
+          } else throw e;
+        }
+      }
+    } catch (e: unknown) {
+      setNote({ ok: false, text: e instanceof Error ? e.message : "Could not save on the bot" });
+    } finally {
+      setBusy(false);
+    }
   };
 
   /** Save this choice's switches on the bot and start the real replay on the same stocks and days. */
@@ -461,6 +503,30 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                 <button type="button" onClick={backtest} disabled={busy} className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-400/40 hover:bg-emerald-500/10 disabled:opacity-50">
                   <Play size={13} /> Backtest this in the replay
                 </button>
+                <span className="inline-flex items-center gap-1">
+                  <select
+                    value={applyBot || job?.bot || 1}
+                    onChange={(e) => setApplyBot(Number(e.target.value))}
+                    className={select}
+                    disabled={busy}
+                    aria-label="Bot to apply the lab's settings to"
+                  >
+                    {[1, 2, 3, 4, 5].map((b) => (
+                      <option key={b} value={b}>
+                        Bot {b}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={applyToBot}
+                    disabled={busy}
+                    title="Save these switches on the picked bot without a replay. The Reset tick box applies too. Nothing is armed and no order is placed."
+                    className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 text-xs font-semibold text-accentSky ring-1 ring-inset ring-sky-400/40 hover:bg-sky-500/10 disabled:opacity-50"
+                  >
+                    <Check size={13} /> Apply to bot <NewTag id="lab-apply-bot" link={false} />
+                  </button>
+                </span>
                 <label
                   className="inline-flex items-center gap-1.5 text-xs text-slate-300"
                   title="Off: only the lab's switches change on the bot; its other settings (entry mode, pullbacks, smart stop, hand-offs…) stay and play in the replay too. On: every other strategy setting goes back to its default first and the lab's numbers are put on, so the replay trades only what the lab tested. The Trade list, PAPER/LIVE, name and per-stock settings stay."
