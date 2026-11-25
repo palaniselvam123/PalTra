@@ -1,6 +1,6 @@
 "use client";
 
-import { ByTrend, HandoffTable } from "./HandoffTrail";
+import { ByTrend, HandoffSection } from "./HandoffTrail";
 import { TrendReadings } from "./TrendReadings";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
@@ -1516,12 +1516,7 @@ function RunDetailBody({
       {(run.by_regime ?? []).length ? <ByTrend groups={run.by_regime ?? []} /> : null}
       <TrendReadings runId={run.id} symbols={run.symbols ?? []} />
       {(run.handoff_trail ?? []).length ? (
-        <div className="mb-4">
-          <div className="mb-1 px-2 text-xs uppercase tracking-wider text-slate-400">
-            Hand-offs in this run ({(run.handoff_trail ?? []).length}) · where each stock was sent
-          </div>
-          <HandoffTable rows={[...(run.handoff_trail ?? [])].reverse()} showDay={run.start_date !== run.end_date} basis={basis} />
-        </div>
+        <HandoffSection rows={[...(run.handoff_trail ?? [])].reverse()} showDay={run.start_date !== run.end_date} basis={basis} />
       ) : null}
       <div className="overflow-x-auto">
         <ColumnHint moved={dayCols.moved} onReset={dayCols.reset} />

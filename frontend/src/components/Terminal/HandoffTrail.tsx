@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
-import { ArrowRightLeft, Loader2, RefreshCw, X } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronRight, Loader2, RefreshCw, X } from "lucide-react";
 import { smaApi, type HandoffRow, type HandoffTrade, type TrendGroupRow } from "@/lib/smaApi";
 import { NewTag } from "@/components/ui/NewTag";
 import { trendColor, trendText, type TrendGroup } from "@/lib/trendAtEntry";
@@ -85,6 +85,52 @@ function PnlTotals({ rows, basis }: { rows: HandoffRow[]; basis: Basis }) {
       </span>
       <span className="text-slate-500">{basis === "net" ? "after charges" : "before charges"}</span>
     </p>
+  );
+}
+
+const FOLD_KEY = "backtests.handoffs.open";
+
+function readOpen(): boolean {
+  try {
+    return window.localStorage.getItem(FOLD_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+/** A backtest run's hand-offs with a heading that shrinks / expands the table (kept per browser); the P&L totals
+ * stay in view while it is shrunk. */
+export function HandoffSection({ rows, showDay = false, basis }: { rows: HandoffRow[]; showDay?: boolean; basis?: Basis }) {
+  const [open, setOpen] = useState(true);
+  useEffect(() => setOpen(readOpen()), []);
+  if (!rows.length) return null;
+  const toggle = () =>
+    setOpen((was) => {
+      try {
+        window.localStorage.setItem(FOLD_KEY, was ? "0" : "1");
+      } catch {
+        /* per-browser convenience only */
+      }
+      return !was;
+    });
+  const withPnl = basis != null && rows.some((r) => r.from_trade || r.to_trade);
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <div className="mb-4">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className="mb-1 flex items-center gap-1 rounded px-2 text-xs uppercase tracking-wider text-slate-400 hover:text-slate-200"
+        title={open ? "Shrink: hide the rows, keep the totals" : "Expand: show every hand-off"}
+      >
+        <Chevron className="h-3.5 w-3.5" aria-hidden />
+        Hand-offs in this run ({rows.length}) · where each stock was sent
+        <span className="ml-1 normal-case tracking-normal text-slate-500">{open ? "(shrink)" : "(expand)"}</span>
+        <NewTag id="bt-handoff-fold" link={false} />
+      </button>
+      {open ? <HandoffTable rows={rows} showDay={showDay} basis={basis} /> : withPnl ? <PnlTotals rows={rows} basis={basis!} /> : null}
+    </div>
   );
 }
 
