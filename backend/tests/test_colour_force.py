@@ -76,3 +76,30 @@ async def test_force_refuses_when_the_colour_candle_has_no_colour(engine, monkey
     with pytest.raises(ForceRefused, match="no colour to follow"):
         await engine.force_order("COLR")
     assert "COLR" not in engine.positions
+
+
+@pytest.mark.asyncio
+async def test_auto_arm_force_follows_the_colour_even_with_the_switch_off(engine, monkeypatch):  # noqa: F811
+    """Auto-arm's "Force order when armed": candle-colour mode reads the colour, whatever colour_force says."""
+    _setup(engine, monkeypatch, colour_force=False)
+    engine.status = "RUNNING"
+    await engine.force_order("COLR", auto=True)
+    pos = engine.positions["COLR"]
+    assert pos.direction == "SHORT" and pos.entry_why == "AUTO_ARM_FORCE"
+
+
+@pytest.mark.asyncio
+async def test_auto_arm_force_reads_the_smas_in_sma_mode(engine, monkeypatch):  # noqa: F811
+    _setup(engine, monkeypatch, entry_mode="SMA")
+    engine.status = "RUNNING"
+    await engine.force_order("COLR", auto=True)
+    assert engine.positions["COLR"].direction == "LONG"
+
+
+@pytest.mark.asyncio
+async def test_auto_arm_force_never_starts_a_stopped_bot(engine, monkeypatch):  # noqa: F811
+    _setup(engine, monkeypatch, colour_force=False)
+    engine.status = "STOPPED"
+    with pytest.raises(ForceRefused, match="stays armed"):
+        await engine.force_order("COLR", auto=True)
+    assert "COLR" not in engine.positions and engine.status == "STOPPED"

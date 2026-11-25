@@ -211,6 +211,7 @@ ENTRY_REASONS = (
     "NTH_CANDLE",
     "BREAKOUT_ARRIVAL",
     "FORCE_ORDER",
+    "AUTO_ARM_FORCE",
     "NEWS",
     "HANDOFF",
     "SMA9_TURN",
@@ -4424,8 +4425,13 @@ class StrategyEngine:
         return result
 
     @_own_view()
-    async def force_order(self, symbol: str) -> str:
+    async def force_order(self, symbol: str, auto: bool = False) -> str:
         """Buy or sell from the live SMA side, then leave the bot running.
+
+        `auto` (an auto-armed stock with "Force order when armed", auto_arm.py): the side follows the bot's entry rule
+        for the stock: candle-colour mode reads the last closed colour candle (colour_force.side, whatever the
+        colour_force switch says), any other mode the SMA side. A bot that is not RUNNING is never started by it
+        (refused: the stock stays armed for the bot's own signal); the entry reason is AUTO_ARM_FORCE.
 
         This does not wait for a cross and does not require the candle, or
         the session, to be closed. A cross already on the tape still cannot
@@ -4436,7 +4442,10 @@ class StrategyEngine:
         is still logged with the decision. Market hours, the entry cut-off,
         the Trade list, the halt / loss lock and the trade cap still apply.
         """
-        self.release_manual_panic()
+        if auto and self.status != "RUNNING":
+            raise ForceRefused(f"the bot is {self.status.lower()}, so no order (the stock stays armed)")
+        if not auto:
+            self.release_manual_panic()
         if self.status == "HALTED":
             raise ForceRefused(self.halt_reason or "Halted for the day")
         if self.status == "DAY_COMPLETED":
@@ -4460,7 +4469,7 @@ class StrategyEngine:
         enriched, price, reference, atr = await self._manual_ready(name, cfg)
         own = _cfg_for(cfg, name)
         colour_note = ""
-        if colour_force.on(own):
+        if colour_force.on(own) or (auto and uses_colour(own)):
             # Candle-colour mode with "Force follows the colour" (colour_force.py): the last closed colour candle decides.
             side, colour_note = colour_force.side(enriched, own)
             if side is None:
@@ -4495,7 +4504,7 @@ class StrategyEngine:
                     adx_blocks_entry=False,
                     cfg=_cfg_for(cfg, name),
                     now=now,
-                    why="FORCE_ORDER",
+                    why="AUTO_ARM_FORCE" if auto else "FORCE_ORDER",
                 )
             except SlCancelFailed as exc:
                 self.last_error = str(exc)
@@ -4511,7 +4520,8 @@ class StrategyEngine:
             _cfg_for(cfg, name),
             now,
             result,
-            note=(f"Force order. Side from the last closed colour candle ({colour_note})." if colour_note else "Force order. SMA side is read from the forming bar, then the last closed bar.")
+            note=("Auto-arm force order. " if auto else "")
+            + (f"Force order. Side from the last closed colour candle ({colour_note})." if colour_note else "Force order. SMA side is read from the forming bar, then the last closed bar.")
             + " Entry filters are not applied"
             + (f" (they would have refused: {overridden})." if overridden else "."),
         )

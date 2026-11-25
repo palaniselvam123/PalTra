@@ -302,6 +302,7 @@ class ReplayEngine(StrategyEngine):
         bot: int = 1,
         settings: dict | None = None,
         arm_windows: dict[str, list[tuple[int, int]]] | None = None,
+        force_on_arm: set[str] | None = None,
         fast: dict | None = None,
         chain: dict | None = None,
         on_bot: dict[str, int] | None = None,
@@ -335,6 +336,10 @@ class ReplayEngine(StrategyEngine):
         # "Replay as armed" (arm_log.py): each stock trades only while it was armed live that
         # day, {symbol: [(start, end) epoch seconds]}. None = every replayed stock all day.
         self.arm_windows = arm_windows
+        # Auto-arm replay's "Force order when armed": these stocks are entered at once at their arm minute
+        # (force_order(auto=True), the entry rule picks the side), once each (_forced).
+        self.force_on_arm = set(force_on_arm or ())
+        self._forced: set[str] = set()
         self._armed_before: set[str] | None = None
         self.run_id = run_id
         # A resumed run plays the settings it was started with, not today's.
@@ -375,6 +380,14 @@ class ReplayEngine(StrategyEngine):
                     self._skip_cross_until[name] = None
             self._armed_before = armed
         await super().tick(now)
+        if self.force_on_arm and self.arm_windows is not None:
+            for name in sorted(set(self._armed_now()) & self.force_on_arm - self._forced):
+                self._forced.add(name)
+                try:
+                    result = await self.force_order(name, auto=True)
+                except ForceRefused as exc:
+                    result = f"not ordered: {exc}"
+                self._signals[name] = f"{name} auto-arm force order — {result}"
         while self._chain_orders:
             # Bot 2 orders at once after a hand-off (handoff_now), played here after the tick that moved it.
             name, direction = self._chain_orders.pop(0)
@@ -1600,6 +1613,7 @@ class ReplaySession:
             start = self.start if index == 0 else SESSION_OPEN
             symbols = self.universe
             auto_windows = None
+            auto_force: set[str] = set()
             day_sources: dict[str, str] = {}
             if self.rule is not None:
                 # Pick as the live Scalp page would have at the pick time, then
@@ -1640,6 +1654,7 @@ class ReplaySession:
                 if getattr(self.rule, "kind", None) == auto_arm.KIND and picked:
                     # Auto-arm replay: each stock armed from the minute the rule picked it (auto_arm.py), as live.
                     auto_windows = auto_arm.arm_windows(day, picked)
+                    auto_force = auto_arm.force_symbols(self.rule, picked)
                     first = min(p["at"] for p in picked)
                     start = dt.time(int(first[:2]), int(first[3:5]))
                 elif getattr(self.rule, "kind", None) == saved_picks.KIND and picked:
@@ -1674,6 +1689,7 @@ class ReplaySession:
                 # A fresh engine per day: its own trade count, loss limit and P&L.
                 engine = ReplayEngine(
                     feed, symbols, run_id=self.run_id, bot=self.bot, settings=saved, arm_windows=windows, fast=fast_snap,
+                    force_on_arm=auto_force if auto_windows is not None else None,
                     chain=chain_snap, on_bot=day_on, sources=day_sources,
                     pick_qty=int(getattr(self.rule, "qty", 0) or 0),
                 )

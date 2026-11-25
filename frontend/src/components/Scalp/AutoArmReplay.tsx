@@ -118,6 +118,8 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
       max_day: th.max_day,
       price_min: th.price_min,
       price_max: th.price_max,
+      force_strong: th.force,
+      force_pressure: th.force,
     };
   };
 
@@ -369,6 +371,8 @@ type Rules = {
   max_day: number;
   price_min: number;
   price_max: number;
+  /** "Force order when armed": the replayed bot enters at once at each arm minute (both sources). */
+  force: boolean;
 };
 
 function rulesFrom(a: ScalpAlerts): Rules {
@@ -384,6 +388,7 @@ function rulesFrom(a: ScalpAlerts): Rules {
     max_day: Number(a.arm_max_day) || 10,
     price_min: Number(a.arm_price_min) || 0,
     price_max: Number(a.arm_price_max) || 0,
+    force: Boolean(a.arm_strong_force || a.arm_pressure_force),
   };
 }
 
@@ -403,6 +408,7 @@ function ruleText(t: Rules, source: "TREND" | "ACTIVE" | "BOTH"): string {
       : null,
     `at most ${t.max_day} a day`,
     t.price_min || t.price_max ? `priced ${t.price_min ? `₹${t.price_min}` : "any"} to ${t.price_max ? `₹${t.price_max}` : "any"}` : null,
+    t.force ? "the bot enters at once when a stock is armed" : null,
   ]
     .filter(Boolean)
     .join("; ");
@@ -509,6 +515,13 @@ function RulesBox({
         <label className="flex flex-col gap-1">
           to ₹ (0 = any)
           <input type="number" min={0} value={th.price_max} onChange={(e) => set("price_max", num(e.target.value, 0, 1000000))} className={box} />
+        </label>
+        <label
+          className="flex min-h-9 items-center gap-2 text-xs text-slate-200"
+          title="At each stock's arm minute the bot enters at once: SMA entry by the SMA lines, candle colour entry by the last closed colour candle."
+        >
+          <input type="checkbox" checked={th.force} onChange={(e) => set("force", e.target.checked)} />
+          Force order when armed <NewTag id="auto-arm-force" link={false} />
         </label>
       </div>
     </div>
