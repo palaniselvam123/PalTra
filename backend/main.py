@@ -5984,8 +5984,10 @@ async def strategy_lab_start(body: StrategyLabStart):
         last = dt.date.fromisoformat(body.end_date) if body.end_date else first
     except ValueError as exc:
         raise HTTPException(400, "Dates must be YYYY-MM-DD.") from exc
-    if last >= dt.datetime.now(IST).date():
-        raise HTTPException(400, "The lab reads finished days only: pick an end date before today.")
+    now_ist = dt.datetime.now(IST)
+    today_closed = now_ist.time() >= dt.time(15, 30)  # after the close today is a finished day too (not cached)
+    if last > now_ist.date() or (last == now_ist.date() and not today_closed):
+        raise HTTPException(400, "The lab reads finished days only: today counts once the market closes at 15:30.")
     bot_engine = _bots_by_number().get(body.bot)
     if bot_engine is None:
         raise HTTPException(400, "Bot must be 1-4.")
