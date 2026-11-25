@@ -102,6 +102,13 @@ def test_the_combiner_applies_checks_exits_stops_and_the_in_position_rule():
     assert base["totals"]["trades"] == 2 and [k["reason"] for k in base["trades"]] == ["MA_CROSS", "MA_CROSS"]
     assert base["trades"][0]["gross"] == 40.0 and base["trades"][1]["gross"] == 10.0
     assert base["trades"][0]["net"] < 40.0  # charges taken off
+    # each stock on each day adds up to the day rows and the stock rows
+    pairs = base["per_stock_day"]
+    assert sum(p["trades"] for p in pairs) == 2
+    for d in base["per_day"]:
+        assert round(sum(p["gross"] for p in pairs if p["day"] == d["day"]), 2) == d["gross"]
+    for st in base["per_stock"]:
+        assert round(sum(p["gross"] for p in pairs if p["symbol"] == st["symbol"]), 2) == st["gross"]
     # the RSI check refuses A; B is kept
     got = lab.evaluate(trades, {"entries": ["rsi"], "exits": ["cross"], "stop": "NONE"})
     assert got["totals"]["trades"] == 1 and got["skipped"]["refused"] == 1 and got["trades"][0]["side"] == "SHORT"
