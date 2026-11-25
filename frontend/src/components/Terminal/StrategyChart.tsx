@@ -23,7 +23,7 @@ import { ChartDataTable } from "./ChartDataTable";
 import { REASON_SHORT } from "./TradeHistoryTable";
 import { entryReasonShort } from "@/lib/entryReason";
 import { inr, px, smaApi, type BlockedCross, type Candle, type ChartFilters, type ChartPayload, type SmaState, type TradeRow } from "@/lib/smaApi";
-import { type FlowPoint, type FlowRead, adxValues, cvdValues, emaValues, macdValues, flowReads, heikinAshi, pressureReads, pressureValues, shown, smoothFlows, useChartStyle } from "@/lib/chartStyle";
+import { type FlowPoint, type FlowRead, adxReads, adxValues, cvdValues, emaValues, macdValues, flowReads, heikinAshi, pressureReads, pressureValues, shown, smoothFlows, useChartStyle } from "@/lib/chartStyle";
 import { slopeZones, zoneWords, type Zone } from "@/lib/slopeZone";
 import { ChartIndicators } from "./ChartIndicators";
 import { NewTag } from "@/components/ui/NewTag";
@@ -1187,6 +1187,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const cvdRef = useRef<ISeriesApi<"Line"> | null>(null);
   // ADX 14 and MACD (line, signal, histogram), each on its own strip under the candles.
   const adxRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const adxBarsRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const adxLevel = useRef<IPriceLine | null>(null);
   const macdRefs = useRef<{ line: ISeriesApi<"Line">; signal: ISeriesApi<"Line">; hist: ISeriesApi<"Histogram"> } | null>(null);
   const bbRefs = useRef<ISeriesApi<"Line">[]>([]);
@@ -1820,6 +1821,16 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     });
     instance.priceScale("adx").applyOptions({ scaleMargins: { top: 0.75, bottom: 0.02 } });
     adxRef.current = adx;
+    // ADX bars under the line: green while +DI is above −DI (trend up), red while below (down), faint under the
+    // ADX check's level (no trend strong enough).
+    adxBarsRef.current = instance.addHistogramSeries({
+      priceScaleId: "adx",
+      priceLineVisible: false,
+      lastValueVisible: false,
+      visible: false,
+      base: 0,
+      autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 60 } }),
+    });
     // MACD: histogram bars (green above zero, red below) with the MACD and signal lines on top.
     const macdHist = instance.addHistogramSeries({
       priceScaleId: "macd",
@@ -2211,8 +2222,22 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       series.applyOptions({ visible: showAdx });
       // The bot's own ADX when the server sent it for every candle; else worked out here (merged candles).
       const fromServer = rows.length > 0 && rows.every((c) => c.adx14 !== undefined);
-      const values = !showAdx ? [] : fromServer ? rows.map((c) => c.adx14 ?? null) : adxValues(rows);
+      const reads = showAdx ? adxReads(rows) : [];
+      const values = !showAdx ? [] : fromServer ? rows.map((c) => c.adx14 ?? null) : reads.map((r) => (r ? r.adx : null));
       series.setData(rows.flatMap((c, i) => (values[i] == null ? [] : [{ time: c.time as never, value: values[i] as number }])));
+      const level = filters?.adx_threshold ?? 20;
+      adxBarsRef.current?.applyOptions({ visible: showAdx });
+      adxBarsRef.current?.setData(
+        rows.flatMap((c, i) => {
+          const v = values[i];
+          const r = reads[i];
+          if (v == null || !r) return [];
+          const strong = v >= level;
+          const up = r.pdi >= r.mdi;
+          const color = up ? (strong ? "rgba(16, 185, 129, 0.7)" : "rgba(16, 185, 129, 0.25)") : strong ? "rgba(244, 63, 94, 0.7)" : "rgba(244, 63, 94, 0.25)";
+          return [{ time: c.time as never, value: v, color }];
+        })
+      );
       if (adxLevel.current) series.removePriceLine(adxLevel.current);
       adxLevel.current =
         showAdx && filters?.use_adx
@@ -2530,6 +2555,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     : rows[readAt]?.adx14 !== undefined
       ? rows[readAt].adx14 ?? null
       : adxValues(rows.slice(0, readAt + 1))[readAt] ?? null;
+  // +DI / −DI of that candle (the ADX bars' colour: which way the trend is).
+  const shownDi = !adxOn || readAt < 0 ? null : adxReads(rows.slice(0, readAt + 1))[readAt] ?? null;
   const shownMacd = !macdOn || readAt < 0
     ? undefined
     : macdValues(rows.slice(0, readAt + 1).map((c) => c.close), filters?.macd_fast ?? 12, filters?.macd_slow ?? 26, filters?.macd_signal ?? 9)[readAt] ?? null;
@@ -2894,6 +2921,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         vwap={shownVwap}
         rsi={shownRsi}
         adx={shownAdx}
+        adxDi={shownDi ? { pdi: shownDi.pdi, mdi: shownDi.mdi } : null}
         adxLevel={filters?.use_adx ? filters.adx_threshold ?? 20 : null}
         macd={shownMacd}
         atr={shownAtr}
@@ -3408,6 +3436,7 @@ function OhlcLine({
   vwap,
   rsi,
   adx,
+  adxDi,
   adxLevel,
   macd,
   atr,
@@ -3437,6 +3466,8 @@ function OhlcLine({
   rsi: number | null;
   /** ADX 14 / MACD of this candle while their strip is on (undefined = strip off: not shown). */
   adx?: number | null;
+  /** +DI / −DI of this candle (which way the trend is) while the ADX strip is on. */
+  adxDi?: { pdi: number; mdi: number } | null;
   /** The ADX check's level while it is on. */
   adxLevel?: number | null;
   macd?: { line: number; signal: number; hist: number } | null;
@@ -3524,6 +3555,12 @@ function OhlcLine({
             {adx == null ? "—" : adx.toFixed(1)}
           </span>
           {adxLevel != null ? <span className="text-slate-400"> / {adxLevel}</span> : null}
+          {adxDi ? (
+            <span className={adxDi.pdi >= adxDi.mdi ? "text-emerald-300" : "text-rose-300"} title="+DI above −DI: the trend is up (green bars); below: down (red bars)">
+              {" "}
+              +DI {adxDi.pdi.toFixed(1)} −DI {adxDi.mdi.toFixed(1)}
+            </span>
+          ) : null}
         </span>
       ) : null}
       {macd !== undefined ? (
