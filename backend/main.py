@@ -6032,11 +6032,17 @@ async def strategy_lab_evaluate(job_id: str, body: StrategyLabChoice):
     return await asyncio.to_thread(strategy_lab.evaluate, rows, body.model_dump(), job.get("settings"))
 
 
+class StrategyLabRecommend(StrategyLabChoice):
+    #: NET = the most P&L after charges; ROC = the best return on capital (net ÷ the most margin in use at once).
+    judge: Literal["NET", "ROC"] = "NET"
+
+
 @app.post("/api/strategy-lab/{job_id}/recommend")
-async def strategy_lab_recommend(job_id: str, body: StrategyLabChoice):
-    """What each rule adds on top of this choice, and the best combination a greedy search finds."""
+async def strategy_lab_recommend(job_id: str, body: StrategyLabRecommend):
+    """What each rule adds on top of this choice, and the best combination a greedy search finds (judged by net P&L
+    or by return on capital)."""
     job, rows = _lab_job_or_404(job_id)
-    return await asyncio.to_thread(strategy_lab.recommend, rows, body.model_dump(), job.get("settings"))
+    return await asyncio.to_thread(strategy_lab.recommend, rows, body.model_dump(), job.get("settings"), body.judge)
 
 
 class StrategyLabApply(StrategyLabChoice):

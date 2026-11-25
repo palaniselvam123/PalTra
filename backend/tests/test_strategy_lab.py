@@ -172,6 +172,17 @@ def test_recommend_lists_every_rule_and_climbs_to_a_better_choice(monkeypatch):
     assert rec["rows"][0]["delta_net"] >= rec["rows"][-1]["delta_net"]
     # turning the cross exit off makes 100 on A: the greedy search finds it
     assert rec["best"]["totals"]["net"] > rec["now"]["net"] and rec["best"]["steps"]
+    # judged by return on capital: every row carries the capital it needs and the return on it, best first
+    roc = lab.recommend(trades, {"entries": [], "exits": ["cross"], "stop": "NONE"}, judge="ROC")
+    assert roc["judge"] == "ROC" and roc["now"]["peak_margin"] > 0 and roc["now"]["roc"] is not None
+    got = [r["roc_changed"] for r in roc["rows"] if r["roc_changed"] is not None]
+    assert got == sorted(got, reverse=True)
+    assert roc["best"]["totals"]["roc"] >= roc["now"]["roc"]
+    # a set that makes less money with far less capital wins on return, not on rupees
+    big = {"net": 1000.0, "roc": 1.0}
+    small = {"net": 600.0, "roc": 6.0}
+    assert lab._score(small, "ROC") > lab._score(big, "ROC") and lab._score(big, "NET") > lab._score(small, "NET")
+    assert lab._score({"net": 0.0, "roc": None}, "ROC") == float("-inf")
 
 
 @pytest.mark.asyncio
