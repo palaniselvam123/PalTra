@@ -6,7 +6,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { readReverse } from "@/components/Terminal/ReverseOwnSettings";
-import { inr, smaApi, type DaySwing, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
+import { inr, smaApi, type DaySwing, type ReplayCapitalPeak, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { SortTh, useSort } from "./sortable";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import { Badge, Skeleton, pnlTone } from "./ui";
@@ -580,8 +580,27 @@ export function filtersShort(s: Settings): string {
 // Column keys of the three Backtests tables; their order is dragged and kept per browser (columnOrder.tsx).
 type RunColKey = "run" | "days" | "strategy" | "trades" | "win" | "profit" | "loss" | "net" | "dd" | "actions";
 const RUN_COLS: RunColKey[] = ["run", "days", "strategy", "trades", "win", "profit", "loss", "net", "dd", "actions"];
-type DayColKey = "date" | "trades" | "wl" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative" | "swing";
-const DAY_COLS: DayColKey[] = ["date", "trades", "wl", "profit", "loss", "gross", "charges", "net", "cumulative", "swing"];
+type DayColKey = "date" | "trades" | "wl" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative" | "swing" | "capital";
+const DAY_COLS: DayColKey[] = ["date", "trades", "wl", "profit", "loss", "gross", "charges", "net", "cumulative", "swing", "capital"];
+
+/** One day's capital: the most it had blocked at one moment (open trades' value × the wallet's margin %), when, how many
+ * positions, and the day's P&L as % of it. */
+function DayCapital({ peak, marginPct, pnl }: { peak?: ReplayCapitalPeak; marginPct: number; pnl: number }) {
+  if (!peak || !(peak.peak_value > 0)) return <span className="text-slate-500">—</span>;
+  const cap = (peak.peak_value * marginPct) / 100;
+  const at = peak.peak_at ? peak.peak_at.slice(11, 16) : null;
+  return (
+    <span
+      className="whitespace-nowrap"
+      title={`Most in open trades at once: ${inr(peak.peak_value)} of shares (${peak.peak_positions} position${peak.peak_positions === 1 ? "" : "s"}${at ? ` at ${at}` : ""}) × ${marginPct} % margin = ${inr(cap)}. The day's P&L is ${((pnl / cap) * 100).toFixed(2)} % of it.`}
+    >
+      {inr(cap)}
+      <span className="text-slate-500">
+        {at ? ` @${at}` : ""} · {peak.peak_positions} pos · <span className={pnlTone(pnl)}>{((pnl / cap) * 100).toFixed(1)}%</span>
+      </span>
+    </span>
+  );
+}
 
 /** A day's highest and lowest P&L with times and which came first (display only; on the backtest basis switch). */
 function SwingText({ s: raw, compact = false }: { s?: DaySwing | null; compact?: boolean }) {
@@ -1474,6 +1493,15 @@ function RunDetailBody({
   const stocks = run.stocks ?? [];
   type DayKey = "date" | "trades" | "wins" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative";
   const dayCols = useColumnOrder<DayColKey>("backtests.cols.days", DAY_COLS);
+  // The practice wallet's margin share (20 % = 5x), for each day's capital.
+  const [marginPct, setMarginPct] = useState(20);
+  useEffect(() => {
+    smaApi
+      .wallet()
+      .then((w) => setMarginPct(w?.margin_pct || 20))
+      .catch(() => undefined);
+  }, []);
+  const capByDay = useMemo(() => new Map((run.capital?.days ?? []).map((c) => [c.date, c])), [run.capital]);
   const { sorted: sortedDays, sort: daySort, onSort: onDaySort } = useSort<ReplayDayRow, DayKey>(days, (d, k) => d[k]);
   return (
     <section aria-label={heading ?? `Run ${run.id} day-wise P&L`} className="border-t border-white/10 px-2 py-3 sm:px-4">
@@ -1538,6 +1566,11 @@ function RunDetailBody({
                     Day high / low <NewTag id="bt-day-swing" />
                   </th>
                 ),
+                capital: (
+                  <th {...dayCols.dragProps("capital")} className="px-2 py-1.5 text-left font-medium" title={`Wallet money the day used: the most it had blocked at one moment (open trades' value × ${marginPct} % margin), when, how many positions, and the day's P&L as % of it`}>
+                    Capital <NewTag id="bt-day-capital" />
+                  </th>
+                ),
               })}
             </tr>
           </thead>
@@ -1586,7 +1619,8 @@ gross: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.gross))}>{signed(
 charges: <td className="px-2 py-1.5 text-right text-amber-300">{inr(d.charges)}</td>,
 net: <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(d.net))}>{signed(d.net)}</td>,
 cumulative: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.cumulative))}>{signed(d.cumulative)}</td>,
-swing: <td className="px-2 py-1.5 text-xs">{heading ? <span className="text-slate-500">—</span> : <SwingText s={run.day_swings?.[d.date]} compact />}</td>
+swing: <td className="px-2 py-1.5 text-xs">{heading ? <span className="text-slate-500">—</span> : <SwingText s={run.day_swings?.[d.date]} compact />}</td>,
+capital: <td className="px-2 py-1.5 text-xs"><DayCapital peak={capByDay.get(d.date)} marginPct={marginPct} pnl={d.net} /></td>
 })}
 </tr>
                 {isOpen
@@ -1609,7 +1643,8 @@ net: <td className={clsx("px-2 py-1 text-right", pnlTone(sd.net))}>{signed(sd.ne
 cumulative: <td className="px-2 py-1 text-right text-slate-500" title="Share of the day's P&L">
                           {d.net !== 0 ? `${Math.round((sd.net / Math.abs(d.net)) * 100)}% of day` : "—"}
                         </td>,
-swing: <td className="px-2 py-1" />
+swing: <td className="px-2 py-1" />,
+capital: <td className="px-2 py-1" />
 })}
 </tr>
                     ))
@@ -1634,7 +1669,8 @@ gross: <td className={clsx("px-2 py-2 text-right", pnlTone(t.gross))}>{signed(t.
 charges: <td className="px-2 py-2 text-right text-amber-300">{inr(t.charges)}</td>,
 net: <td className={clsx("px-2 py-2 text-right font-semibold", pnlTone(t.net))}>{signed(t.net)}</td>,
 cumulative: <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t.max_drawdown)}</td>,
-swing: <td className="px-2 py-2" />
+swing: <td className="px-2 py-2" />,
+capital: <td className="px-2 py-2 text-xs">{run.capital?.peak_value ? <DayCapital peak={run.capital} marginPct={marginPct} pnl={t.net} /> : null}</td>
 })}
 </tr>
             </tfoot>
