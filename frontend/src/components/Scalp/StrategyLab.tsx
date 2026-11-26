@@ -276,7 +276,7 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
       const playing = Boolean(current && replayActive(current) && current.status !== "FINISHED");
       if (playing && !window.confirm(`Bot ${target}'s replay is already running. Stop it and start this one instead?`)) return;
       await smaApi.strategyLabApply(job.id, { ...choice, reset: resetFirst, stop_replay: playing });
-      await smaApi.replayStart(job.first, "09:15", 300, job.last, stocks, target, false, true);
+      await smaApi.replayStart(job.first, "09:15", 300, job.last, stocks, target, false, true, "strategy_lab");
       setNote({
         ok: true,
         text: `${resetFirst ? "Reset and saved" : "Saved"} on Bot ${target} and started the replay. Its trades build up in the terminal's Backtests tab; compare them with the lab's ${result.totals.trades} trade(s) and ${money(result.totals.gross, true)}.`,

@@ -27,7 +27,7 @@ KEYS: dict[str, tuple[str, ...]] = {
     "ST": ("SUPERTREND",),
     "BB": ("BB_MIDDLE", "BB_TARGET"),
     "EMA": ("EMA_CROSS",),
-    "MACD": ("MACD_CROSS",),
+    "MACD": ("MACD_CROSS", "MACD_SHRINK"),
     "CVD": ("CVD_DIVERGENCE",),
     "SLOW": ("SLOW_SMA_BREACH",),
     "FLOW": ("FLOW_EXIT",),

@@ -230,7 +230,7 @@ export function BulkArm({
       if (current && replayActive(current) && current.status !== "FINISHED") {
         if (!window.confirm(`${desk.name} is already replaying. Stop it and start this backtest instead?`)) return;
       }
-      await smaApi.replayStart(days[0], "09:15", 300, days[days.length - 1], armedOk, bot);
+      await smaApi.replayStart(days[0], "09:15", 300, days[days.length - 1], armedOk, bot, false, true, "scalp_arm");
       setBtNote({
         ok: true,
         text: `Backtest started on ${desk.name}: ${armedOk.length} stock${armedOk.length === 1 ? "" : "s"} · ${days.length === 1 ? days[0] : `${days[0]} → ${days[days.length - 1]}`}, with the numbers above. Practice money, no orders. Results build up in the SMA terminal's Backtests tab.`,

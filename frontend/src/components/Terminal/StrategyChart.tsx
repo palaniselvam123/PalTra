@@ -2091,7 +2091,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     const showRsi = shown(look.rsi, Boolean(filters?.use_rsi));
     const showCvd = shown(look.cvd, Boolean(filters?.use_cvd || filters?.cvd_div_exit));
     const showAdx = shown(look.adx, Boolean(filters?.use_adx));
-    const showMacd = shown(look.macd, Boolean(filters?.use_macd || filters?.macd_exit));
+    const showMacd = shown(look.macd, Boolean(filters?.use_macd || filters?.macd_exit || filters?.use_macd_grow || filters?.macd_shrink_exit));
     smaFastRef.current.applyOptions({ visible: look.sma9.show !== "off" });
     smaSlowRef.current.applyOptions({ visible: look.sma21.show !== "off" });
     const showSlopeBars = showSlope || Boolean(filters?.slope_exit);
@@ -2549,7 +2549,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   // ADX / MACD on the reading line while their strip is on (the candle under the mouse, else the last one).
   const readAt = hoverRow ? rows.indexOf(hoverRow) : rows.length - 1;
   const adxOn = shown(look.adx, Boolean(filters?.use_adx));
-  const macdOn = shown(look.macd, Boolean(filters?.use_macd || filters?.macd_exit));
+  const macdOn = shown(look.macd, Boolean(filters?.use_macd || filters?.macd_exit || filters?.use_macd_grow || filters?.macd_shrink_exit));
   const shownAdx = !adxOn || readAt < 0
     ? undefined
     : rows[readAt]?.adx14 !== undefined

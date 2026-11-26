@@ -40,6 +40,7 @@ import auto_start
 import scalp_alerts
 import auto_arm
 import saved_picks
+import run_source
 import scan_trade_test
 import hold_test
 import trend_rank
@@ -760,6 +761,10 @@ class ConfigUpdate(BaseModel):
     macd_fast: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
     macd_slow: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
     macd_signal: int | None = Field(default=None, ge=1, le=macd.MAX_LEN)
+    use_macd_grow: bool | None = None
+    macd_grow_candles: int | None = Field(default=None, ge=1, le=macd.MAX_RUN)
+    macd_shrink_exit: bool | None = None
+    macd_shrink_candles: int | None = Field(default=None, ge=1, le=macd.MAX_RUN)
     use_cvd: bool | None = None
     cvd_lookback: int | None = Field(default=None, ge=1, le=cum_delta.MAX_LOOKBACK)
     cvd_div_exit: bool | None = None
@@ -2006,6 +2011,10 @@ def _gap_dict(row) -> dict:
         "macd_fast": macd.lengths(row)[0],
         "macd_slow": macd.lengths(row)[1],
         "macd_signal": macd.lengths(row)[2],
+        "use_macd_grow": macd.grow_on(row),
+        "macd_grow_candles": macd.grow_candles(row),
+        "macd_shrink_exit": macd.shrink_on(row),
+        "macd_shrink_candles": macd.shrink_candles(row),
         "use_cvd": cum_delta.entry_on(row),
         "cvd_lookback": cum_delta.lookback(row),
         "cvd_div_exit": cum_delta.exit_on(row),
@@ -2787,6 +2796,8 @@ class ReplayStart(BaseModel):
     #: Play the hand-offs (handoff_chain.py): a stock handed to Bot 2 / Bot 3 stays in the run and trades with
     #: that bot's settings, and the live Trade lists are not touched. Off = dropped from the run (and moved live).
     play_handoffs: bool = True
+    #: Where it was started (run_source.ORIGINS), saved on the run for the Backtests tab's source tag; display only.
+    origin: str | None = Field(default=None, max_length=32)
 
 
 class ScalpPickStart(BaseModel):
@@ -2906,12 +2917,15 @@ class TrendPickStart(BaseModel):
     speed: int = 300
     #: Play Bot 1's hand-offs inside the run on Bot 2's / Bot 3's settings (handoff_chain.py), like the replay bar.
     play_handoffs: bool = True
+    #: Where it was started (run_source.ORIGINS), saved on the run for the Backtests tab's source tag; display only.
+    origin: str | None = Field(default=None, max_length=32)
 
 
 async def _start_trend_picks(
     bot: int, universe: list[str], day: dt.date, end_day: dt.date, pick_time: dt.time, top_n: int, direction: str,
     minutes: int, speed: int, play_handoffs: bool = True, active: dict | None = None, rule=None,
     candles: str = "NORMAL", until: dt.time | None = None, cap: int | None = None, skip_candles: int = 0,
+    origin: str | None = None,
 ) -> dict:
     """Start a strong-trend pick backtest on `bot`'s replay player, or with `active` (rank, bias, min_value_cr) a Most
     active pick backtest (active_picks.py). Raises HTTPException on a refusal."""
@@ -2961,6 +2975,7 @@ async def _start_trend_picks(
             "bot": bot,
             "bot_name": bot_label,
             **({"play_handoffs": True} if play_handoffs else {}),
+            **({"origin": run_source.clean(origin)} if run_source.clean(origin) else {}),
         },
         rule=rule,
         bot=bot,
@@ -2985,6 +3000,7 @@ async def replay_trend_picks(body: TrendPickStart):
     return await _start_trend_picks(
         body.bot, body.universe, day, end_day, pick_time, body.top_n, body.direction, body.minutes, body.speed,
         play_handoffs=body.play_handoffs, candles=body.candles, until=until, skip_candles=body.skip_candles,
+        origin=body.origin,
     )
 
 
@@ -3025,6 +3041,8 @@ class AutoArmStart(BaseModel):
     bot: int = Field(default=1, ge=1, le=4)
     speed: int = 300
     play_handoffs: bool = True
+    #: Where it was started (run_source.ORIGINS), saved on the run for the Backtests tab's source tag; display only.
+    origin: str | None = Field(default=None, max_length=32)
 
 
 async def _auto_arm_scans(day: dt.date, rule: "auto_arm.AutoArmRule") -> tuple[list, str | None]:
@@ -3114,7 +3132,7 @@ async def replay_auto_arm(body: AutoArmStart):
         names = names[: auto_arm.MAX_UNIVERSE]
     info = await _start_trend_picks(
         body.bot, names, day, end_day, first, rule.max_day, "BOTH", body.minutes, body.speed,
-        play_handoffs=body.play_handoffs, rule=rule,
+        play_handoffs=body.play_handoffs, rule=rule, origin=body.origin,
     )
     return {**info, "notes": notes[:10]}
 
@@ -3138,6 +3156,8 @@ class SavedScanStart(BaseModel):
     bot: int = Field(default=1, ge=1, le=4)
     speed: int = 300
     play_handoffs: bool = True
+    #: Where it was started (run_source.ORIGINS), saved on the run for the Backtests tab's source tag; display only.
+    origin: str | None = Field(default=None, max_length=32)
 
 
 async def _saved_scan_picks(day: dt.date, rule: "saved_picks.SavedScanRule") -> tuple[list[dict], str]:
@@ -3196,7 +3216,7 @@ async def replay_saved_scans(body: SavedScanStart):
         raise HTTPException(400, " · ".join(notes[:5]) or "No saved Most active scans for those days.")
     info = await _start_trend_picks(
         body.bot, names[: saved_picks.MAX_UNIVERSE], day, end_day, at, body.top_n, "BOTH", 5, body.speed,
-        play_handoffs=body.play_handoffs, rule=rule, cap=saved_picks.MAX_UNIVERSE,
+        play_handoffs=body.play_handoffs, rule=rule, cap=saved_picks.MAX_UNIVERSE, origin=body.origin,
     )
     return {**info, "notes": notes, "days_with_picks": len(rule.chosen)}
 
@@ -3389,6 +3409,8 @@ class ActivePickStart(BaseModel):
     bot: int = Field(default=1, ge=1, le=4)
     speed: int = 300
     play_handoffs: bool = True
+    #: Where it was started (run_source.ORIGINS), saved on the run for the Backtests tab's source tag; display only.
+    origin: str | None = Field(default=None, max_length=32)
 
 
 @app.post("/api/replay/active-picks")
@@ -3408,7 +3430,7 @@ async def replay_active_picks(body: ActivePickStart):
         raise HTTPException(409, "A comparison or stock ranking is using the replay players. Stop it first or wait for it.")
     return await _start_trend_picks(
         body.bot, body.universe, day, end_day, pick_time, body.top_n, "BOTH", 5, body.speed,
-        play_handoffs=body.play_handoffs, until=until,
+        play_handoffs=body.play_handoffs, until=until, origin=body.origin,
         active={"rank": body.rank, "bias": body.bias, "min_value_cr": body.min_value_cr},
     )
 
@@ -3457,6 +3479,7 @@ async def _trend_picks_daily(s: trend_picks.AutoSettings, day: dt.date) -> tuple
         await _start_trend_picks(
             s.bot, names, day, day, start, s.top_n, s.direction, s.minutes, max(SPEEDS),
             play_handoffs=s.play_handoffs, candles=s.candles, until=until, skip_candles=s.skip_candles,
+            origin="daily",
         )
     except HTTPException as exc:
         return None, f"not started: {exc.detail}"
@@ -3546,7 +3569,7 @@ async def trend_compare_start(body: TrendCompareStart):
         await _start_trend_picks(
             body.bot, names, day, end_day, dt.time(int(h), int(m)), body.top_n, body.direction, body.minutes,
             max(SPEEDS), play_handoffs=body.play_handoffs, active=active, candles=body.candles,
-            until=until, skip_candles=body.skip_candles,
+            until=until, skip_candles=body.skip_candles, origin="pick_compare",
         )
         # The run id is known once the candles are in; wait for it (or for the load to fail).
         while session.run_id is None and session.status == "LOADING":
@@ -3659,7 +3682,7 @@ async def stock_rank_start(body: StockRankStart):
         await replay_start(
             ReplayStart(
                 date=day.isoformat(), end_date=end_day.isoformat(), symbols=symbols, bot=body.bot,
-                speed=max(SPEEDS), play_handoffs=body.play_handoffs,
+                speed=max(SPEEDS), play_handoffs=body.play_handoffs, origin="stock_rank",
             )
         )
         while session.run_id is None and session.status == "LOADING":
@@ -3784,6 +3807,7 @@ async def replay_start(body: ReplayStart):
             "bot_name": bot_label,
             **({"as_armed": True} if body.as_armed else {}),
             **({"play_handoffs": True} if body.play_handoffs else {}),
+            **({"origin": run_source.clean(body.origin)} if run_source.clean(body.origin) else {}),
         },
         bot=body.bot,
         bot_name=bot_label,

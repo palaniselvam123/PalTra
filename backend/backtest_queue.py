@@ -298,7 +298,10 @@ class Runner:
         item.started_at = time.time()
         self.starting = True
         try:
-            await start(dict(item.body), item.kind)
+            # Saved on the run (run_source.py): tagged "Backtest queue" unless the queued body names its own origin.
+            body = {**item.body}
+            body.setdefault("origin", "queue_schedule" if item.origin == "schedule" else "queue")
+            await start(body, item.kind)
             item.status, item.note = "PLAYING", ""
             item.run_id = getattr(session_of(int(item.body.get("bot", 1))), "run_id", None)
         except Exception as exc:  # noqa: BLE001 - a refusal fails this item; the queue moves on

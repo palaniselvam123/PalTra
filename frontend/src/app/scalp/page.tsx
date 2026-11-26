@@ -332,7 +332,7 @@ export default function ScalpPage() {
         const ok = window.confirm("A replay is already running. Stop it and start this backtest instead?");
         if (!ok) return;
       }
-      await smaApi.replayStart(days[0], "09:15", 300, days[days.length - 1], symbols);
+      await smaApi.replayStart(days[0], "09:15", 300, days[days.length - 1], symbols, 1, false, true, "scalp_arm");
       setBtNote({
         ok: true,
         text: `Backtest started: ${symbols.join(", ")} · ${days.length === 1 ? days[0] : `${days[0]} → ${days[days.length - 1]}`}. It replays your SMA settings (each stock's own, if set) on Groww's past candles — practice money, no orders. A day takes a few minutes; results build up in the SMA terminal's Backtests tab.`,

@@ -88,7 +88,7 @@ export const STYLES: TradeStyle[] = [
     shows: "VWAP, volume, RSI, Bollinger, MACD, CVD, EMA, Supertrend checks and their exits",
     on: (f) =>
       yes(f.use_vwap) || yes(f.use_volume) || yes(f.use_density) || yes(f.use_rsi) || yes(f.use_bollinger) || yes(f.use_macd) ||
-      yes(f.use_cvd) || yes(f.use_adx_filter) || picked(f.bb_exit) || yes(f.macd_exit) || yes(f.cvd_div_exit),
+      yes(f.use_cvd) || yes(f.use_adx_filter) || picked(f.bb_exit) || yes(f.macd_exit) || yes(f.use_macd_grow) || yes(f.macd_shrink_exit) || yes(f.cvd_div_exit),
   },
   {
     id: "bots",

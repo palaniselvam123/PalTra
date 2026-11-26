@@ -388,7 +388,7 @@ function LiveBacktest({ data, onAdd }: { data: Compare; onAdd: (id: number) => v
     const bot = Number(run.settings?.bot ?? run.bot ?? 1);
     note(run.id, { note: "Starting the backtest…", busy: true });
     try {
-      await smaApi.replayStart(run.start_date, "09:15", 300, run.end_date !== run.start_date ? run.end_date : undefined, undefined, bot, true, true);
+      await smaApi.replayStart(run.start_date, "09:15", 300, run.end_date !== run.start_date ? run.end_date : undefined, undefined, bot, true, true, "live_compare");
     } catch (err) {
       const text = err instanceof Error ? err.message : "The backtest did not start";
       note(run.id, {

@@ -296,7 +296,7 @@ _PREFIX_RULES: tuple[tuple[str, object], ...] = (
     ("colour_", lambda s: _mode(s) == "COLOUR"),
     ("nth_", lambda s: _mode(s) == "NTH_CANDLE"),
     ("rsi_", lambda s: _on(s, "use_rsi")),
-    ("macd_", lambda s: _on(s, "use_macd") or _on(s, "macd_exit")),
+    ("macd_", lambda s: _on(s, "use_macd") or _on(s, "macd_exit") or _on(s, "use_macd_grow") or _on(s, "macd_shrink_exit")),
     ("decel_", lambda s: _on(s, "decel_exit")),
     ("uturn_", lambda s: _on(s, "uturn_on")),
     ("review_", lambda s: _on(s, "review_on")),

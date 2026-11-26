@@ -61,7 +61,7 @@ export const LINE_NAMES: Record<LineKey, { name: string; auto: string; color2?: 
   atr: { name: "ATR 14 (strip)", auto: "while the stop type is ATR" },
   rsi: { name: "RSI 14 (strip)", auto: "while the RSI check is ticked" },
   adx: { name: "ADX 14 with bars (strip)", auto: "while the ADX check is ticked" },
-  macd: { name: "MACD with histogram (strip)", auto: "while the MACD check or exit is on", color2: "signal" },
+  macd: { name: "MACD with histogram (strip)", auto: "while a MACD check or exit is on", color2: "signal" },
   cvd: { name: "Cumulative delta (strip)", auto: "while the cumulative delta check or divergence exit is on" },
   pressure: { name: "Buyers waiting % (strip)", auto: "while a Most active scan has read the stock" },
   pressureSell: { name: "Sellers waiting % (strip)", auto: "while a Most active scan has read the stock" },

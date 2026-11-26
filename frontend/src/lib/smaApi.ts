@@ -233,6 +233,11 @@ export type SmaConfig = {
   macd_fast?: number;
   macd_slow?: number;
   macd_signal?: number;
+  /** MACD histogram (macd.py): entry only while it grows the trade's way N candles; exit once it moves against N candles. */
+  use_macd_grow?: boolean;
+  macd_grow_candles?: number;
+  macd_shrink_exit?: boolean;
+  macd_shrink_candles?: number;
   /** Cumulative delta (cum_delta.py): entry only while it moves the trade's way; exit on a price / delta divergence. */
   use_cvd?: boolean;
   cvd_lookback?: number;
@@ -1904,6 +1909,11 @@ export type ChartFilters = {
   macd_fast?: number;
   macd_slow?: number;
   macd_signal?: number;
+  /** MACD histogram (macd.py): entry only while it grows the trade's way N candles; exit once it moves against N candles. */
+  use_macd_grow?: boolean;
+  macd_grow_candles?: number;
+  macd_shrink_exit?: boolean;
+  macd_shrink_candles?: number;
   /** Draw the Supertrend line (its check or exit on) and its settings. */
   st_line?: boolean;
   st_period?: number;
@@ -2550,8 +2560,18 @@ export interface MarketRead {
   value_cr?: number;
 }
 
+/** Where a backtest was started from (backend run_source.ORIGINS); saved on the run. */
+export type ReplayOrigin =
+  | "replay" | "scalp_arm" | "strategy_lab" | "scan_trade" | "stock_rank" | "pick_compare" | "daily" | "queue"
+  | "queue_schedule" | "live_compare" | "mcp";
+
+/** What a run is and where it came from (run_source.describe): e.g. "Auto-arm · Most active", via "Backtest queue". */
+export type ReplayRunSource = { code: string; label: string; via: string | null };
+
 export type ReplayRun = {
   id: number;
+  /** Where the run came from (Most active auto-arm, Trend quality picks, Strategy lab, ...). Display only. */
+  source?: ReplayRunSource;
   created_at: string | null;
   start_date: string;
   end_date: string;
@@ -3857,7 +3877,9 @@ export const smaApi = {
     symbols?: string[],
     bot = 1,
     asArmed = false,
-    playHandoffs = true
+    playHandoffs = true,
+    /** Where it is started from (backend run_source.ORIGINS), shown as the run's source tag. */
+    origin?: ReplayOrigin
   ) =>
     request<ReplayInfo>(
       "/api/replay/start",
@@ -3872,6 +3894,7 @@ export const smaApi = {
           bot,
           ...(asArmed ? { as_armed: true } : {}),
           play_handoffs: playHandoffs,
+          ...(origin ? { origin } : {}),
         }),
       },
       20000
