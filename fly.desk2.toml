@@ -1,11 +1,11 @@
 # The second desk: a full copy of the main desk (desk + SMA terminal + bots) on its own Fly account,
 # with its own volume, database, Groww key, settings and secrets. Same image as `paltra`. Setup: DESK2.md.
 #
-# CI deploys it with Run workflow → target desk2 (.github/workflows/test-and-deploy.yml). The app name
-# below is a placeholder: CI passes the repo variable DESK2_APP with -a, so the name you created on
-# the new account is used. By hand: fly deploy -c fly.desk2.toml -a <that name>
+# CI deploys it with Run workflow → target desk2 (.github/workflows/test-and-deploy.yml). The app is
+# `pritra`; CI passes the repo variable DESK2_APP with -a, so a different name created on the new
+# account is used instead. By hand: fly deploy -c fly.desk2.toml
 
-app = 'paltra2'
+app = 'pritra'
 primary_region = 'sin'
 # Time to ring the owner and send the WhatsApp alert before a deploy stops the app.
 kill_timeout = '15s'

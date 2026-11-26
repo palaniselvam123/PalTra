@@ -24,12 +24,12 @@ fly auth logout
 fly auth login            # sign in with the NEW Fly account
 ```
 
-1. **Create the app and its volume.** App names are global on Fly; `paltra2` is only an example, so
-   pick any free name and use it everywhere below.
+1. **Create the app and its volume.** The app is called `pritra`. Fly app names are global: if
+   `pritra` is taken, pick another name and use it everywhere below (and in `DESK2_APP`).
 
    ```bash
-   fly apps create paltra2
-   fly volumes create data -a paltra2 -r sin -s 3
+   fly apps create pritra
+   fly volumes create data -a pritra -r sin -s 3
    ```
 
 2. **Set its secrets.** Make a new `ENCRYPTION_KEY` (it also signs the Google sign-in cookie), not the
@@ -40,16 +40,16 @@ fly auth login            # sign in with the NEW Fly account
    ```
 
    ```bash
-   fly secrets set -a paltra2 ENCRYPTION_KEY=<the key> FRONTEND_ORIGIN=https://paltra2.fly.dev
+   fly secrets set -a pritra ENCRYPTION_KEY=<the key> FRONTEND_ORIGIN=https://pritra.fly.dev
    ```
 
 3. **Lock it with Google sign-in (strongly advised).** Without these the pages and APIs are open to
    anyone who finds the address. In Google Cloud Console → Credentials, add
-   `https://paltra2.fly.dev` to the **Authorised JavaScript origins** of the OAuth client the main desk
+   `https://pritra.fly.dev` to the **Authorised JavaScript origins** of the OAuth client the main desk
    uses (or make a new one), then:
 
    ```bash
-   fly secrets set -a paltra2 GOOGLE_CLIENT_ID=<client id> GOOGLE_ALLOWED_EMAILS=<your gmail>
+   fly secrets set -a pritra GOOGLE_CLIENT_ID=<client id> GOOGLE_ALLOWED_EMAILS=<your gmail>
    ```
 
    Optional: `SCANS=off` to keep its Scalp scans off, as on the main desk. The OpenAI key and the
@@ -58,13 +58,13 @@ fly auth login            # sign in with the NEW Fly account
 4. **Make the deploy token:**
 
    ```bash
-   fly tokens create deploy -a paltra2
+   fly tokens create deploy -a pritra
    ```
 
 5. **Give it to GitHub.** In the repository: Settings → Secrets and variables → Actions:
    - **Secrets** → New repository secret: `FLY_DESK2_API_TOKEN` = the whole token from step 4
      (starts with `FlyV1 `).
-   - **Variables** → New repository variable: `DESK2_APP` = `paltra2` (your app name).
+   - **Variables** → New repository variable: `DESK2_APP` = `pritra` (your app name).
 
 ## Deploying
 
@@ -75,7 +75,7 @@ Actions → **Test and deploy** → **Run workflow** on `main`:
   minute; bots' in-memory state is lost)
 
 The first deploy builds the image (a few minutes), starts one machine with the volume mounted, and
-waits for `/api/health`. Then open `https://paltra2.fly.dev`, sign in, and on Settings → Account save
+waits for `/api/health`. Then open `https://pritra.fly.dev`, sign in, and on Settings → Account save
 the Groww API key and log in.
 
 ## Size and cost
