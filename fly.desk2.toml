@@ -32,14 +32,10 @@ kill_timeout = '15s'
   source = 'data'
   destination = '/data'
 
-# One dedicated core. The desk, both SMA bots, a replay and every API call
-# share one Python event loop, so extra shared vCPUs do not help; a shared
-# CPU's quota throttles a fast replay until the page cannot reach the engine.
-# Size the machine here: a deploy applies this section and undoes any resize
-# made in the Fly dashboard.
-# Performance CPUs are dedicated (never throttled in busy market hours), which the bots' single event loop
-# needs more than extra shared cores; 4 GB leaves room for five bots and their candle tapes.
+# A shared-CPU machine: the second desk's Fly account is on the Free plan, which refuses performance
+# machines. 2 shared CPUs and 2 GB run the desk, the bots and replays; a heavy replay can slow its pages.
+# On a Pay As You Go account switch to cpu_kind = 'performance', memory_mb = 4096 like fly.toml.
 [[vm]]
-  cpu_kind = 'performance'
+  cpu_kind = 'shared'
   cpus = 2
-  memory_mb = 4096
+  memory_mb = 2048
