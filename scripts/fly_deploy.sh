@@ -11,6 +11,7 @@
 #
 # Usage:   scripts/fly_deploy.sh <fly config file, or "" for fly.toml> <name for the messages>
 # Needs:   FLY_API_TOKEN (that app's deploy token) and VERSION (the commit) in the environment.
+# Optional: FLY_APP, the app name to deploy to instead of the config's `app` (the second desk).
 # Tunable: REMOTE_TIMEOUT (480 s), LOCAL_TIMEOUT (900 s), RETRY_PAUSE (30 s).
 set -uo pipefail
 
@@ -19,6 +20,9 @@ what="${2:-app}"
 args=(--build-arg "APP_VERSION=${VERSION:-}")
 if [ -n "$config" ]; then
   args+=(-c "$config")
+fi
+if [ -n "${FLY_APP:-}" ]; then
+  args+=(-a "$FLY_APP")
 fi
 
 if timeout "${REMOTE_TIMEOUT:-480}" flyctl deploy --remote-only "${args[@]}"; then
