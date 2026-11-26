@@ -420,7 +420,10 @@ class ReplayEngine(StrategyEngine):
             rule = all_bots_guard.trail_rule(row)
         if not (target or stop or at or rule):
             return
-        amount = all_bots_guard.total([self])
+        # The closed part is a DB read: off the event loop (it froze the backtest server's pages on every replayed
+        # minute). The replay awaits it before going on, so the same day still gives the same trades.
+        closed = await asyncio.to_thread(all_bots_guard.closed_total, [self])
+        amount = round(closed + all_bots_guard.open_total([self]), 2)
         # The profit safety net follows this replayed day's own best P&L (a fresh engine each day).
         prev = getattr(self, "_day_peak", None)
         self._day_peak = amount if prev is None else max(prev, amount)

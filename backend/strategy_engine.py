@@ -8179,15 +8179,20 @@ class StrategyEngine:
     def _kpis(self, mode: str = "PAPER") -> dict:
         day = self._session_date
         book = (mode or "PAPER").upper()
-        with session_factory()() as db:
-            rows = (
-                db.query(TradeLog)
-                .filter(TradeLog.date == day, TradeLog.exit_price.isnot(None), self._bot_rows())
-                .all()
-            )
-        rows = [row for row in rows if (row.mode or "PAPER").upper() == book]
-        # A replay counts only its own run, not earlier replays of that date.
+        # A replay counts only its own run, not earlier replays of that date. Both filters go into the query: on a
+        # backtest server with tens of thousands of replayed trades, loading every row of the date (earlier runs of
+        # the same day included) and dropping them afterwards froze the event loop ~6 s on every replayed minute.
         floor_id = int(getattr(self, "_min_trade_id", 0) or 0)
+        wanted = [TradeLog.date == day, TradeLog.exit_price.isnot(None), self._bot_rows()]
+        if floor_id:
+            wanted.append(TradeLog.id > floor_id)
+        if book == "PAPER":
+            wanted.append(or_(TradeLog.mode.is_(None), func.upper(TradeLog.mode) == "PAPER"))
+        else:
+            wanted.append(func.upper(TradeLog.mode) == book)
+        with session_factory()() as db:
+            rows = db.query(TradeLog).filter(*wanted).all()
+        rows = [row for row in rows if (row.mode or "PAPER").upper() == book]
         if floor_id:
             rows = [row for row in rows if int(row.id) > floor_id]
         theoretical = 0.0
