@@ -972,6 +972,9 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
     trades: list[dict] = []
     pivot_cache: dict[int, dict | None] = {}
     xc_cache: dict[int, pd.DataFrame | None] = {}
+    or_cache: dict[tuple, bool] = {}
+    day_hl = _day_highs_lows(t_ts, t_high, t_low, t_day)
+    day_list = np.unique(t_day)
     for i in range(1, len(x.ts) - 1):
         if x.day[i] not in wanted:
             continue
@@ -1014,7 +1017,7 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
             continue
         sign = 1.0 if side == "LONG" else -1.0
         checks = _entry_checks(x, rich, i, side, s, lv)
-        checks.update(_extra_checks(symbol, cfg, s, tape, rich, e, side, entry_ts, minutes))
+        checks.update(_extra_checks(symbol, cfg, s, tape, rich, e, side, entry_ts, minutes, or_cache, m0))
         exits = _exit_candidates(x, e, side, s, square_ts, rich)
         exits["exit_candle"] = _exit_candle_hit(cfg, s, tape, rich, xc_cache, day_key, side, entry_ts, square_ts, t_ts, t_open, minutes)
         flow_pts = trade_flow.minutes(symbol, tape, flow_exit.first_minute(entry_ts), square_ts)
@@ -1039,7 +1042,10 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
         stops["SUPERTREND"] = _line_stop(x, t_ts, t_high, t_low, m0, m_sq, side, entry, atr_stop, i, span, symbol, lambda j: _st_guard(x, j, side))
         stops["VWAP"] = _line_stop(x, t_ts, t_high, t_low, m0, m_sq, side, entry, atr_stop, i, span, symbol, lambda j: _vwap_guard(x, j, side, s["vwap_stop_atr"]))
         breakeven = stop_plan.breakeven(side, entry, s["qty"])
-        stops["SMART"] = _smart_stop(cfg, tape, t_ts, t_high, t_low, m0, m_sq, side, entry, entry_ts, atr, s, symbol, minutes, breakeven)
+        # the smart stop reads only its own sessions before the entry (smart_days), not the whole range
+        first_day = day_list[max(0, int(np.searchsorted(day_list, day_key)) - int(s["smart"]["days"]))]
+        smart_tape = tape.iloc[int(np.searchsorted(t_day, first_day, side="left")) : m0 + 1]
+        stops["SMART"] = _smart_stop(cfg, smart_tape, t_ts, t_high, t_low, m0, m_sq, side, entry, entry_ts, atr, s, symbol, minutes, breakeven)
         stops["PLAN"] = _plan_stop(cfg, x, t_ts, t_high, t_low, m0, m_sq, side, entry, atr_stop, i, span, symbol, breakeven)
         targets: dict[str, list | None] = {"tsl": None, "pivot_r1": None, "pivot_r2": None}
         if target_pts > 0:
@@ -1054,7 +1060,7 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
         goal = entry + sign * s["atr_target_mult"] * float(atr)
         hit = _target_walk(t_ts, t_high, t_low, m0, m_sq, side, round_price(symbol, goal))
         targets["atr"] = list(hit) if hit else None
-        day_goal = day_target.target_for(side, entry, day_target.levels(tape, entry_ts, day_target.skip_min(cfg)), cfg)
+        day_goal = day_target.target_for(side, entry, _day_levels(day_hl, t_ts, t_high, t_low, t_day, day_key, entry_ts, day_target.skip_min(cfg)), cfg)
         hit = _target_walk(t_ts, t_high, t_low, m0, m_sq, side, round_price(symbol, day_goal[2])) if day_goal else None
         targets["day_level"] = list(hit) if hit else None
         targets["net"] = _net_target(cfg, t_ts, t_high, t_low, m0, m_sq, side, entry, float(atr), s["qty"], symbol)
@@ -1082,28 +1088,81 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
     return trades, s
 
 
+def _day_highs_lows(t_ts, t_high, t_low, t_day) -> dict[int, tuple[float, float]]:
+    """Each day's high and low of the 1-minute tape (for yesterday's level of the day high / low target)."""
+    out: dict[int, tuple[float, float]] = {}
+    for key in np.unique(t_day):
+        sel = t_day == key
+        out[int(key)] = (float(np.nanmax(t_high[sel])), float(np.nanmin(t_low[sel])))
+    return out
+
+
+def _day_levels(day_hl: dict, t_ts, t_high, t_low, t_day, day_key: int, entry_ts: int, skip: int) -> dict | None:
+    """`day_target.levels` on the arrays: today's high / low from the 1-minute candles that began before the entry minute
+    (from 09:15 + `skip` minutes) and the session before's high / low."""
+    minute = int(entry_ts) // 60 * 60
+    sel = (t_day == day_key) & (t_ts < minute)
+    if skip > 0:
+        sel &= t_ts >= (day_key * 86400 - 19800) + (9 * 60 + 15 + skip) * 60
+    out = {"today_high": None, "today_low": None, "prev_high": None, "prev_low": None, "prev_day": None}
+    if sel.any():
+        out["today_high"] = float(np.nanmax(t_high[sel]))
+        out["today_low"] = float(np.nanmin(t_low[sel]))
+    earlier = [k for k in day_hl if k < day_key]
+    if earlier:
+        prev = max(earlier)
+        out["prev_high"], out["prev_low"] = day_hl[prev]
+        out["prev_day"] = dt.date(1970, 1, 1).fromordinal(dt.date(1970, 1, 1).toordinal() + prev).isoformat()
+    if all(out[k] is None for k in ("today_high", "prev_high")):
+        return None
+    return out
+
+
+#: Sessions of history the fresh-trend and opening-range checks read before the signal's day (their volume compares
+#: with earlier sessions); a fixed window keeps the answer the same on the range's first and last day, and quick.
+CHECK_SESSIONS = 10
+
+#: The opening-range checks that read only the 09:15-09:30 window (and the first candle after it): once that candle
+#: has closed their answer is the same for every signal of the day and side, so the lab reads them once.
+_OR_DAY_CHECKS = ("or_volume", "or_vwap", "or_break")
+
+
 def _extra_checks(symbol: str, cfg, s: dict, tape: pd.DataFrame, rich: pd.DataFrame, e: int, side: str, entry_ts: int,
-                  minutes: int) -> dict[str, bool]:
+                  minutes: int, or_cache: dict | None = None, m0: int | None = None) -> dict[str, bool]:
     """The checks the bot's own modules answer (fresh trend, opening range, executed volume, smaller candles), read on
     the candles closed at the signal candle's close; `rich.iloc[: e + 1]` keeps the entry candle as the forming one, as
     the bot sees it."""
     out: dict[str, bool] = {}
-    frame = rich.iloc[: e + 1]
+    days = np.unique(rich_days := ((rich["ts"].to_numpy(dtype="int64")[: e + 1] + 19800) // 86400))
+    since = days[max(0, len(days) - 1 - CHECK_SESSIONS)]
+    frame = rich.iloc[int(np.searchsorted(rich_days, since, side="left")) : e + 1]
     got = fresh_entry.read(frame, side, _Over(cfg, fresh_rvol=s["fresh_rvol"]))
     out["fresh"] = bool(got and all(got[0].values()))
+    day = int((entry_ts + 19800) // 86400)
+    ready_at = day * 86400 - 19800 + (9 * 60 + 30 + minutes) * 60  # the first candle from 09:30 has closed
     for name in opening_range.CHECKS:
+        key = (day, side, name)
+        if or_cache is not None and name in _OR_DAY_CHECKS and entry_ts >= ready_at and key in or_cache:
+            out[name] = or_cache[key]
+            continue
         try:
             why = opening_range.entry_reason(frame, side, _Over(cfg, **{f"use_{name}": True}), only=name)
         except Exception:  # noqa: BLE001 - a check that cannot be read refuses, like the bot
             why = "not readable"
         out[name] = why is None
+        if or_cache is not None and name in _OR_DAY_CHECKS and entry_ts >= ready_at:
+            or_cache[key] = out[name]
     win = s["flow_entry_window"]
     start, end = flow_exit.entry_span(entry_ts, win, minutes)
     pts = trade_flow.minutes(symbol, tape, start, end)
     out["flow"] = flow_exit.entry_refusal(pts, side, s["flow_entry_pct"], max(1, (end - start) // 60)) is None
     if s["sc_minutes"]:
-        ts = pd.to_numeric(tape["ts"], errors="coerce")
-        cut = tape[ts <= entry_ts]
+        if m0 is not None:
+            # enough minutes for the largest smaller candle's run (5 candles of 10 minutes), not the whole warm-up
+            cut = tape.iloc[max(0, m0 - 150) : m0 + 1]
+        else:
+            ts = pd.to_numeric(tape["ts"], errors="coerce")
+            cut = tape[ts <= entry_ts]
         over = _Over(cfg, sc_entry=True, sc_minutes=s["sc_minutes"], sma_fast=s["sma_fast"], sma_slow=s["sma_slow"])
         out["small_colour"] = small_colour.entry_reason(cut, side, over, minutes) is None
     else:

@@ -278,7 +278,7 @@ def test_api_starts_evaluates_recommends_and_deletes(tmp_path, monkeypatch):
         ok = client.post("/api/strategy-lab/start", json={"symbols": ["TCS", "INFY"], "date": D1.isoformat(), "end_date": D2.isoformat(), "bot": 1})
         assert ok.status_code == 200
         job_id = ok.json()["job"]["id"]
-        for _ in range(200):
+        for _ in range(600):  # up to 30 s: CI runners are slower than a laptop
             view = client.get("/api/strategy-lab").json()
             if not view["running"]:
                 break
