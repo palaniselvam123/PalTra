@@ -577,7 +577,7 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                     {rec.best.steps.length > 0 ? (
                       <button type="button" onClick={useBest} className="rounded-md px-2 py-1 text-xs font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-400/40 hover:bg-emerald-500/10">
                         Use the best found: {money(rec.best.totals.net, true)} after charges, {rec.best.totals.trades} trades
-                        {rec.best.totals.roc != null ? `, ${pct(rec.best.totals.roc)} on ${money(rec.best.totals.peak_margin ?? 0)} capital` : ""}
+                        {rec.best.totals.roc != null ? `, ${pct(rec.best.totals.roc)} return on ${money(rec.best.totals.peak_margin ?? 0)} margin` : ""}
                       </button>
                     ) : (
                       <span className="text-slate-500">No single change beats this choice.</span>
@@ -585,7 +585,7 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                   </div>
                   {rec.best.steps.length > 0 && (
                     <p className="text-xs text-slate-500">
-                      Found by changing one rule at a time{rec.judge === "ROC" ? " (judged by return on capital)" : " (judged by P&L after charges)"}:{" "}
+                      Found by changing one rule at a time{rec.judge === "ROC" ? " (judged by return on margin, after charges)" : " (judged by P&L after charges)"}:{" "}
                       {rec.best.steps
                         .map((s) =>
                           rec.judge === "ROC" && s.roc_after != null
@@ -604,8 +604,8 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                           <th className="px-2 py-1">Now</th>
                           <th className="px-2 py-1 text-right">P&L if changed</th>
                           <th className="px-2 py-1 text-right">Adds (after charges)</th>
-                          <th className="px-2 py-1 text-right" title="The most margin in use at one moment with this change (the Margin % box)">Capital</th>
-                          <th className="px-2 py-1 text-right" title="P&L after charges ÷ that capital">Return on capital</th>
+                          <th className="px-2 py-1 text-right" title="The most margin in use at one moment with this change (the Margin % box)">Margin</th>
+                          <th className="px-2 py-1 text-right" title="P&L after charges ÷ that margin">Return on margin (after charges)</th>
                           <th className="px-2 py-1 text-right">Trades</th>
                           <th className="px-2 py-1 text-right">Win %</th>
                           <th className="px-2 py-1 text-right">Profit factor</th>
@@ -722,9 +722,9 @@ function BestFound({
           value={judge}
           onChange={(e) => onJudge(e.target.value as StrategyLabJudge)}
           className="rounded border border-slate-700 bg-base px-1.5 py-1 text-xs text-slate-200"
-          title="Return on capital: P&L after charges ÷ the most margin in use at one moment, so a set that makes a little less with far less money can win. P&L: the most rupees after charges."
+          title="Return on margin: P&L after charges ÷ the most margin in use at one moment, so a set that makes a little less with far less money can win. P&L: the most rupees after charges."
         >
-          <option value="ROC">Return on capital</option>
+          <option value="ROC">Return on margin (after charges)</option>
           <option value="NET">P&amp;L after charges</option>
         </select>
       </label>
@@ -733,12 +733,12 @@ function BestFound({
           <span className="text-slate-300">
             {better ? "Best" : "Now (nothing beats it)"}:{" "}
             <b className={clsx("tabular-nums", best.totals.net >= 0 ? "text-emerald-300" : "text-rose-300")}>{money(best.totals.net, true)}</b> after charges ·{" "}
-            {best.totals.trades} trades · capital <b className="tabular-nums text-slate-200">{money(best.totals.peak_margin ?? 0)}</b> · return{" "}
+            {best.totals.trades} trades · margin <b className="tabular-nums text-slate-200">{money(best.totals.peak_margin ?? 0)}</b> · return on margin{" "}
             <b className={clsx("tabular-nums", (best.totals.roc ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300")}>{best.totals.roc == null ? "—" : pct(best.totals.roc)}</b>
           </span>
           {better ? (
             <span className="text-slate-500">
-              (now {money(now.net, true)}, {now.roc == null ? "—" : pct(now.roc)} on {money(now.peak_margin ?? 0)})
+              (now {money(now.net, true)}, {now.roc == null ? "—" : pct(now.roc)} on {money(now.peak_margin ?? 0)} margin)
             </span>
           ) : null}
           {stale || rec.judge !== judge ? <span className="text-amber-300">The ticks or Judge by changed: find it again.</span> : null}
@@ -1170,8 +1170,8 @@ function CapitalRow({ cap }: { cap: StrategyLabCapital }) {
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
         <Tile label="Capital needed (full value)" value={money(cap.peak_value)} />
         <Tile label={`Margin blocked (${num(cap.margin_pct, 0)}%)`} value={money(cap.peak_margin)} />
-        <Tile label="Return on capital" value={cap.return_pct == null ? "—" : pct(cap.return_pct)} tone={cap.return_pct ?? undefined} />
-        <Tile label="Return on margin" value={cap.return_on_margin_pct == null ? "—" : pct(cap.return_on_margin_pct)} tone={cap.return_on_margin_pct ?? undefined} />
+        <Tile label="Return on full value (before charges)" value={cap.return_pct == null ? "—" : pct(cap.return_pct)} tone={cap.return_pct ?? undefined} />
+        <Tile label="Return on margin (before charges)" value={cap.return_on_margin_pct == null ? "—" : pct(cap.return_on_margin_pct)} tone={cap.return_on_margin_pct ?? undefined} />
         <Tile label="Largest trade" value={money(cap.max_trade_value)} />
         <Tile label="Average trade" value={money(cap.avg_trade_value)} />
       </div>
