@@ -80,10 +80,11 @@ the Groww API key and log in.
 
 ## Size and cost
 
-`fly.desk2.toml` uses the main desk's machine (2 performance CPUs, 4 GB, always on), about
-US$60-65 a month plus about US$0.45 a month for the 3 GB volume. For a lighter practice desk, change
-`[[vm]]` in `fly.desk2.toml` to `cpu_kind = 'shared'`, `cpus = 2`, `memory_mb = 2048` (a few dollars a
-month); a busy replay can then slow its pages.
+`fly.desk2.toml` uses a shared-CPU machine (2 shared CPUs, 2 GB, always on): the new account is on
+Fly's Free plan, which refuses performance machines. A few dollars a month plus about US$0.45 a month
+for the 3 GB volume; a busy replay can slow its pages. After upgrading that account to Pay As You Go,
+change `[[vm]]` in `fly.desk2.toml` to `cpu_kind = 'performance'`, `memory_mb = 4096` (like `fly.toml`,
+about US$60-65 a month).
 
 ## Not set up for it
 
