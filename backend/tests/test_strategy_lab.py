@@ -48,7 +48,7 @@ def test_crosses_become_base_trades_with_every_rule_answered():
     assert first["side"] == "LONG" and _hhmm(first["entry_ts"]) == "10:05"  # the rise from 10:15 crosses at 10:00
     assert set(first["checks"]) == set(lab.ENTRY_CHECKS)
     assert set(first["exits"]) == set(lab.EXIT_RULES)
-    assert set(first["stops"]) == {"ATR", "TSL", "SUPERTREND", "VWAP"} and set(first["targets"]) == set(lab.TARGETS)
+    assert set(first["stops"]) == set(lab.STOPS) - {"NONE"} and set(first["targets"]) == set(lab.TARGETS)
     # the opposite cross one candle later is the cross exit, at the open of the candle after it
     assert _hhmm(first["exits"]["cross"][0]) == "10:10"
     assert _hhmm(first["square"][0]) == "15:15"
@@ -278,7 +278,7 @@ def test_api_starts_evaluates_recommends_and_deletes(tmp_path, monkeypatch):
         ok = client.post("/api/strategy-lab/start", json={"symbols": ["TCS", "INFY"], "date": D1.isoformat(), "end_date": D2.isoformat(), "bot": 1})
         assert ok.status_code == 200
         job_id = ok.json()["job"]["id"]
-        for _ in range(200):
+        for _ in range(600):  # up to 30 s: CI runners are slower than a laptop
             view = client.get("/api/strategy-lab").json()
             if not view["running"]:
                 break
@@ -367,3 +367,55 @@ async def test_the_lab_matches_the_replay_engine_on_the_base_strategy(tmp_path, 
     # the same minutes, so the P&L differs only by the walk inside the fill minutes (under a rupee a share here)
     for m, b in zip(mine, bot):
         assert abs(m[4] - b[4]) <= 10 * 1.0, (m, b)
+
+
+def test_the_newer_settings_rules_are_answered_and_round_trip():
+    """Fresh trend, opening range, executed volume, smaller candles, the exit candle, the executed volume exit, the smart
+    stop, the staged plan and the ATR / day level / safety-net targets are in the lab and in "what each rule adds"."""
+    trades, settings = lab.analyze_stock("TEST", _tape(), _cfg(), [D1, D2])
+    first = trades[0]
+    for name in ("fresh", "or_volume", "or_vwap", "or_spread", "or_break", "flow", "small_colour"):
+        assert isinstance(first["checks"][name], bool)
+    assert settings["exit_candle_minutes"] == 15 and settings["sc_minutes"] == "1,3"
+    long_trend = next(t for t in trades if t["side"] == "LONG")
+    # The 10:15-10:45 rise then flat: a long's safety net and ATR target are reachable, the stops are real prices.
+    for kind in ("SMART", "PLAN"):
+        hit = long_trend["stops"][kind]
+        assert hit is None or (hit[0] >= long_trend["entry_ts"] and hit[1] > 0)
+    assert long_trend["targets"]["net"] is None or long_trend["targets"]["net"][1] > long_trend["entry_price"]
+    assert long_trend["exits"]["exit_candle"] is None or long_trend["exits"]["exit_candle"][0] > long_trend["entry_ts"]
+
+    cfg = _cfg(use_fresh=True, use_or_break=True, flow_entry=True, sc_entry=True, sc_minutes="1",
+               exit_candle_minutes=15, flow_exit=True, use_stop=True, stop_type="ATR", stop_plan=True,
+               atr_target_mult=2.0, day_target=True, target_net=True)
+    choice = lab.choice_from_cfg(cfg)
+    assert {"fresh", "or_break", "flow", "small_colour"} <= set(choice["entries"])
+    assert {"exit_candle", "flow_exit"} <= set(choice["exits"])
+    assert choice["stop"] == "PLAN" and {"atr", "day_level", "net"} <= set(choice["targets"])
+    back = lab.settings_for_choice(choice, lab.lab_settings(cfg))
+    assert back["use_fresh"] and back["use_or_break"] and back["flow_entry"] and back["sc_entry"]
+    assert back["exit_candle_minutes"] == 15 and back["flow_exit"] and back["flow_exit_mode"] == "EXIT"
+    assert back["stop_type"] == "ATR" and back["stop_plan"] is True
+    assert back["atr_target_mult"] == 2.0 and back["day_target"] and back["target_net"]
+    smart = lab.settings_for_choice({**choice, "stop": "SMART", "targets": []}, lab.lab_settings(cfg))
+    assert smart["stop_type"] == "SMART" and smart["stop_plan"] is False and smart["atr_target_mult"] == 0.0
+
+    names = {(kind, name) for kind, name, _ in lab._toggles(lab.clean_choice(choice))}
+    assert ("entry", "fresh") in names and ("exit", "flow_exit") in names
+    assert ("stop", "SMART") in names and ("target", "net") in names
+    out = lab.evaluate(trades, lab.clean_choice({"stop": "SMART", "targets": ["net", "atr"], "exits": ["exit_candle"]}))
+    assert out["totals"]["trades"] >= 1
+
+
+def test_a_run_read_before_the_newer_rules_leaves_them_out_of_what_each_rule_adds():
+    trades, settings = lab.analyze_stock("TEST", _tape(), _cfg(), [D1, D2])
+    for t in trades:
+        t["checks"].pop("fresh")
+        t["stops"].pop("SMART")
+        t["targets"].pop("net")
+    assert lab.missing_rules(trades) == ["entry:fresh", "stop:SMART", "target:net"]
+    rec = lab.recommend(trades, {}, settings)
+    names = {(r["kind"], r["name"]) for r in rec["rows"]}
+    assert ("entry", "fresh") not in names and ("stop", "SMART") not in names and ("target", "net") not in names
+    assert rec["missing"] == ["entry:fresh", "stop:SMART", "target:net"]
+    assert lab.evaluate(trades, lab.clean_choice({}), settings)["missing"] == ["entry:fresh", "stop:SMART", "target:net"]

@@ -4049,7 +4049,7 @@ export type RegimeSignal = { key: string; label: string; buckets: RegimeBucket[]
 /** Strategy lab (backend strategy_lab.py). A rule's name and its label on the screen. */
 export type StrategyLabRule = { name: string; label: string };
 export type StrategyLabRules = { entries: StrategyLabRule[]; exits: StrategyLabRule[]; stops: StrategyLabRule[]; targets: StrategyLabRule[] };
-export type StrategyLabStop = "NONE" | "ATR" | "TSL" | "SUPERTREND" | "VWAP";
+export type StrategyLabStop = "NONE" | "ATR" | "TSL" | "SUPERTREND" | "VWAP" | "SMART" | "PLAN";
 export type StrategyLabChoice = {
   entries: string[];
   exits: string[];
@@ -4134,6 +4134,8 @@ export type StrategyLabTrade = {
   worst: number;
 };
 export type StrategyLabResult = {
+  /** Rules ("entry:fresh", "stop:SMART"…) the run was read without (read before the lab knew them). */
+  missing?: string[];
   totals: StrategyLabTotals;
   per_day: { day: string; trades: number; gross: number; net: number; cum_gross: number }[];
   per_stock: { symbol: string; trades: number; win_pct: number; gross: number; net: number; days: number; green_days: number; per_trade: number }[];
@@ -4180,6 +4182,7 @@ export type StrategyLabJudge = "NET" | "ROC";
 export type StrategyLabBrief = StrategyLabTotals & { peak_margin?: number; peak_value?: number; roc?: number | null };
 export type StrategyLabRecommend = {
   judge?: StrategyLabJudge;
+  missing?: string[];
   now: StrategyLabBrief;
   rows: StrategyLabRecommendRow[];
   best: {

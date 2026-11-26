@@ -24,6 +24,14 @@ exits, its stop, its target and the square-off. P&L before charges and after (`c
 stock, per day, by exit reason, and the equity line. `recommend` toggles each rule one at a time against the
 current choice ("what each rule adds") and hill-climbs to the best combination it finds.
 
+Rules the bot's own modules answer are read through them: fresh trend (`fresh_entry.read`), the opening-range checks
+(`opening_range.entry_reason`), executed volume (`trade_flow.minutes`, `flow_exit.entry_refusal`), colours on smaller
+candles (`small_colour.entry_reason`), the exit-candle SMA cross (`exit_candle.judge`, the bot's exit candle or the next
+size up), the executed volume exit (`flow_exit.judge`, one reading), the smart stop (`smart_stop.room` at the entry, then
+`want`, no live re-size), the ATR stop with the staged plan (`stop_plan`), and the ATR target (the bot's multiple or
+3×), day high / low target (`day_target`) and profit safety net (`target_net`). A run read before a rule existed has no
+answer for it (`missing_rules`): it is left out of "what each rule adds" until the days are read again.
+
 What it is not: the bot. Candle-close resolution; stops and targets on the 1-minute candles' high / low, the stop
 first when both are inside one minute (the cautious reading); fills at candle opens; no pullback / candle-extreme /
 entry-candle waits, no gap mode, no hand-offs, no reviews, no fast movers, no news entries, no slope candle other
@@ -49,14 +57,25 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
+import atr_target
 import cum_delta
+import day_target
 import ema_filter
+import exit_candle
+import flow_exit
+import fresh_entry
 import indicators
 import level_check
 import macd
+import opening_range
 import pivots
 import slope_exit
+import small_colour
+import smart_stop
+import stop_plan
 import supertrend
+import target_net
+import trade_flow
 import tsl as tsl_mod
 from candles import CANDLE_MINUTES, candle_minutes, resample
 from charges import calculate_charges, legs_for
@@ -95,6 +114,13 @@ ENTRY_CHECKS: dict[str, str] = {
     "supertrend": "Supertrend side",
     "level": "Price level",
     "adx": "ADX at least",
+    "fresh": "Fresh trend",
+    "or_volume": "Opening range: volume",
+    "or_vwap": "Opening range: VWAP",
+    "or_spread": "Opening range: SMA spread",
+    "or_break": "Opening range: breakout",
+    "flow": "Executed volume (order's side)",
+    "small_colour": "Colours on smaller candles",
 }
 #: Exit rules (key → label).
 EXIT_RULES: dict[str, str] = {
@@ -111,9 +137,22 @@ EXIT_RULES: dict[str, str] = {
     "slope_bend": "SMA 9 bend",
     "vturn": "SMA 9 V-turn",
     "decel": "SMA 9 deceleration guard",
+    "exit_candle": "SMA cross on the exit candle",
+    "flow_exit": "Executed volume exit",
 }
-STOPS = ("NONE", "ATR", "TSL", "SUPERTREND", "VWAP")
-TARGETS: dict[str, str] = {"tsl": "Trailing-stop target", "pivot_r1": "Pivot R1 / S1", "pivot_r2": "Pivot R2 / S2"}
+STOPS = ("NONE", "ATR", "TSL", "SUPERTREND", "VWAP", "SMART", "PLAN")
+TARGETS: dict[str, str] = {
+    "tsl": "Trailing-stop target",
+    "pivot_r1": "Pivot R1 / S1",
+    "pivot_r2": "Pivot R2 / S2",
+    "atr": "ATR target",
+    "day_level": "Day high / low target",
+    "net": "Profit safety net",
+}
+#: The exit candle the lab reads when the bot has none set: the next size up from the bot's candle.
+EXIT_CANDLE_DEFAULTS = (5, 15, 30, 60)
+#: The ATR target multiple the lab reads when the bot has none set.
+DEFAULT_ATR_TARGET = 3.0
 EXIT_REASONS = {
     "cross": "MA_CROSS",
     "bb_band": "BB_TARGET",
@@ -128,6 +167,13 @@ EXIT_REASONS = {
     "slope_bend": "SMA9_BEND",
     "vturn": "SMA9_VTURN",
     "decel": "SMA9_DECEL",
+    "exit_candle": "EXIT_CANDLE_CROSS",
+    "flow_exit": "FLOW_EXIT",
+    "stop:SMART": "SMART_SL_HIT",
+    "stop:PLAN": "PLAN_SL_HIT",
+    "target:atr": "TARGET_HIT",
+    "target:day_level": "DAY_LEVEL_TARGET",
+    "target:net": "TARGET_NET",
     "stop:ATR": "ATR_SL_HIT",
     "stop:TSL": "TSL_HIT",
     "stop:SUPERTREND": "ST_SL_HIT",
@@ -154,6 +200,35 @@ def _num(cfg, name: str, default: float) -> float:
 
 def _int(cfg, name: str, default: int) -> int:
     return int(round(_num(cfg, name, default)))
+
+
+class _Over:
+    """`cfg` with some fields set (e.g. a check's own switch on), so the bot's modules read the rule the lab tests."""
+
+    def __init__(self, cfg, **over) -> None:
+        self._cfg = cfg
+        self._over = over
+
+    def __getattr__(self, name: str):
+        if name in self._over:
+            return self._over[name]
+        return getattr(self._cfg, name, None)
+
+
+def _exit_size(cfg, own: int) -> int:
+    """The exit candle the lab reads: the bot's own setting when set (and not its own candle), else the next size up."""
+    size = _int(cfg, "exit_candle_minutes", 0)
+    if size in exit_candle.EXIT_MINUTES and size > 0 and size != own:
+        return size
+    return next((n for n in EXIT_CANDLE_DEFAULTS if n > own), 0)
+
+
+def _small_sizes(cfg, own: int) -> str:
+    """The smaller candles the lab reads: the bot's own ticked sizes, else up to two of 1 / 3 / 5 under its candle."""
+    mine = small_colour.watched(cfg, own)
+    if mine:
+        return ",".join(str(n) for n in mine)
+    return ",".join(str(n) for n in [n for n in (1, 3, 5) if n < own][:2])
 
 
 def _hhmm(value, default: str) -> dt.time:
@@ -232,6 +307,19 @@ def lab_settings(cfg) -> dict:
         "tsl_atrs": list(tsl_mod.tsl_atrs(cfg)),
         "vwap_stop_atr": max(0.0, _num(cfg, "vwap_stop_atr", 0.5)),
         "decel": {k: v for k, v in _decel_settings(cfg).items()},
+        "fresh_rvol": fresh_entry.min_rvol(cfg),
+        "or_volume_ratio": opening_range.ratio(cfg),
+        "or_spread_pct": opening_range.spread_pct(cfg),
+        "flow_entry_pct": _num(cfg, "flow_entry_pct", 55.0),
+        "flow_entry_window": max(0, _int(cfg, "flow_entry_window", 3)),
+        "sc_minutes": _small_sizes(cfg, candle_minutes(cfg)),
+        "exit_candle_minutes": _exit_size(cfg, candle_minutes(cfg)),
+        "flow_exit_pct": flow_exit.pct(cfg),
+        "flow_exit_window": flow_exit.window(cfg),
+        "atr_target_mult": atr_target.mult(cfg) or DEFAULT_ATR_TARGET,
+        "smart": smart_stop.settings(cfg),
+        "plan_be_r": stop_plan.be_r(cfg),
+        "plan_trail_r": stop_plan.trail_r(cfg),
     }
 
 
@@ -247,6 +335,10 @@ def choice_from_cfg(cfg) -> dict:
     for name in ENTRY_CHECKS:
         if name == "gap":
             on = bool(getattr(cfg, "use_gap_long", False)) or bool(getattr(cfg, "use_gap_short", False))
+        elif name == "flow":
+            on = bool(getattr(cfg, "flow_entry", False))
+        elif name == "small_colour":
+            on = small_colour.entry_on(cfg) and bool(small_colour.watched(cfg, candle_minutes(cfg)))
         else:
             on = bool(getattr(cfg, "use_adx_filter" if name == "adx" else f"use_{name}", False))
         if on:
@@ -281,12 +373,24 @@ def choice_from_cfg(cfg) -> dict:
         exits.append("vturn")
     if bool(getattr(cfg, "decel_exit", False)):
         exits.append("decel")
+    if exit_candle.active(cfg, candle_minutes(cfg)):
+        exits.append("exit_candle")
+    if flow_exit.on(cfg) and flow_exit.closes(cfg):
+        exits.append("flow_exit")
     stop = "NONE"
     use_stop = getattr(cfg, "use_stop", None)
     if use_stop is None or bool(use_stop):
         kind = str(getattr(cfg, "stop_type", None) or "ATR").upper()
         stop = kind if kind in STOPS else "ATR"
+        if stop == "ATR" and stop_plan.on(cfg):
+            stop = "PLAN"
     targets: list[str] = []
+    if atr_target.on(cfg):
+        targets.append("atr")
+    if day_target.on(cfg):
+        targets.append("day_level")
+    if target_net.on(cfg):
+        targets.append("net")
     if stop == "TSL" and tsl_mod.tsl_settings(cfg)[2] > 0:
         targets.append("tsl")
     mode = pivots.target_mode(cfg)
@@ -305,6 +409,12 @@ def settings_for_choice(choice: dict, base: dict | None = None) -> dict:
     for name in ENTRY_CHECKS:
         if name == "gap":
             out["use_gap_long"] = out["use_gap_short"] = "gap" in entries
+        elif name == "flow":
+            out["flow_entry"] = "flow" in entries
+        elif name == "small_colour":
+            out["sc_entry"] = "small_colour" in entries
+            if "small_colour" in entries and (base or {}).get("sc_minutes"):
+                out["sc_minutes"] = str(base["sc_minutes"])
         elif name == "adx":
             out["use_adx_filter"] = "adx" in entries
         else:
@@ -324,12 +434,20 @@ def settings_for_choice(choice: dict, base: dict | None = None) -> dict:
     out["slope_bend_pct"] = float((base or {}).get("slope_bend_pct") or 60.0) if "slope_bend" in exits else 0.0
     out["vturn_exit"] = "vturn" in exits
     out["decel_exit"] = "decel" in exits
+    out["exit_candle_minutes"] = int((base or {}).get("exit_candle_minutes") or 0) if "exit_candle" in exits else 0
+    out["flow_exit"] = "flow_exit" in exits
+    if "flow_exit" in exits:
+        out["flow_exit_mode"] = "EXIT"
     stop = str(choice.get("stop") or "NONE").upper()
     out["use_stop"] = stop != "NONE"
+    out["stop_plan"] = stop == "PLAN"
     if stop != "NONE":
-        out["stop_type"] = stop
+        out["stop_type"] = "ATR" if stop == "PLAN" else stop
     targets = set(choice.get("targets") or [])
     out["pivot_target"] = "R1" if "pivot_r1" in targets else "R2" if "pivot_r2" in targets else "OFF"
+    out["atr_target_mult"] = float((base or {}).get("atr_target_mult") or DEFAULT_ATR_TARGET) if "atr" in targets else 0.0
+    out["day_target"] = "day_level" in targets
+    out["target_net"] = "net" in targets
     if base and base.get("candle_minutes"):
         out["candle_minutes"] = int(base["candle_minutes"])
     return out
@@ -354,7 +472,8 @@ def numbers_for_bot(settings: dict | None, choice: dict) -> dict:
                 "gap_short_max", "candle_dir_count", "candle_dir_rule", "ema_fast", "ema_slow", "cvd_lookback",
                 "cvd_div_lookback", "st_period", "st_mult", "level_line", "counter_rule", "counter_need_fast",
                 "counter_min_body", "slope_lookback", "slope_turn_pct", "vturn_move_pct", "vturn_turn_pct", "vturn_within",
-                "tsl_mode", "vwap_stop_atr"):
+                "tsl_mode", "vwap_stop_atr", "fresh_rvol", "or_volume_ratio", "or_spread_pct", "flow_entry_pct",
+                "flow_entry_window", "flow_exit_pct", "flow_exit_window", "plan_be_r", "plan_trail_r"):
         put(key, key)
     put("entry_cutoff_time", "entry_cutoff")
     put("square_off_time", "square_off")
@@ -369,6 +488,10 @@ def numbers_for_bot(settings: dict | None, choice: dict) -> dict:
             out[field] = value
     for k, v in (s.get("decel") or {}).items():
         out[f"decel_{k}"] = v
+    smart = s.get("smart") or {}
+    for k in ("pct", "days", "min_pct", "max_pct", "follow"):
+        if k in smart:
+            out[f"smart_{k}"] = smart[k]
     # The lab only opens trades on SMA crosses.
     out["entry_mode"] = "SMA"
     return out
@@ -848,6 +971,10 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
     diff = x.fast - x.slow
     trades: list[dict] = []
     pivot_cache: dict[int, dict | None] = {}
+    xc_cache: dict[int, pd.DataFrame | None] = {}
+    or_cache: dict[tuple, bool] = {}
+    day_hl = _day_highs_lows(t_ts, t_high, t_low, t_day)
+    day_list = np.unique(t_day)
     for i in range(1, len(x.ts) - 1):
         if x.day[i] not in wanted:
             continue
@@ -890,7 +1017,11 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
             continue
         sign = 1.0 if side == "LONG" else -1.0
         checks = _entry_checks(x, rich, i, side, s, lv)
+        checks.update(_extra_checks(symbol, cfg, s, tape, rich, e, side, entry_ts, minutes, or_cache, m0))
         exits = _exit_candidates(x, e, side, s, square_ts, rich)
+        exits["exit_candle"] = _exit_candle_hit(cfg, s, tape, rich, xc_cache, day_key, side, entry_ts, square_ts, t_ts, t_open, minutes)
+        flow_pts = trade_flow.minutes(symbol, tape, flow_exit.first_minute(entry_ts), square_ts)
+        exits["flow_exit"] = _flow_exit_hit(flow_pts, s, side, entry_ts, square_ts, t_ts, t_open, minutes)
         # Stops on the 1-minute candles.
         atr_stop = round_price(symbol, entry - sign * s["atr_multiplier"] * atr)
         stops: dict[str, list | None] = {}
@@ -910,6 +1041,12 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
         span = minutes * 60
         stops["SUPERTREND"] = _line_stop(x, t_ts, t_high, t_low, m0, m_sq, side, entry, atr_stop, i, span, symbol, lambda j: _st_guard(x, j, side))
         stops["VWAP"] = _line_stop(x, t_ts, t_high, t_low, m0, m_sq, side, entry, atr_stop, i, span, symbol, lambda j: _vwap_guard(x, j, side, s["vwap_stop_atr"]))
+        breakeven = stop_plan.breakeven(side, entry, s["qty"])
+        # the smart stop reads only its own sessions before the entry (smart_days), not the whole range
+        first_day = day_list[max(0, int(np.searchsorted(day_list, day_key)) - int(s["smart"]["days"]))]
+        smart_tape = tape.iloc[int(np.searchsorted(t_day, first_day, side="left")) : m0 + 1]
+        stops["SMART"] = _smart_stop(cfg, smart_tape, t_ts, t_high, t_low, m0, m_sq, side, entry, entry_ts, atr, s, symbol, minutes, breakeven)
+        stops["PLAN"] = _plan_stop(cfg, x, t_ts, t_high, t_low, m0, m_sq, side, entry, atr_stop, i, span, symbol, breakeven)
         targets: dict[str, list | None] = {"tsl": None, "pivot_r1": None, "pivot_r2": None}
         if target_pts > 0:
             goal = entry + sign * target_pts
@@ -920,6 +1057,13 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
             if goal is not None:
                 hit = _target_walk(t_ts, t_high, t_low, m0, m_sq, side, float(goal[1]))
                 targets[key] = list(hit) if hit else None
+        goal = entry + sign * s["atr_target_mult"] * float(atr)
+        hit = _target_walk(t_ts, t_high, t_low, m0, m_sq, side, round_price(symbol, goal))
+        targets["atr"] = list(hit) if hit else None
+        day_goal = day_target.target_for(side, entry, _day_levels(day_hl, t_ts, t_high, t_low, t_day, day_key, entry_ts, day_target.skip_min(cfg)), cfg)
+        hit = _target_walk(t_ts, t_high, t_low, m0, m_sq, side, round_price(symbol, day_goal[2])) if day_goal else None
+        targets["day_level"] = list(hit) if hit else None
+        targets["net"] = _net_target(cfg, t_ts, t_high, t_low, m0, m_sq, side, entry, float(atr), s["qty"], symbol)
         held = t_high[m0:m_sq] if side == "LONG" else t_low[m0:m_sq]
         worst = t_low[m0:m_sq] if side == "LONG" else t_high[m0:m_sq]
         trades.append(
@@ -942,6 +1086,219 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
             }
         )
     return trades, s
+
+
+def _day_highs_lows(t_ts, t_high, t_low, t_day) -> dict[int, tuple[float, float]]:
+    """Each day's high and low of the 1-minute tape (for yesterday's level of the day high / low target)."""
+    out: dict[int, tuple[float, float]] = {}
+    for key in np.unique(t_day):
+        sel = t_day == key
+        out[int(key)] = (float(np.nanmax(t_high[sel])), float(np.nanmin(t_low[sel])))
+    return out
+
+
+def _day_levels(day_hl: dict, t_ts, t_high, t_low, t_day, day_key: int, entry_ts: int, skip: int) -> dict | None:
+    """`day_target.levels` on the arrays: today's high / low from the 1-minute candles that began before the entry minute
+    (from 09:15 + `skip` minutes) and the session before's high / low."""
+    minute = int(entry_ts) // 60 * 60
+    sel = (t_day == day_key) & (t_ts < minute)
+    if skip > 0:
+        sel &= t_ts >= (day_key * 86400 - 19800) + (9 * 60 + 15 + skip) * 60
+    out = {"today_high": None, "today_low": None, "prev_high": None, "prev_low": None, "prev_day": None}
+    if sel.any():
+        out["today_high"] = float(np.nanmax(t_high[sel]))
+        out["today_low"] = float(np.nanmin(t_low[sel]))
+    earlier = [k for k in day_hl if k < day_key]
+    if earlier:
+        prev = max(earlier)
+        out["prev_high"], out["prev_low"] = day_hl[prev]
+        out["prev_day"] = dt.date(1970, 1, 1).fromordinal(dt.date(1970, 1, 1).toordinal() + prev).isoformat()
+    if all(out[k] is None for k in ("today_high", "prev_high")):
+        return None
+    return out
+
+
+#: Sessions of history the fresh-trend and opening-range checks read before the signal's day (their volume compares
+#: with earlier sessions); a fixed window keeps the answer the same on the range's first and last day, and quick.
+CHECK_SESSIONS = 10
+
+#: The opening-range checks that read only the 09:15-09:30 window (and the first candle after it): once that candle
+#: has closed their answer is the same for every signal of the day and side, so the lab reads them once.
+_OR_DAY_CHECKS = ("or_volume", "or_vwap", "or_break")
+
+
+def _extra_checks(symbol: str, cfg, s: dict, tape: pd.DataFrame, rich: pd.DataFrame, e: int, side: str, entry_ts: int,
+                  minutes: int, or_cache: dict | None = None, m0: int | None = None) -> dict[str, bool]:
+    """The checks the bot's own modules answer (fresh trend, opening range, executed volume, smaller candles), read on
+    the candles closed at the signal candle's close; `rich.iloc[: e + 1]` keeps the entry candle as the forming one, as
+    the bot sees it."""
+    out: dict[str, bool] = {}
+    days = np.unique(rich_days := ((rich["ts"].to_numpy(dtype="int64")[: e + 1] + 19800) // 86400))
+    since = days[max(0, len(days) - 1 - CHECK_SESSIONS)]
+    frame = rich.iloc[int(np.searchsorted(rich_days, since, side="left")) : e + 1]
+    got = fresh_entry.read(frame, side, _Over(cfg, fresh_rvol=s["fresh_rvol"]))
+    out["fresh"] = bool(got and all(got[0].values()))
+    day = int((entry_ts + 19800) // 86400)
+    ready_at = day * 86400 - 19800 + (9 * 60 + 30 + minutes) * 60  # the first candle from 09:30 has closed
+    for name in opening_range.CHECKS:
+        key = (day, side, name)
+        if or_cache is not None and name in _OR_DAY_CHECKS and entry_ts >= ready_at and key in or_cache:
+            out[name] = or_cache[key]
+            continue
+        try:
+            why = opening_range.entry_reason(frame, side, _Over(cfg, **{f"use_{name}": True}), only=name)
+        except Exception:  # noqa: BLE001 - a check that cannot be read refuses, like the bot
+            why = "not readable"
+        out[name] = why is None
+        if or_cache is not None and name in _OR_DAY_CHECKS and entry_ts >= ready_at:
+            or_cache[key] = out[name]
+    win = s["flow_entry_window"]
+    start, end = flow_exit.entry_span(entry_ts, win, minutes)
+    pts = trade_flow.minutes(symbol, tape, start, end)
+    out["flow"] = flow_exit.entry_refusal(pts, side, s["flow_entry_pct"], max(1, (end - start) // 60)) is None
+    if s["sc_minutes"]:
+        if m0 is not None:
+            # enough minutes for the largest smaller candle's run (5 candles of 10 minutes), not the whole warm-up
+            cut = tape.iloc[max(0, m0 - 150) : m0 + 1]
+        else:
+            ts = pd.to_numeric(tape["ts"], errors="coerce")
+            cut = tape[ts <= entry_ts]
+        over = _Over(cfg, sc_entry=True, sc_minutes=s["sc_minutes"], sma_fast=s["sma_fast"], sma_slow=s["sma_slow"])
+        out["small_colour"] = small_colour.entry_reason(cut, side, over, minutes) is None
+    else:
+        out["small_colour"] = True  # 1-minute candles: nothing smaller to read
+    return out
+
+
+def _fill_at(t_ts: np.ndarray, t_open: np.ndarray, at_ts: int, square_ts: int) -> list | None:
+    """The open of the first 1-minute candle at or after `at_ts`, before the square-off."""
+    m = int(np.searchsorted(t_ts, at_ts, side="left"))
+    if m >= len(t_ts) or t_ts[m] >= square_ts:
+        return None
+    return [int(t_ts[m]), float(t_open[m])]
+
+
+def _exit_candle_hit(cfg, s: dict, tape: pd.DataFrame, rich: pd.DataFrame, cache: dict, day_key: int, side: str,
+                     entry_ts: int, square_ts: int, t_ts: np.ndarray, t_open: np.ndarray, own: int) -> list | None:
+    """The SMA cross exit read on the exit candle (exit_candle.judge), once per exit candle closed after the entry."""
+    size = s["exit_candle_minutes"]
+    if not size or size == own:
+        return None
+    if day_key not in cache:
+        cut = tape[t_ts < square_ts + size * 60]
+        cache[day_key] = exit_candle.closed_frame(cut, size, s["sma_fast"], s["sma_slow"])
+    full = cache[day_key]
+    if full is None or full.empty:
+        return None
+    ts = full["ts"].to_numpy(dtype="int64")
+    r_ts = rich["ts"].to_numpy(dtype="int64")
+    for k in np.nonzero(ts >= entry_ts)[0]:
+        closed_at = int(ts[k]) + size * 60
+        if closed_at > square_ts:
+            break
+        own_closed = rich.iloc[: int(np.searchsorted(r_ts + own * 60, closed_at, side="right"))]
+        hit, _ = exit_candle.judge(full.iloc[: k + 1], own_closed, side, s["sma_fast"], s["sma_slow"])
+        if hit:
+            return _fill_at(t_ts, t_open, closed_at, square_ts)
+    return None
+
+
+def _flow_exit_hit(points: list[dict], s: dict, side: str, entry_ts: int, square_ts: int, t_ts: np.ndarray,
+                   t_open: np.ndarray, own: int) -> list | None:
+    """The executed volume exit (flow_exit.judge): the first closed window after the entry in which the other side did
+    the % of the shares traded; filled at the next minute's open."""
+    if not points:
+        return None
+    win = s["flow_exit_window"]
+    first = flow_exit.first_minute(entry_ts)
+    for end in range(first + 60, square_ts + 1, 60):
+        sp = flow_exit.span(end, entry_ts, win, own)
+        if sp is None:
+            continue
+        part = [p for p in points if sp[0] <= p["time"] < sp[1]]
+        verdict, _ = flow_exit.judge(part, side, s["flow_exit_pct"], max(1, (sp[1] - sp[0]) // 60))
+        if verdict:
+            return _fill_at(t_ts, t_open, end, square_ts)
+    return None
+
+
+def _smart_stop(cfg, tape, t_ts, t_high, t_low, m0, m_sq, side, entry, entry_ts, atr, s, symbol, minutes, breakeven) -> list | None:
+    """The smart stop (smart_stop.py): the stock's own room from its dips before the entry, following the best price
+    since the entry, tighter only, moved only when it gains enough (no live re-size)."""
+    try:
+        info = smart_stop.room(tape, side, entry, cfg, before_ts=entry_ts, fallback=s["atr_multiplier"] * float(atr), minutes=minutes)
+    except Exception:  # noqa: BLE001
+        return None
+    room_rs = float(info.get("rs") or 0.0)
+    if room_rs <= 0:
+        return None
+    long = side == "LONG"
+    follow = bool(s["smart"].get("follow", True))
+    current = [round_price(symbol, entry - room_rs if long else entry + room_rs)]
+    best = [entry]
+
+    def level_at(m: int) -> float:
+        want = round_price(symbol, smart_stop.want(side, entry, best[0], room_rs, breakeven, follow))
+        tighter = want > current[0] if long else want < current[0]
+        if tighter and smart_stop.worth_moving(current[0], want, room_rs):
+            current[0] = want
+        best[0] = max(best[0], t_high[m]) if long else min(best[0], t_low[m])
+        return current[0]
+
+    hit = _stop_walk(t_ts, t_high, t_low, m0, m_sq, side, level_at)
+    return list(hit) if hit else None
+
+
+def _plan_stop(cfg, x, t_ts, t_high, t_low, m0, m_sq, side, entry, atr_stop, signal_i, span, symbol, breakeven) -> list | None:
+    """The staged stop plan (stop_plan.py) on the ATR stop: breakeven plus charges at +plan_be_r R, then the Supertrend
+    line (never under breakeven) from +plan_trail_r R; tighter only, stages only forward."""
+    r_ps = stop_plan.risk(entry, atr_stop)
+    if not r_ps:
+        return None
+    long = side == "LONG"
+    current = [atr_stop]
+    best = [entry]
+    stage = [0]
+    next_j = [signal_i + 1]
+    line = [None]
+
+    def level_at(m: int) -> float:
+        while next_j[0] < len(x.ts) and x.ts[next_j[0]] + span <= t_ts[m]:
+            line[0] = _st_guard(x, next_j[0], side)
+            next_j[0] += 1
+        stage[0] = max(stage[0], stop_plan.stage(side, entry, best[0], r_ps, cfg))
+        want = current[0]
+        if stage[0] >= 1:
+            want = breakeven
+        if stage[0] >= 2 and line[0] is not None:
+            want = max(breakeven, line[0]) if long else min(breakeven, line[0])
+        want = round_price(symbol, want)
+        if (long and want > current[0]) or (not long and want < current[0]):
+            current[0] = want
+        best[0] = max(best[0], t_high[m]) if long else min(best[0], t_low[m])
+        return current[0]
+
+    hit = _stop_walk(t_ts, t_high, t_low, m0, m_sq, side, level_at)
+    return list(hit) if hit else None
+
+
+def _net_target(cfg, t_ts, t_high, t_low, m0, m_sq, side, entry, atr, qty, symbol) -> list | None:
+    """The profit safety net (target_net.py): from the start distance on, keep the % of the best profit per share; the
+    first minute whose low (high for a short) reaches that floor closes. The floor uses the best price before the
+    minute (the cautious order)."""
+    begin = target_net.start_level(side, entry, qty, atr, cfg)
+    if begin is None:
+        return None
+    long = side == "LONG"
+    best = entry
+    for m in range(m0, m_sq):
+        got = target_net.floor(side, entry, begin[1], best, cfg)
+        if got is not None:
+            level = round_price(symbol, got[0])
+            if (long and t_low[m] <= level) or (not long and t_high[m] >= level):
+                return [int(t_ts[m]), float(level)]
+        best = max(best, t_high[m]) if long else min(best, t_low[m])
+    return None
 
 
 def _st_guard(x: _Series, j: int, side: str) -> float | None:
@@ -1174,6 +1531,7 @@ def evaluate(trades: list[dict], choice: dict, settings: dict | None = None, wit
     out["choice"] = choice
     out["settings"] = settings_for_choice(choice, settings)
     if with_trades:
+        out["missing"] = missing_rules(trades)
         out["trades"] = kept[-MAX_TRADES_OUT:]
         out["trades_cut"] = max(0, len(kept) - MAX_TRADES_OUT)
     return out
@@ -1278,7 +1636,8 @@ def _summarize(kept: list[dict]) -> dict:
     }
 
 
-STOP_LABELS = {"NONE": "No stop", "ATR": "ATR stop", "TSL": "Trailing stop", "SUPERTREND": "Supertrend stop", "VWAP": "VWAP + ATR stop"}
+STOP_LABELS = {"NONE": "No stop", "ATR": "ATR stop", "TSL": "Trailing stop", "SUPERTREND": "Supertrend stop", "VWAP": "VWAP + ATR stop",
+               "SMART": "Smart stop", "PLAN": "ATR stop + staged plan"}
 
 
 def rule_label(kind: str, name: str) -> str:
@@ -1291,21 +1650,46 @@ def rule_label(kind: str, name: str) -> str:
     return STOP_LABELS.get(name, name)
 
 
-def _toggles(choice: dict) -> list[tuple[str, str, dict]]:
-    """Every single change of `choice`: (kind, name, the changed choice)."""
+def missing_rules(trades: list[dict]) -> list[str]:
+    """Rules ("entry:fresh", "stop:SMART", ...) a run read before they were in the lab: its base trades carry no answer
+    for them, so they are left out of "what each rule adds" until the days are read again."""
+    if not trades:
+        return []
+    t = trades[0]
+    have = {
+        "entry": set(t.get("checks") or {}),
+        "exit": set(t.get("exits") or {}),
+        "stop": set(t.get("stops") or {}) | {"NONE"},
+        "target": set(t.get("targets") or {}),
+    }
+    out = [f"entry:{n}" for n in ENTRY_CHECKS if n not in have["entry"]]
+    out += [f"exit:{n}" for n in EXIT_RULES if n not in have["exit"]]
+    out += [f"stop:{n}" for n in STOPS if n not in have["stop"]]
+    out += [f"target:{n}" for n in TARGETS if n not in have["target"]]
+    return out
+
+
+def _toggles(choice: dict, skip: set[str] | frozenset = frozenset()) -> list[tuple[str, str, dict]]:
+    """Every single change of `choice`: (kind, name, the changed choice); rules in `skip` (missing_rules) are left out."""
     out: list[tuple[str, str, dict]] = []
     for name in ENTRY_CHECKS:
+        if f"entry:{name}" in skip:
+            continue
         entries = set(choice["entries"])
         entries.symmetric_difference_update({name})
         out.append(("entry", name, {**choice, "entries": sorted(entries)}))
     for name in EXIT_RULES:
+        if f"exit:{name}" in skip:
+            continue
         exits = set(choice["exits"])
         exits.symmetric_difference_update({name})
         out.append(("exit", name, {**choice, "exits": sorted(exits)}))
     for stop in STOPS:
-        if stop != choice["stop"]:
+        if stop != choice["stop"] and f"stop:{stop}" not in skip:
             out.append(("stop", stop, {**choice, "stop": stop}))
     for name in TARGETS:
+        if f"target:{name}" in skip:
+            continue
         targets = set(choice["targets"])
         targets.symmetric_difference_update({name})
         out.append(("target", name, {**choice, "targets": sorted(targets)}))
@@ -1341,8 +1725,9 @@ def recommend(trades: list[dict], choice: dict, settings: dict | None = None, ju
     judge = judge if judge in JUDGES else "NET"
     choice = clean_choice(choice)
     now = _brief(evaluate(trades, choice, settings, with_trades=False))
+    skip = set(missing_rules(trades))
     rows = []
-    for kind, name, changed in _toggles(choice):
+    for kind, name, changed in _toggles(choice, skip):
         got = _brief(evaluate(trades, changed, settings, with_trades=False))
         on_now = (
             name in choice["entries"] if kind == "entry" else name in choice["exits"] if kind == "exit" else name in choice["targets"] if kind == "target" else False
@@ -1384,7 +1769,7 @@ def recommend(trades: list[dict], choice: dict, settings: dict | None = None, ju
     steps: list[dict] = []
     for _ in range(SEARCH_STEPS):
         candidates = []
-        for kind, name, changed in _toggles(best_choice):
+        for kind, name, changed in _toggles(best_choice, skip):
             got = _brief(evaluate(trades, changed, settings, with_trades=False))
             if got["trades"] >= SEARCH_MIN_TRADES and _score(got, judge) > _score(best, judge) + 1e-9:
                 candidates.append((_score(got, judge), kind, name, changed, got))
@@ -1400,6 +1785,7 @@ def recommend(trades: list[dict], choice: dict, settings: dict | None = None, ju
         "now": now,
         "rows": rows,
         "best": {"choice": best_choice, "totals": best, "steps": steps, "settings": settings_for_choice(best_choice, settings)},
+        "missing": sorted(skip),
     }
 
 
