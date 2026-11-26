@@ -245,7 +245,7 @@ def test_start_backtest_outside_market_hours(mcp, monkeypatch):
     _at(monkeypatch, 2026, 10, 12, 16, 0)  # Monday 16:00 IST
     err, text = call(client, "start_backtest", {"bot": 2, "date": "2026-10-01", "end_date": "2026-10-09", "symbols": ["SBIN"]})
     assert not err and json.loads(text)["status"] == "LOADING"
-    assert writes == [("replay", {"bot": 2, "date": "2026-10-01", "end_date": "2026-10-09", "start": "09:15", "speed": 300, "symbols": ["SBIN"]})]
+    assert writes == [("replay", {"bot": 2, "origin": "mcp", "date": "2026-10-01", "end_date": "2026-10-09", "start": "09:15", "speed": 300, "symbols": ["SBIN"]})]
 
 
 def test_start_backtest_is_blocked_in_market_hours_but_not_at_weekends(mcp, monkeypatch):

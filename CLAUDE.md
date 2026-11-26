@@ -552,6 +552,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   "-" when no scan was saved on this server), and the Result table shows the
   largest trade's full value and margin and the most margin blocked at once (`backtestPdf.peakMargin`: overlapping
   trades add up). The blotter's summary PDF shows the same. A Scalp-pick run's PDF (auto-arm, strong-trend, Most active picks) ends with **How the stocks were picked** (`BacktestRuns.pickRuleRows`: kind, days, stocks read, source, arm window, trend read step and candle, strong-trend checks / side, buyers-sellers % / side / money floor, saved-scan days, price range, max a day; or pick time, top N, direction / rank / bias) and **Stocks armed each day** (`pickLogRows`: day, minute armed, stock, found by, side, why), from the run's `scalp_pick` snapshot (`backtestPdf` `pickRule` / `pickLog`).
+  **Where a run came from** (`backend/run_source.py`, display only; owner's request): every start path saves `origin`
+  (`run_source.ORIGINS`: replay bar, Scalp page Backtest these, Strategy lab, Trade a saved scan, stock ranking, Compare
+  pick times, daily run, backtest queue / its schedule, the Compare page's Backtest the same days, MCP) on the run's
+  settings (`ReplayStart.origin`, the pick starts' `origin`, `_start_trend_picks(origin=)`; unknown codes dropped), and
+  `run_source.describe` reads it with the pick rule (`scalp_pick.kind` / auto-arm `source`: "Auto-arm · Most active",
+  "Trend quality picks", "Most active saved scan"…; a pick run's starter as `via`) into `_run_dict`'s `source`. The
+  Backtests list tags each run (`BacktestRuns.RunSourceTag`), filters by it ("Started from"), and the run detail / PDF
+  ("Started from" row) show it; Run again keeps the origin. Runs saved before read from their rule, else "Replay".
   A replay plays one bot's settings and armed stocks (`ReplayStart.bot`, 1-4,
   default 1; `ReplayEngine(bot=)` reads that bot's settings row, never writes it,
   and tags its trades with that bot). Each terminal desk starts and follows only

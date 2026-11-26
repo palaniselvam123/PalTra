@@ -6,7 +6,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import { readReverse } from "@/components/Terminal/ReverseOwnSettings";
-import { inr, smaApi, type DaySwing, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
+import { inr, smaApi, type DaySwing, type ReplayDayRow, type ReplayOrigin, type ReplayRun, type ReplayRunSource, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { SortTh, useSort } from "./sortable";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import { Badge, Skeleton, pnlTone } from "./ui";
@@ -69,6 +69,37 @@ type ScalpPickInfo = ScalpPickRule & { universe?: number; candles?: string; skip
 export function scalpPickOf(s: Settings): ScalpPickInfo | null {
   const raw = (s as Record<string, unknown>).scalp_pick;
   return raw && typeof raw === "object" ? (raw as ScalpPickInfo) : null;
+}
+
+/** Where a run came from (backend run_source.describe); runs listed before the server knew it read as a replay. */
+export function runSourceOf(run: ReplayRun): ReplayRunSource {
+  return run.source ?? { code: "REPLAY", label: "Replay", via: null };
+}
+
+/** The source tag's words in one line: "Auto-arm · Most active (Backtest queue)". */
+export function runSourceText(run: ReplayRun): string {
+  const s = runSourceOf(run);
+  return s.via ? `${s.label} (${s.via})` : s.label;
+}
+
+/** One colour per family of sources: auto-arm, Trend quality picks, Most active, Strategy lab, the rest. */
+function sourceColor(code: string): "violet" | "sky" | "amber" | "green" | "slate" {
+  if (code.startsWith("AUTOARM")) return "violet";
+  if (code === "TREND_PICKS") return "sky";
+  if (code === "ACTIVE_PICKS" || code === "SAVED_SCAN" || code === "SCAN_TRADE") return "amber";
+  if (code === "STRATEGY_LAB") return "green";
+  return "slate";
+}
+
+/** The run's source as a tag (Backtests list and run detail). */
+export function RunSourceTag({ run }: { run: ReplayRun }) {
+  const s = runSourceOf(run);
+  return (
+    <Badge color={sourceColor(s.code)} className="normal-case tracking-normal" title={`Started from: ${runSourceText(run)}`}>
+      {s.label}
+      {s.via ? <span className="font-normal opacity-80">· {s.via}</span> : null}
+    </Badge>
+  );
 }
 
 /** Which backtest made the picks, in words. */
@@ -496,9 +527,12 @@ type RunFilters = {
   minTrades: string;
   /** NEW = newest first (the server's order), BEST / WORST = by P&L, PER_TRADE = best P&L per trade. */
   order: string;
+  /** Where the run came from (its source tag's label), "ALL" = any. */
+  source: string;
 };
 const NO_FILTERS: RunFilters = {
   text: "", bot: "ALL", result: "ALL", status: "ALL", from: "", to: "", pnlMin: "", pnlMax: "", minTrades: "", order: "NEW",
+  source: "ALL",
 };
 
 /** A typed ₹ / count box as a number, or null when blank or not a number. */
@@ -534,6 +568,7 @@ function runMatches(run: ReplayRun, f: RunFilters): boolean {
     if (!text.split(/[\s,]+/).filter(Boolean).every((part) => hay.includes(part))) return false;
   }
   if (f.bot !== "ALL" && String(Number(run.settings.bot ?? 1) || 1) !== f.bot) return false;
+  if (f.source && f.source !== "ALL" && runSourceOf(run).label !== f.source) return false;
   const t = run.totals;
   if (f.result === "PROFIT" && !(t.trades > 0 && t.net > 0)) return false;
   if (f.result === "LOSS" && !(t.trades > 0 && t.net < 0)) return false;
@@ -822,7 +857,9 @@ export function BacktestRuns() {
         run.symbols,
         bot,
         Boolean(run.settings.as_armed),
-        Boolean(run.settings.play_handoffs)
+        Boolean(run.settings.play_handoffs),
+        // Run again keeps where the run came from (its source tag).
+        (typeof run.settings.origin === "string" ? run.settings.origin : "replay") as ReplayOrigin
       )
       .then(() => {
         setError(null);
@@ -851,7 +888,11 @@ export function BacktestRuns() {
         basis: backtestBasisNow(),
         marginPct: wallet?.margin_pct ?? 20,
         strategy: strategyLabel(full.settings),
-        settings: [...SETTING_ROWS.map(([label, value]) => [label, value(full.settings)] as [string, string]), ...bot5Rows(full.settings)],
+        settings: [
+          ["Started from", runSourceText(full)] as [string, string],
+          ...SETTING_ROWS.map(([label, value]) => [label, value(full.settings)] as [string, string]),
+          ...bot5Rows(full.settings),
+        ],
         reasons: REASON_SHORT,
         pickRule: pickRuleRows(full),
         pickLog: pickLogRows(full.settings),
@@ -989,7 +1030,13 @@ export function BacktestRuns() {
         </p>
       ) : (
         <>
-        <RunFilterBar filters={filters} onChange={setFilters} shown={shownRuns.length} total={runs.length} />
+        <RunFilterBar
+          filters={filters}
+          onChange={setFilters}
+          shown={shownRuns.length}
+          total={runs.length}
+          sources={Array.from(new Set(runs.map((r) => runSourceOf(r).label))).sort()}
+        />
         {/* Pinned under the blotter bar, so runs far down the list can be ticked and compared without scrolling back. */}
         <div
           className="z-10 flex flex-wrap items-center gap-2 border-b border-white/10 bg-[#151921] px-4 py-2 text-xs md:sticky"
@@ -1110,6 +1157,9 @@ run: <td className="px-2 py-2 align-top">
                           {run.status === "RUNNING" ? <Badge color="violet">Playing</Badge> : null}
                           {run.status === "STOPPED" ? <Badge color="slate">Stopped</Badge> : null}
                           {run.status === "INTERRUPTED" ? <Badge color="amber">Cut short</Badge> : null}
+                        </div>
+                        <div className="mt-0.5">
+                          <RunSourceTag run={run} />
                         </div>
                         <div className="text-slate-400">
                           {shortDate(run.start_date)}
@@ -1281,11 +1331,14 @@ function RunFilterBar({
   onChange,
   shown,
   total,
+  sources,
 }: {
   filters: RunFilters;
   onChange: (next: RunFilters) => void;
   shown: number;
   total: number;
+  /** The source tags of the runs listed, for the "Started from" menu. */
+  sources: string[];
 }) {
   const set = (key: keyof RunFilters, value: string) => onChange({ ...filters, [key]: value });
   const box =
@@ -1310,6 +1363,19 @@ function RunFilterBar({
           {[1, 2, 3, 4, 5].map((n) => (
             <option key={n} value={String(n)}>
               Bot {n}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-slate-400">
+        <span className="flex items-center gap-1">
+          Started from <NewTag id="bt-run-source" />
+        </span>
+        <select value={filters.source ?? "ALL"} onChange={(e) => set("source", e.target.value)} className={box}>
+          <option value="ALL">Anywhere</option>
+          {sources.map((label) => (
+            <option key={label} value={label}>
+              {label}
             </option>
           ))}
         </select>
@@ -1491,7 +1557,10 @@ function RunDetailBody({
                 : "")}
           </span>
         </h3>
-        <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>P&amp;L {signed(t.net)}</span>
+        <span className="flex items-center gap-2">
+          {run.id > 0 ? <RunSourceTag run={run} /> : null}
+          <span className={clsx("font-mono text-sm font-semibold", pnlTone(t.net))}>P&amp;L {signed(t.net)}</span>
+        </span>
       </div>
       {scalpPickOf(run.settings) ? <PickList pick={scalpPickOf(run.settings)!} stocks={stocks} swings={run.day_swings} /> : null}
       {run.fast_move ? (

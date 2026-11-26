@@ -350,7 +350,8 @@ export function ReplayBar({ info, live, armedCount, onChanged, bot = 1, botName,
         undefined,
         bot,
         asArmed,
-        playHandoffs
+        playHandoffs,
+        "replay"
       )
     );
   };

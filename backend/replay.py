@@ -59,6 +59,7 @@ import server_role
 import strategy_lab
 import auto_arm
 import saved_picks
+import run_source
 from scalp_picks import PickRule, picks_for_day, resumable as pick_resumable, rule_from_dict
 
 SPEEDS = (1, 10, 60, 300)
@@ -1105,6 +1106,8 @@ def _run_dict(run: ReplayRun, trades: list[TradeLog], with_days: bool) -> dict:
         "start_time": run.start_time,
         "symbols": [s for s in (run.symbols or "").split(",") if s],
         "settings": _settings_for_page(run.settings),
+        # Where the run came from (run_source.py: Auto-arm · Most active, Strategy lab, ...; display only).
+        "source": run_source.describe(_run_settings(run)),
         "status": run.status,
         "days_total": run.days_total,
         "days_done": run.days_done,

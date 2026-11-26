@@ -213,7 +213,7 @@ export function StrategyLab({ armed }: { armed: Map<string, string[]> }) {
         if (!window.confirm(`Bot ${target}'s replay is already running. Stop it and start this one instead?`)) return;
       }
       await smaApi.saveConfigOn(target, result.settings as Partial<SmaConfig>);
-      await smaApi.replayStart(job.first, "09:15", 0, job.last, job.symbols, target, false, true);
+      await smaApi.replayStart(job.first, "09:15", 0, job.last, job.symbols, target, false, true, "strategy_lab");
       setNote({ ok: true, text: `Saved on Bot ${target} and started the replay. Its trades build up in the terminal's Backtests tab; compare them with the lab's ${result.totals.trades} trade(s) and ${money(result.totals.gross, true)}.` });
     } catch (e: unknown) {
       setNote({ ok: false, text: e instanceof Error ? e.message : "Could not start the replay" });

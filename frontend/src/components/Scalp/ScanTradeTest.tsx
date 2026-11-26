@@ -74,7 +74,7 @@ export function ScanTradeTestView() {
     setNote(null);
     setError(null);
     try {
-      await smaApi.replayStart(data.day, data.rows[0].entry_at, 0, undefined, data.rows.map((r) => r.symbol), bot);
+      await smaApi.replayStart(data.day, data.rows[0].entry_at, 0, undefined, data.rows.map((r) => r.symbol), bot, false, true, "scan_trade");
       setNote(`Bot ${bot}'s own strategy is now replaying these ${data.rows.length} stocks from ${data.rows[0].entry_at} on ${data.day}. Its result appears in the terminal's Backtests tab (practice money).`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start the bot's replay");

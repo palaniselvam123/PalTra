@@ -410,7 +410,7 @@ async def start_backtest(args: dict) -> Any:
     current = await _call("GET", "/api/replay", params={"bot": bot})
     if current.get("status") in REPLAY_BUSY:
         raise ToolError(f"Bot {bot} already has a backtest {current['status'].lower()}. Wait for it to finish.")
-    body = {"bot": bot, "date": date, "end_date": args.get("end_date") or None, "start": "09:15",
+    body = {"bot": bot, "origin": "mcp", "date": date, "end_date": args.get("end_date") or None, "start": "09:15",
             "speed": BACKTEST_SPEED, "symbols": symbols}
     info = await _call("POST", "/api/replay/start", json=body)
     log.info("mcp.start_backtest bot=%s date=%s end=%s symbols=%s", bot, date, body["end_date"], len(symbols or []))
