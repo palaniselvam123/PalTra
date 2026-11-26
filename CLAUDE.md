@@ -3094,6 +3094,10 @@ No credentials are needed. The desk starts on the simulated feed.
     internal registry address (on 11 Nov every deploy failed for over an hour with "failed to push …
     `_api.internal:5000` … dial tcp [fdaa::3]:5000: connect: connection refused" while Fly's status page
     was green). Each job's limit is 30 minutes.
+  - **second desk** (another Fly account, `fly.desk2.toml`, setup in `DESK2.md`): "Run workflow" with
+    `target: desk2` (same `commit` / `market_hours_ok` rules) deploys only it (`deploy-desk2`), to the app
+    named by the repo variable `DESK2_APP` (`scripts/fly_deploy.sh` passes `FLY_APP` as `-a`) with the
+    secret `FLY_DESK2_API_TOKEN`; its own volume, database, keys and secrets, boots PAPER
   - it needs the repo secret `FLY_API_TOKEN`
     (`fly tokens create deploy -a paltra`); the deploy job runs in the
     `production` environment, which GitHub creates on first use (add required

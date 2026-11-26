@@ -10,6 +10,9 @@ name: Test and deploy
 #    "commit" to ship exactly that one (blank = the latest main). Inside NSE market hours
 #    (09:00-15:45 IST, Mon-Fri) the main desk is deployed only with "market_hours_ok" ticked,
 #    because a restart drops the bots' in-memory state mid-session.
+# 3. "Run workflow" with target "desk2" deploys the same way (commit, market_hours_ok) to the SECOND DESK
+#    on its own Fly account (fly.desk2.toml, DESK2.md): repo variable DESK2_APP = its app name, secret
+#    FLY_DESK2_API_TOKEN = its deploy token. The main desk and the scanner are not touched.
 # Tests never place orders: they use fake brokers, PAPER mode, and no Groww credentials exist here.
 
 on:
@@ -19,16 +22,16 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Where to deploy: backtest = the backtest server; main-desk = the main desk (paltra) and the scanner"
+        description: "Where to deploy: backtest = the backtest server; main-desk = the main desk (paltra) and the scanner; desk2 = the second desk (other Fly account)"
         type: choice
-        options: [backtest, main-desk]
+        options: [backtest, main-desk, desk2]
         default: backtest
       commit:
         description: "Commit to deploy (the version the backtest server shows). Blank = the latest main."
         type: string
         default: ""
       market_hours_ok:
-        description: "main-desk only: allow the deploy inside NSE market hours (09:00-15:45 IST). The desk restarts for about a minute."
+        description: "main-desk / desk2: allow the deploy inside NSE market hours (09:00-15:45 IST). The desk restarts for about a minute."
         type: boolean
         default: false
 
@@ -173,6 +176,7 @@ jobs:
     outputs:
       backtest: ${{ steps.check.outputs.backtest }}
       desk: ${{ steps.check.outputs.desk }}
+      desk2: ${{ steps.check.outputs.desk2 }}
       version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v4
@@ -184,6 +188,7 @@ jobs:
           TARGET: ${{ inputs.target || 'backtest' }}
           MARKET_OK: ${{ inputs.market_hours_ok || false }}
           DEPLOY_BACKTEST: ${{ vars.DEPLOY_BACKTEST }}
+          DESK2_APP: ${{ vars.DESK2_APP }}
         run: |
           version=$(git rev-parse HEAD)
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -196,7 +201,24 @@ jobs:
           fi
           backtest=false
           desk=false
-          if [ "$EVENT" = "workflow_dispatch" ] && [ "$TARGET" = "main-desk" ]; then
+          desk2=false
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$TARGET" = "desk2" ]; then
+            if [ -z "$DESK2_APP" ]; then
+              msg="Second desk NOT deployed: set the repo variable DESK2_APP to its Fly app name and the secret FLY_DESK2_API_TOKEN (see DESK2.md)."
+              echo "::error title=Second desk not set up::$msg"
+              echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            if [ "$in_hours" = true ] && [ "$MARKET_OK" != "true" ]; then
+              msg="Second desk NOT deployed: $clock is inside NSE market hours (09:00-15:45 IST, Mon-Fri). Run again after 15:45, or tick market_hours_ok to deploy now (that desk restarts for about a minute)."
+              echo "::error title=Second desk deploy refused (market hours)::$msg"
+              echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            desk2=true
+            msg="Deploying ${version:0:7} to the SECOND DESK ($DESK2_APP) at $clock."
+            echo "::notice title=Second desk deploy::$msg"
+          elif [ "$EVENT" = "workflow_dispatch" ] && [ "$TARGET" = "main-desk" ]; then
             if [ "$in_hours" = true ] && [ "$MARKET_OK" != "true" ]; then
               msg="Main desk NOT deployed: $clock is inside NSE market hours (09:00-15:45 IST, Mon-Fri). Run again after 15:45, or tick market_hours_ok to deploy now (the desk restarts for about a minute)."
               echo "::error title=Main desk deploy refused (market hours)::$msg"
@@ -222,6 +244,7 @@ jobs:
           fi
           echo "backtest=$backtest" >> "$GITHUB_OUTPUT"
           echo "desk=$desk" >> "$GITHUB_OUTPUT"
+          echo "desk2=$desk2" >> "$GITHUB_OUTPUT"
           echo "$msg" >> "$GITHUB_STEP_SUMMARY"
 
   # The backtest server (fly.backtest.toml, BACKTEST.md): every tested push to main lands here first.
@@ -312,4 +335,33 @@ jobs:
         run: scripts/fly_deploy.sh fly.scanner.toml "Scanner"
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_SCANNER_API_TOKEN }}
+          VERSION: ${{ needs.release-gate.outputs.version }}
+
+  # The second desk (fly.desk2.toml, DESK2.md): a full desk on its own Fly account, only by hand,
+  # Run workflow → target desk2. Repo variable DESK2_APP = its app name; secret FLY_DESK2_API_TOKEN
+  # (`fly tokens create deploy -a <that name>`, made while logged in to the new account).
+  deploy-desk2:
+    name: Deploy second desk to Fly.io
+    needs: [backend-tests, frontend-build, release-gate]
+    if: ${{ !cancelled() && needs.release-gate.result == 'success' && needs.release-gate.outputs.desk2 == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    concurrency:
+      group: fly-deploy-desk2
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-gate.outputs.version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-out
+          path: frontend/out
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: flyctl deploy (second desk; built on the runner if Fly's builder fails)
+        run: scripts/fly_deploy.sh fly.desk2.toml "Second desk"
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_DESK2_API_TOKEN }}
+          FLY_APP: ${{ vars.DESK2_APP }}
           VERSION: ${{ needs.release-gate.outputs.version }}

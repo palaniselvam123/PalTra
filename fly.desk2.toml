@@ -1,0 +1,45 @@
+# The second desk: a full copy of the main desk (desk + SMA terminal + bots) on its own Fly account,
+# with its own volume, database, Groww key, settings and secrets. Same image as `paltra`. Setup: DESK2.md.
+#
+# CI deploys it with Run workflow → target desk2 (.github/workflows/test-and-deploy.yml). The app name
+# below is a placeholder: CI passes the repo variable DESK2_APP with -a, so the name you created on
+# the new account is used. By hand: fly deploy -c fly.desk2.toml -a <that name>
+
+app = 'paltra2'
+primary_region = 'sin'
+# Time to ring the owner and send the WhatsApp alert before a deploy stops the app.
+kill_timeout = '15s'
+
+[build]
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+# Fly's default limit is 25 requests at once per machine; the pages poll many endpoints
+# (state, chart, replay, scans) and a few open tabs passed it, so Fly's proxy queued or
+# refused requests ("Can't reach the trading engine"). One uvicorn process serves them all.
+[http_service.concurrency]
+  type = 'requests'
+  soft_limit = 200
+  hard_limit = 250
+
+[[mounts]]
+  source = 'data'
+  destination = '/data'
+
+# One dedicated core. The desk, both SMA bots, a replay and every API call
+# share one Python event loop, so extra shared vCPUs do not help; a shared
+# CPU's quota throttles a fast replay until the page cannot reach the engine.
+# Size the machine here: a deploy applies this section and undoes any resize
+# made in the Fly dashboard.
+# Performance CPUs are dedicated (never throttled in busy market hours), which the bots' single event loop
+# needs more than extra shared cores; 4 GB leaves room for five bots and their candle tapes.
+[[vm]]
+  cpu_kind = 'performance'
+  cpus = 2
+  memory_mb = 4096
