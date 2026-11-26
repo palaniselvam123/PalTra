@@ -1976,7 +1976,13 @@ spinning top), body and range) / Matched / Call columns
   button) every other strategy field goes back to its default (`strategy_defaults`) and the lab's numbers are put on
   (`numbers_for_bot`: SMAs, ATR, quantity, candle, cut-off / square-off, filter ranges, TSL / VWAP / decel numbers,
   `entry_mode` SMA), so the replay trades only what the lab tested. A backtest already playing on that bot is stopped only
-  with `stop_replay` (the page asks), else 409. `recommend` (`POST …/recommend`, `judge` `NET` | `ROC`): every rule toggled one at a time against the choice ("what
+  with `stop_replay` (the page asks), else 409. **Newer Settings rules** (owner's request): entry checks `fresh`, `or_volume` / `or_vwap` / `or_spread` / `or_break`,
+  `flow` (executed volume) and `small_colour`; exits `exit_candle` (the bot's exit candle, else the next size up,
+  `EXIT_CANDLE_DEFAULTS`) and `flow_exit`; stops `SMART` (room at entry, no live re-size) and `PLAN` (ATR + staged plan);
+  targets `atr` (the bot's multiple, else `DEFAULT_ATR_TARGET` 3), `day_level` and `net`, each read through the bot's own
+  module (`_extra_checks`, `_exit_candle_hit`, `_flow_exit_hit`, `_smart_stop`, `_plan_stop`, `_net_target`) and written
+  back by `settings_for_choice`; a run read before has no answer for them (`missing_rules`, result `missing`): greyed on
+  the page ("read the days again") and skipped by `recommend`. `recommend` (`POST …/recommend`, `judge` `NET` | `ROC`): every rule toggled one at a time against the choice ("what
   each rule adds", `delta_net`, and the capital it needs `capital_changed` = peak margin with the return on it `roc_changed` = net ÷ that, %) and a greedy climb (`SEARCH_STEPS`, `SEARCH_MIN_TRADES`) to the best found, judged by net or by return on capital (`_score`); the page shows it above the rule ticks (`StrategyLab.BestFound`: Judge by, default return on capital, Use it).
   `choice_from_cfg` is the bot's own switches, the run's starting choice. `GET /api/strategy-lab` (runs, `rules` with
   labels), `GET /api/strategy-lab/{id}` (the run's choice evaluated), `POST /api/strategy-lab/stop`, `DELETE

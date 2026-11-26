@@ -72,6 +72,8 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
   const latest = useRef(0);
 
   const rules: StrategyLabRules | null = view?.rules ?? null;
+  // Rules this run was read without (older runs): greyed and left out of "What does each rule add?".
+  const missingRules = useMemo(() => new Set(result?.missing ?? []), [result]);
 
   const loadView = useCallback(async () => {
     try {
@@ -420,16 +422,29 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
             onFind={recommend}
             onUse={useBest}
           />
+          {missingRules.size ? (
+            <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-200 ring-1 ring-inset ring-amber-400/30">
+              This run was read before the lab knew {missingRules.size} of its rules (greyed below), so they are left out of
+              &quot;What does each rule add?&quot;. Press &quot;Read the days&quot; again with the same stocks and days to
+              include them (the candles are cached, so it is quick).
+            </p>
+          ) : null}
           <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
-            <RuleBox title="Checks before entering" hint="A trade is taken only when every ticked check agrees at the signal candle." rules={rules.entries} picked={choice.entries} onToggle={(n) => toggle("entries", n)} onAll={() => setAll("entries", rules.entries.map((r) => r.name))} onNone={() => setAll("entries", [])} />
-            <RuleBox title="Exits" hint="The trade ends at the earliest ticked exit, the stop, a target or the square-off." rules={rules.exits} picked={choice.exits} onToggle={(n) => toggle("exits", n)} onAll={() => setAll("exits", rules.exits.map((r) => r.name))} onNone={() => setAll("exits", [])} />
+            <RuleBox title="Checks before entering" hint="A trade is taken only when every ticked check agrees at the signal candle." kind="entry" missing={missingRules} rules={rules.entries} picked={choice.entries} onToggle={(n) => toggle("entries", n)} onAll={() => setAll("entries", rules.entries.map((r) => r.name))} onNone={() => setAll("entries", [])} />
+            <RuleBox title="Exits" hint="The trade ends at the earliest ticked exit, the stop, a target or the square-off." kind="exit" missing={missingRules} rules={rules.exits} picked={choice.exits} onToggle={(n) => toggle("exits", n)} onAll={() => setAll("exits", rules.exits.map((r) => r.name))} onNone={() => setAll("exits", [])} />
             <div className="space-y-3 rounded-lg border border-slate-800 bg-base/60 p-3 text-xs">
               <div>
                 <div className="mb-1 font-semibold text-slate-200">Stop</div>
                 {rules.stops.map((r) => (
                   <label key={r.name} className="flex items-center gap-2 py-0.5 text-slate-300">
-                    <input type="radio" name="lab-stop" checked={choice.stop === r.name} onChange={() => change({ ...choice, stop: r.name as StrategyLabStop })} />
-                    {r.label}
+                    <input
+                      type="radio"
+                      name="lab-stop"
+                      checked={choice.stop === r.name}
+                      disabled={missingRules.has(`stop:${r.name}`) && choice.stop !== r.name}
+                      onChange={() => change({ ...choice, stop: r.name as StrategyLabStop })}
+                    />
+                    <RuleLabel id={`stop:${r.name}`} label={r.label} missing={missingRules} />
                   </label>
                 ))}
               </div>
@@ -437,8 +452,13 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                 <div className="mb-1 font-semibold text-slate-200">Targets</div>
                 {rules.targets.map((r) => (
                   <label key={r.name} className="flex items-center gap-2 py-0.5 text-slate-300">
-                    <input type="checkbox" checked={choice.targets.includes(r.name)} onChange={() => toggle("targets", r.name)} />
-                    {r.label}
+                    <input
+                      type="checkbox"
+                      checked={choice.targets.includes(r.name)}
+                      disabled={missingRules.has(`target:${r.name}`) && !choice.targets.includes(r.name)}
+                      onChange={() => toggle("targets", r.name)}
+                    />
+                    <RuleLabel id={`target:${r.name}`} label={r.label} missing={missingRules} />
                   </label>
                 ))}
               </div>
@@ -743,9 +763,34 @@ function BestFound({
   );
 }
 
+/** Rules added to the lab from the Settings pages (fresh trend, opening range, executed volume, smaller candles, exit
+ * candle, smart stop, staged plan, ATR / day level / safety-net targets): shown with a New tag. */
+const NEWER_RULES = new Set([
+  "entry:fresh", "entry:or_volume", "entry:or_vwap", "entry:or_spread", "entry:or_break", "entry:flow", "entry:small_colour",
+  "exit:exit_candle", "exit:flow_exit", "stop:SMART", "stop:PLAN", "target:atr", "target:day_level", "target:net",
+]);
+
+/** A rule's label, greyed with a note when the run was read before the lab knew it (no answer in its trades). */
+function RuleLabel({ id, label, missing }: { id: string; label: string; missing: Set<string> }) {
+  return (
+    <span className={missing.has(id) ? "text-slate-500" : undefined}>
+      {label}
+      {NEWER_RULES.has(id) ? (
+        <>
+          {" "}
+          <NewTag id="lab-more-rules" link={false} />
+        </>
+      ) : null}
+      {missing.has(id) ? <span className="text-amber-300/90"> · read the days again</span> : null}
+    </span>
+  );
+}
+
 function RuleBox({
   title,
   hint,
+  kind,
+  missing,
   rules,
   picked,
   onToggle,
@@ -754,6 +799,8 @@ function RuleBox({
 }: {
   title: string;
   hint: string;
+  kind: "entry" | "exit";
+  missing: Set<string>;
   rules: { name: string; label: string }[];
   picked: string[];
   onToggle: (name: string) => void;
@@ -779,8 +826,13 @@ function RuleBox({
       <div className="grid gap-x-3 sm:grid-cols-2">
         {rules.map((r) => (
           <label key={r.name} className="flex items-center gap-2 py-0.5 text-slate-300">
-            <input type="checkbox" checked={picked.includes(r.name)} onChange={() => onToggle(r.name)} />
-            {r.label}
+            <input
+              type="checkbox"
+              checked={picked.includes(r.name)}
+              disabled={missing.has(`${kind}:${r.name}`) && !picked.includes(r.name)}
+              onChange={() => onToggle(r.name)}
+            />
+            <RuleLabel id={`${kind}:${r.name}`} label={r.label} missing={missing} />
           </label>
         ))}
       </div>
