@@ -2876,7 +2876,7 @@ spinning top), body and range) / Matched / Call columns
   thread's stack to stderr), then `STALL over: …` with how long it lasted. Started
   first in `boot_engine`; `GET /api/stall` reports it. Search the Fly log for `STALL`.
 - `scripts/health_watch.sh`, `.github/workflows/health-watch.yml` – outside watcher
-  for the owner's phone. GitHub Actions asks `https://paltra.fly.dev/api/health/deep`
+  for the owner's phone. GitHub Actions asks `https://pritra.fly.dev/api/health/deep` (repo variable `HEALTH_URL`)
   every 5 minutes between 03:00 and 10:55 UTC (08:30-16:25 IST) on weekdays and, when
   the answer is not 200 for two runs in a row and the time is between 09:10 and 15:40
   IST, rings the owner through CallMeBot Telegram and, when the repo secrets
@@ -3098,6 +3098,11 @@ No credentials are needed. The desk starts on the simulated feed.
     `target: desk2` (same `commit` / `market_hours_ok` rules) deploys only it (`deploy-desk2`), to the app
     named by the repo variable `DESK2_APP` (`scripts/fly_deploy.sh` passes `FLY_APP` as `-a`) with the
     secret `FLY_DESK2_API_TOKEN`; its own volume, database, keys and secrets, boots PAPER
+  - **moving off the old Fly account** (owner's plan: close the account running `paltra`, `paltra-backtest`
+    and `paltra-scanner`; `pritra` becomes the desk): Run workflow's default target is `desk2`; with the repo
+    variables `DEPLOY_BACKTEST` / `DEPLOY_SCANNER` false a merge deploys nothing (the release gate's note says
+    so); the health watcher reads `https://pritra.fly.dev/api/health/deep` (`scripts/health_watch.sh`; the repo
+    variable `HEALTH_URL` overrides it). Steps in `DESK2.md`, "Closing the old account"
   - it needs the repo secret `FLY_API_TOKEN`
     (`fly tokens create deploy -a paltra`); the deploy job runs in the
     `production` environment, which GitHub creates on first use (add required

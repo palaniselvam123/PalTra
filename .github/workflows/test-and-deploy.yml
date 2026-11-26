@@ -10,9 +10,12 @@ name: Test and deploy
 #    "commit" to ship exactly that one (blank = the latest main). Inside NSE market hours
 #    (09:00-15:45 IST, Mon-Fri) the main desk is deployed only with "market_hours_ok" ticked,
 #    because a restart drops the bots' in-memory state mid-session.
-# 3. "Run workflow" with target "desk2" deploys the same way (commit, market_hours_ok) to the SECOND DESK
-#    on its own Fly account (fly.desk2.toml, DESK2.md): repo variable DESK2_APP = its app name, secret
-#    FLY_DESK2_API_TOKEN = its deploy token. The main desk and the scanner are not touched.
+# 3. "Run workflow" with target "desk2" deploys the same way (commit, market_hours_ok) to the desk on the
+#    NEW Fly account (pritra, fly.desk2.toml, DESK2.md): repo variable DESK2_APP = its app name, secret
+#    FLY_DESK2_API_TOKEN = its deploy token. paltra and the scanner are not touched.
+# Moving off the old Fly account (paltra, paltra-backtest, paltra-scanner): set the repo variables
+# DEPLOY_BACKTEST and DEPLOY_SCANNER to false, so a merge deploys nothing, and deploy with target desk2
+# (the default). The backtest / main-desk targets need the old account and fail without it.
 # Tests never place orders: they use fake brokers, PAPER mode, and no Groww credentials exist here.
 
 on:
@@ -22,10 +25,10 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Where to deploy: backtest = the backtest server; main-desk = the main desk (paltra) and the scanner; desk2 = the second desk (other Fly account)"
+        description: "Where to deploy: desk2 = pritra (the desk on the new Fly account); backtest = the backtest server and main-desk = paltra and the scanner (old account)"
         type: choice
-        options: [backtest, main-desk, desk2]
-        default: backtest
+        options: [desk2, backtest, main-desk]
+        default: desk2
       commit:
         description: "Commit to deploy (the version the backtest server shows). Blank = the latest main."
         type: string
@@ -234,11 +237,11 @@ jobs:
             fi
           else
             if [ "$DEPLOY_BACKTEST" != "true" ]; then
-              msg="Nothing deployed: new versions go to the backtest server first, and the repo variable DEPLOY_BACKTEST is not true. Set it, or deploy with Run workflow → target main-desk."
+              msg="Nothing deployed by this merge (the repo variable DEPLOY_BACKTEST is not true). Deploy it with Run workflow → target desk2 (pritra)."
               echo "::warning title=No backtest server::$msg"
             else
               backtest=true
-              msg="Deploying ${version:0:7} to the BACKTEST SERVER at $clock. Check it there, then Run workflow → target main-desk (commit ${version:0:7}) to ship it to the main desk."
+              msg="Deploying ${version:0:7} to the BACKTEST SERVER at $clock. Check it there, then Run workflow → target main-desk (commit ${version:0:7}) to ship it to the main desk, or target desk2 for pritra."
               echo "::notice title=Backtest server deploy::$msg"
             fi
           fi

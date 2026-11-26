@@ -2,8 +2,8 @@ name: Health watch
 
 # Rings the owner on Telegram (CallMeBot) when PalTra is not working during NSE
 # market hours. It runs on GitHub's machines, not on Fly, so a frozen or crashed
-# app cannot silence it. It only reads https://paltra.fly.dev/api/health/deep and
-# never touches an order. Set the repo secret CALLMEBOT_USER (see
+# app cannot silence it. It only reads https://pritra.fly.dev/api/health/deep (the desk on the
+# new Fly account; the repo variable HEALTH_URL overrides it) and never touches an order. Set the repo secret CALLMEBOT_USER (see
 # scripts/health_watch.sh). "Run workflow" with test_call ticked rings once to
 # check the setup.
 #
@@ -58,6 +58,7 @@ jobs:
       - name: Ask the app
         env:
           CALLMEBOT_USER: ${{ secrets.CALLMEBOT_USER }}
+          HEALTH_URL: ${{ vars.HEALTH_URL }}
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
