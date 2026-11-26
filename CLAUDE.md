@@ -499,7 +499,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   `GET /api/replay/compare/stock?runs=&symbol=&day=` → `stock_day`; `components/Terminal/CompareDetail.tsx`,
   `useCompareDetail` / `CompareDetailTop` / `CompareDetailRest`): every closed trade of each run (`load`; entry / exit time
   and reason, minutes in the trade, the buyers % of the latest saved Most active read before its entry,
-  `pressure_exit.read_before`), per run `stats` (winners / losers, stocks up / down, average winner / loser, time in a
+  `add_reads`: day by day, each stock-day's reads once, since the saved-scan cache holds only a few days), per run `stats` (winners / losers, stocks up / down, average winner / loser, time in a
   trade, buys vs sells, by entry / exit reason), `overlap` of each run with the base (`match`: the same stock, day and side
   entered within `MATCH_MIN` 5 minutes = the same trade; overlap rate, same entry but a different exit, the same moment on
   the other side, trades and stocks only one run took, P&L per bucket, the biggest differences listed) and plain-words

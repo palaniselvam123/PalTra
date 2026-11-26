@@ -99,3 +99,33 @@ def test_detail_and_stock_day_read_the_trade_book(tmp_path, monkeypatch):
     with pytest.raises(ValueError):
         bd.detail([7])
     database.reset_engine()
+
+
+def test_reads_are_fetched_once_per_stock_day_and_the_latest_before_each_entry_is_taken(monkeypatch):
+    import pressure_exit
+
+    ist = dt.timezone(dt.timedelta(hours=5, minutes=30))
+    day1 = dt.datetime(2026, 11, 2, 0, 0, tzinfo=ist).timestamp()
+    day2 = dt.datetime(2026, 11, 3, 0, 0, tzinfo=ist).timestamp()
+    calls: list[tuple[str, float]] = []
+
+    def series(symbol, start, end):
+        calls.append((symbol, start))
+        base = start + 10 * 3600  # 10:00
+        return [{"time": base, "buy_pct": 60.0, "rvol": 1.1, "value_cr": 5.0},
+                {"time": base + 1800, "buy_pct": 70.0, "rvol": 1.5, "value_cr": 9.0}]
+
+    monkeypatch.setattr(pressure_exit, "series", series)
+    # Two runs, each going through both days in its own order (the order that used to unpack every day per run).
+    trades = [
+        {"symbol": "TCS", "entry_ts": day1 + 10 * 3600 + 600},   # 10:10: the 10:00 read
+        {"symbol": "TCS", "entry_ts": day2 + 10 * 3600 + 2400},  # 10:40: the 10:30 read
+        {"symbol": "TCS", "entry_ts": day1 + 9.5 * 3600},        # 09:30: no read yet
+        {"symbol": "TCS", "entry_ts": day2 + 10 * 3600 + 1800},  # 10:30 exactly: that read
+    ]
+    bd.add_reads(trades)
+    assert sorted(calls) == [("TCS", day1), ("TCS", day2)]  # once per stock and day
+    assert trades[0]["buy_pct"] == 60.0 and trades[0]["read_at"] == "10:00"
+    assert trades[1]["buy_pct"] == 70.0 and trades[1]["rvol"] == 1.5 and trades[1]["read_at"] == "10:30"
+    assert trades[2].get("buy_pct") is None
+    assert trades[3]["buy_pct"] == 70.0
