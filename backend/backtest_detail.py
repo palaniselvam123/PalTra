@@ -11,6 +11,7 @@ No order path; nothing in the strategy reads it.
 """
 from __future__ import annotations
 
+import bisect
 import datetime as dt
 import json
 import statistics
@@ -107,11 +108,27 @@ def add_reads(trades: list[dict]) -> None:
         import pressure_exit
     except Exception:  # noqa: BLE001
         return
-    for t in trades:
-        try:
-            read = pressure_exit.read_before(t["symbol"], float(t["entry_ts"]))
-        except Exception:  # noqa: BLE001
-            read = None
+    # Day by day (the saved-scan cache holds only a few days, and the trades come run after run, so walking them in
+    # their own order unpacked every day's scans again for each run: a 3-run, 27-day comparison ran past the page's
+    # minute), each stock's day of reads fetched once and the latest at or before each entry picked from it.
+    points: dict[tuple[str, str], tuple[list[float], list[dict]]] = {}
+
+    def day_of(t: dict) -> str:
+        return dt.datetime.fromtimestamp(float(t["entry_ts"]), IST).date().isoformat()
+
+    for t in sorted(trades, key=lambda t: float(t["entry_ts"])):
+        day = day_of(t)
+        key = (t["symbol"], day)
+        if key not in points:
+            start = dt.datetime.combine(dt.date.fromisoformat(day), dt.time(0, 0), tzinfo=IST).timestamp()
+            try:
+                found = pressure_exit.series(t["symbol"], start, start + 86_399)
+            except Exception:  # noqa: BLE001
+                found = []
+            points[key] = ([float(p["time"]) for p in found], found)
+        times, found = points[key]
+        at = bisect.bisect_right(times, float(t["entry_ts"]))
+        read = found[at - 1] if at else None
         if read:
             t["buy_pct"] = read.get("buy_pct")
             t["rvol"] = read.get("rvol")

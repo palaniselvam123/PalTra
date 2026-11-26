@@ -1226,7 +1226,13 @@ def run_market_reads(run_id: int) -> dict[str, dict] | None:
     with session_factory()() as db:
         if db.get(ReplayRun, run_id) is None:
             return None
-        rows = db.query(TradeLog.id, TradeLog.symbol, TradeLog.entry_time).filter(TradeLog.run_id == run_id).all()
+        # Oldest first, so each day's saved scans are unpacked once (the cache holds only a few days).
+        rows = (
+            db.query(TradeLog.id, TradeLog.symbol, TradeLog.entry_time)
+            .filter(TradeLog.run_id == run_id)
+            .order_by(TradeLog.entry_time, TradeLog.id)
+            .all()
+        )
     out: dict[str, dict] = {}
     for trade_id, symbol, entry_time in rows:
         if not symbol or entry_time is None:
