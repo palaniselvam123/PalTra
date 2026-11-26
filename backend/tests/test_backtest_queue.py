@@ -25,7 +25,8 @@ def env(tmp_path, monkeypatch):
     runs: dict[int, str] = {}
     next_id = [100]
 
-    async def start(body):
+    async def start(body, kind="AUTOARM"):
+        body = {**body, "_kind": kind}
         if body.get("refuse"):
             raise RuntimeError("Switch Bot 2 to PAPER before replaying its settings.")
         started.append(body)
@@ -177,3 +178,25 @@ def test_wake_loop_asks_then_comes_back_at_the_due_time():
 
     asyncio.run(drive())
     assert [c.strftime("%H:%M") for c in calls] == ["15:31", "16:30"]
+
+
+def test_a_replay_run_queues_and_starts_as_a_replay(env):
+    st = bq.load()
+    item = bq.add(st, {"date": "2026-10-14", "end_date": "2026-10-16", "bot": 2, "symbols": ["SBIN", "INFY"],
+                       "start": "09:15", "note": "again from run #7"}, kind="REPLAY")
+    bq.add(st, _body(1))
+    bq.save(st)
+    assert item.label == "Bot 2 · replay · 2026-10-14 → 2026-10-16 · SBIN, INFY · again from run #7"
+    assert bq.load().items[0].kind == "REPLAY" and bq.load().items[1].kind == "AUTOARM"
+    r = bq.Runner()
+    _step(env, r)
+    assert env["started"][0]["_kind"] == "REPLAY" and env["started"][0]["bot"] == 2
+    many = bq.label_for({"date": "2026-10-14", "bot": 1, "symbols": list("ABCDEF")}, "REPLAY")
+    assert many.endswith("A, B, C, D +2")
+
+
+def test_old_queue_file_items_read_as_auto_arm(env, tmp_path):
+    import json
+
+    (tmp_path / "q.json").write_text(json.dumps({"items": [{"id": "x1", "body": _body(1), "label": "old"}]}))
+    assert bq.load().items[0].kind == "AUTOARM"

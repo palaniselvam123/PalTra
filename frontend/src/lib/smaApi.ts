@@ -3154,6 +3154,8 @@ export type QueueItem = {
   body: AutoArmBody;
   label: string;
   origin: "manual" | "schedule";
+  /** AUTOARM = an auto-arm backtest; REPLAY = an ordinary replay (a run queued again from the Backtests tab). */
+  kind?: "AUTOARM" | "REPLAY";
   status: "QUEUED" | "PLAYING" | "DONE" | "FAILED" | "STOPPED" | "INTERRUPTED" | "CANCELLED";
   added_at: number;
   started_at: number | null;
@@ -3184,6 +3186,17 @@ export const smaApi = {
   backtestQueue: () => request<BacktestQueue>("/api/backtest-queue"),
   backtestQueueAdd: (body: AutoArmBody) =>
     request<BacktestQueue & { added: string }>("/api/backtest-queue", { method: "POST", body: JSON.stringify(body) }),
+  /** Queue an ordinary replay (a run's stocks and days again on its bot); plays at full speed when no replay plays. */
+  backtestQueueAddReplay: (body: {
+    date: string;
+    end_date?: string | null;
+    start?: string;
+    symbols?: string[];
+    bot: number;
+    as_armed?: boolean;
+    play_handoffs?: boolean;
+    note?: string;
+  }) => request<BacktestQueue & { added: string }>("/api/backtest-queue/replay", { method: "POST", body: JSON.stringify(body) }),
   backtestQueueRemove: (id: string) => request<BacktestQueue>(`/api/backtest-queue/${encodeURIComponent(id)}`, { method: "DELETE" }),
   backtestQueueClear: () => request<BacktestQueue>("/api/backtest-queue/clear", { method: "POST" }),
   backtestQueuePause: (paused: boolean) =>

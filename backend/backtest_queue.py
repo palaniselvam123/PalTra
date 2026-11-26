@@ -55,6 +55,9 @@ class Item:
     body: dict
     label: str = ""
     origin: str = "manual"  # manual | schedule
+    #: AUTOARM = an auto-arm backtest (AutoArmStart body); REPLAY = an ordinary replay (ReplayStart body), e.g. a run
+    #: queued again from the Backtests tab.
+    kind: str = "AUTOARM"
     status: str = "QUEUED"  # QUEUED | PLAYING | DONE | FAILED | STOPPED | INTERRUPTED | CANCELLED
     added_at: float = 0.0
     started_at: float | None = None
@@ -145,7 +148,22 @@ def save(state: State) -> None:
     tmp.replace(path)
 
 
-def label_for(body: dict) -> str:
+def _days(body: dict) -> str:
+    day, end = body.get("date"), body.get("end_date")
+    return day if not end or end == day else f"{day} → {end}"
+
+
+def label_for(body: dict, kind: str = "AUTOARM") -> str:
+    if kind == "REPLAY":
+        if body.get("as_armed"):
+            what = "as armed live"
+        else:
+            names = [str(x) for x in body.get("symbols") or []]
+            what = ", ".join(names[:4]) or "armed stocks"
+            if len(names) > 4:
+                what += f" +{len(names) - 4}"
+        note = f" · {body['note']}" if body.get("note") else ""
+        return f"Bot {body.get('bot', 1)} · replay · {_days(body)} · {what}{note}"
     src = {"TREND": "Trend quality", "ACTIVE": "Most active", "BOTH": "Trend quality + Most active"}.get(
         str(body.get("source", "BOTH")), "Auto-arm")
     day, end = body.get("date"), body.get("end_date")
@@ -153,13 +171,14 @@ def label_for(body: dict) -> str:
     return f"Bot {body.get('bot', 1)} · {src} auto-arm · {days}"
 
 
-def add(state: State, body: dict, origin: str = "manual") -> Item:
+def add(state: State, body: dict, origin: str = "manual", kind: str = "AUTOARM") -> Item:
     """Raises ValueError when the queue is full or the body has no day."""
     if not body.get("date"):
         raise ValueError("Pick the days to backtest.")
     if sum(1 for i in state.items if i.status == "QUEUED") >= MAX_QUEUED:
         raise ValueError(f"The queue holds at most {MAX_QUEUED} waiting backtests.")
-    item = Item(id=uuid.uuid4().hex[:10], body=dict(body), label=label_for(body), origin=origin, added_at=time.time())
+    item = Item(id=uuid.uuid4().hex[:10], body=dict(body), label=label_for(body, kind), origin=origin, kind=kind,
+                added_at=time.time())
     state.items.append(item)
     return item
 
@@ -200,7 +219,7 @@ def schedule_today(state: State, now: dt.datetime) -> list[Item]:
     return added
 
 
-StartFn = Callable[[dict], Awaitable[None]]
+StartFn = Callable[[dict, str], Awaitable[None]]
 SessionFn = Callable[[int], object]
 RunStatusFn = Callable[[int], "str | None"]
 
@@ -279,7 +298,7 @@ class Runner:
         item.started_at = time.time()
         self.starting = True
         try:
-            await start(dict(item.body))
+            await start(dict(item.body), item.kind)
             item.status, item.note = "PLAYING", ""
             item.run_id = getattr(session_of(int(item.body.get("bot", 1))), "run_id", None)
         except Exception as exc:  # noqa: BLE001 - a refusal fails this item; the queue moves on
