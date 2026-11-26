@@ -3,7 +3,8 @@
 import { ByTrend, HandoffSection } from "./HandoffTrail";
 import { TrendReadings } from "./TrendReadings";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FileDown, LineChart, ListPlus, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
+import { BacktestQueuePanel } from "@/components/Scalp/BacktestQueue";
 import clsx from "clsx";
 import { readReverse } from "@/components/Terminal/ReverseOwnSettings";
 import { inr, smaApi, type DaySwing, type ReplayCapitalPeak, type ReplayDayRow, type ReplayRun, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
@@ -847,6 +848,50 @@ export function BacktestRuns() {
       .finally(() => setStarting(null));
   };
 
+  // The backtest queue (backtest_queue.py): runs queued again play one after another, never next to another replay.
+  const [queueKey, setQueueKey] = useState(0);
+  const [queueing, setQueueing] = useState<string | null>(null);
+  const [queueNote, setQueueNote] = useState<string | null>(null);
+  const queueable = (run: ReplayRun) =>
+    run.id > 0 && !scalpPickOf(run.settings) && (run.symbols.length > 0 || Boolean(run.settings.as_armed));
+  /** Queue runs again: each run's stocks and days on its bot, with the bot's settings as they are when it starts. */
+  const queueRuns = async (list: ReplayRun[], key: string) => {
+    const ok = list.filter(queueable);
+    if (!ok.length) {
+      setError("None of these runs can be queued again (pick runs and live days are not replays of a stock list).");
+      return;
+    }
+    setQueueing(key);
+    setQueueNote(null);
+    let done = 0;
+    try {
+      for (const run of ok) {
+        await smaApi.backtestQueueAddReplay({
+          date: run.start_date,
+          end_date: run.end_date,
+          start: run.start_time || "09:15",
+          symbols: run.symbols,
+          bot: Math.min(4, Number(run.settings.bot ?? 1) || 1),
+          as_armed: Boolean(run.settings.as_armed),
+          play_handoffs: run.settings.play_handoffs == null ? true : Boolean(run.settings.play_handoffs),
+          note: `again from run #${run.id}`,
+        });
+        done += 1;
+      }
+      setError(null);
+      const skipped = list.length - ok.length;
+      setQueueNote(
+        `Queued ${done} run${done === 1 ? "" : "s"}${skipped ? ` (${skipped} skipped: not a stock-list replay)` : ""}. ` +
+          "They play one after another at full speed, each with its bot's settings as they are when it starts.",
+      );
+    } catch (err: unknown) {
+      setError(`${done ? `Queued ${done}, then: ` : ""}${err instanceof Error ? err.message : "Could not queue it"}`);
+    } finally {
+      setQueueing(null);
+      setQueueKey((k) => k + 1);
+    }
+  };
+
   /** One run as a PDF: its settings, totals, day-wise P&L and every trade. */
   const downloadPdf = useCallback(async (run: ReplayRun) => {
     setPrinting(run.id);
@@ -998,6 +1043,10 @@ export function BacktestRuns() {
           {error}
         </p>
       ) : null}
+      {queueNote ? <p className="px-4 pt-2 text-xs text-emerald-300">{queueNote}</p> : null}
+      <div className="px-4">
+        <BacktestQueuePanel bot={1} refreshKey={queueKey} />
+      </div>
       {runs.length === 0 ? (
         <p className="px-4 py-6 text-sm text-slate-400">
           No runs yet. Use “Replay past days” above: pick a From and To date and press Start.
@@ -1041,6 +1090,16 @@ export function BacktestRuns() {
                   </button>
                 ))}
               </span>
+              <button
+                type="button"
+                disabled={queueing !== null}
+                onClick={() => void queueRuns(picked.map((id) => runs.find((x) => x.id === id)).filter((x): x is ReplayRun => Boolean(x)), "ticked")}
+                title="Add the ticked runs to the backtest queue: each run's stocks and days again on its bot, one after another"
+                className="inline-flex min-h-9 items-center gap-1 rounded-md border border-sky-400/50 px-2 font-semibold text-sky-200 hover:bg-sky-500/10 disabled:opacity-60"
+              >
+                {queueing === "ticked" ? <Loader2 size={13} aria-hidden className="animate-spin" /> : <ListPlus size={13} aria-hidden />}
+                Queue ticked <NewTag id="bt-queue-runs" link={false} />
+              </button>
               <button
                 type="button"
                 onClick={() => setPicked([])}
@@ -1224,6 +1283,26 @@ actions: <td className="px-2 py-2 text-right align-top">
                               <RotateCcw size={13} aria-hidden />
                             )}
                             <span className="hidden lg:inline">Run again</span>
+                          </button>
+                        ) : null}
+                        {queueable(run) ? (
+                          <button
+                            type="button"
+                            aria-label={`Queue run ${run.id} again`}
+                            title="Queue: the same stocks and days on the same bot, played when no other replay is playing (bot's settings as they are then)"
+                            disabled={queueing !== null}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void queueRuns([run], `run-${run.id}`);
+                            }}
+                            className="mr-1 inline-flex min-h-9 min-w-9 items-center justify-center gap-1 rounded-md border border-sky-400/40 px-2 text-xs font-semibold text-sky-200 hover:bg-sky-500/10 disabled:opacity-60"
+                          >
+                            {queueing === `run-${run.id}` ? (
+                              <Loader2 size={13} aria-hidden className="animate-spin" />
+                            ) : (
+                              <ListPlus size={13} aria-hidden />
+                            )}
+                            <span className="hidden lg:inline">Queue</span>
                           </button>
                         ) : null}
                         <button

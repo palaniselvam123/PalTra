@@ -3207,8 +3207,13 @@ _backtest_queue_task: asyncio.Task | None = None
 _backtest_wake_task: asyncio.Task | None = None
 
 
-async def _queue_start(body: dict) -> None:
-    """Start one queued auto-arm backtest through the ordinary route (every refusal applies)."""
+async def _queue_start(body: dict, kind: str = "AUTOARM") -> None:
+    """Start one queued backtest through the ordinary route (every refusal applies): an auto-arm backtest, or a plain
+    replay (a run queued again from the Backtests tab)."""
+    if kind == "REPLAY":
+        fields = {k: v for k, v in body.items() if k in ReplayStart.model_fields}
+        await replay_start(ReplayStart(**{**fields, "speed": max(SPEEDS)}))
+        return
     await replay_auto_arm(AutoArmStart(**{**body, "speed": max(SPEEDS)}))
 
 
@@ -3234,6 +3239,13 @@ def _start_backtest_queue() -> None:
 
 class QueueAdd(AutoArmStart):
     pass
+
+
+class QueueReplay(ReplayStart):
+    #: Replays play on bots 1-4 only (each has its own replay player).
+    bot: int = Field(default=1, ge=1, le=4)
+    #: Shown on the queue list, e.g. "again from run #12".
+    note: str = Field(default="", max_length=60)
 
 
 class QueueSchedule(BaseModel):
@@ -3268,6 +3280,28 @@ async def backtest_queue_add(body: QueueAdd):
     state = await asyncio.to_thread(backtest_queue.load)
     try:
         item = backtest_queue.add(state, body.model_dump(exclude={"speed"}))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    await asyncio.to_thread(backtest_queue.save, state)
+    return {"added": item.id, **backtest_queue.view(state)}
+
+
+@app.post("/api/backtest-queue/replay")
+async def backtest_queue_add_replay(body: QueueReplay):
+    """Add one ordinary replay to the queue (the Backtests tab's Queue: a run's stocks and days again on its bot, with the
+    bot's settings as they are when it starts). Plays when no other replay is playing, at full speed. Practice money."""
+    if server_role.is_scanner():
+        raise HTTPException(409, "Backtests run on the main desk or the backtest server, not on the scanner.")
+    try:
+        parse_replay_range(body.date, body.end_date, allow_today=True)
+        parse_start(body.start)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not body.as_armed and not body.symbols:
+        raise HTTPException(400, "Pick the stocks to replay.")
+    state = await asyncio.to_thread(backtest_queue.load)
+    try:
+        item = backtest_queue.add(state, body.model_dump(exclude={"speed"}), kind="REPLAY")
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     await asyncio.to_thread(backtest_queue.save, state)
