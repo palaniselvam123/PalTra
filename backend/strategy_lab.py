@@ -335,6 +335,45 @@ def settings_for_choice(choice: dict, base: dict | None = None) -> dict:
     return out
 
 
+def numbers_for_bot(settings: dict | None, choice: dict) -> dict:
+    """The numbers the lab read (`lab_settings`) as BotConfig fields, so a bot reset to its defaults gets them back and
+    the replay trades the same SMAs, stop distance, filter ranges and quantity the lab tested ("Reset the other settings
+    first"). The run's quantity unless the choice set one."""
+    s = settings or {}
+    if not s:
+        return {}
+    out: dict = {}
+
+    def put(field: str, key: str) -> None:
+        if s.get(key) is not None:
+            out[field] = s[key]
+
+    for key in ("sma_fast", "sma_slow", "atr_period", "atr_multiplier", "candle_minutes", "max_trades_per_stock",
+                "adx_threshold", "volume_min_ratio", "density_min_pct", "rsi_long_min", "rsi_long_max", "rsi_short_min",
+                "rsi_short_max", "bb_period", "bb_std", "bb_min_width_pct", "gap_long_min", "gap_long_max", "gap_short_min",
+                "gap_short_max", "candle_dir_count", "candle_dir_rule", "ema_fast", "ema_slow", "cvd_lookback",
+                "cvd_div_lookback", "st_period", "st_mult", "level_line", "counter_rule", "counter_need_fast",
+                "counter_min_body", "slope_lookback", "slope_turn_pct", "vturn_move_pct", "vturn_turn_pct", "vturn_within",
+                "tsl_mode", "vwap_stop_atr"):
+        put(key, key)
+    put("entry_cutoff_time", "entry_cutoff")
+    put("square_off_time", "square_off")
+    out["qty"] = int(choice.get("qty") or s.get("qty") or 1)
+    macd_len = s.get("macd") or []
+    for field, value in zip(("macd_fast", "macd_slow", "macd_signal"), macd_len):
+        out[field] = value
+    for prefix, key in (("", "tsl_points"), ("", "tsl_pcts"), ("", "tsl_atrs")):
+        vals = s.get(key) or []
+        unit = {"tsl_points": "points", "tsl_pcts": "pct", "tsl_atrs": "atr"}[key]
+        for field, value in zip((f"tsl_sl_{unit}", f"tsl_trail_{unit}", f"tsl_target_{unit}"), vals):
+            out[field] = value
+    for k, v in (s.get("decel") or {}).items():
+        out[f"decel_{k}"] = v
+    # The lab only opens trades on SMA crosses.
+    out["entry_mode"] = "SMA"
+    return out
+
+
 # ----------------------------------------------------------------------------------------------------------------
 # Candle cache
 # ----------------------------------------------------------------------------------------------------------------
@@ -968,6 +1007,12 @@ def clean_choice(raw: dict | None) -> dict:
         qty = max(0, int(raw.get("qty") or 0))
     except (TypeError, ValueError):
         qty = 0
+    # Only these stocks count (the lab's Stocks tab); empty = every stock of the run.
+    symbols = sorted({str(x).strip().upper() for x in (raw.get("symbols") or []) if str(x).strip()})
+    try:
+        margin = float(raw.get("margin_pct") or DEFAULT_MARGIN_PCT)
+    except (TypeError, ValueError):
+        margin = DEFAULT_MARGIN_PCT
     return {
         "entries": sorted(set(entries)),
         "exits": sorted(set(exits)),
@@ -976,6 +1021,54 @@ def clean_choice(raw: dict | None) -> dict:
         "entry_from": entry_from.strftime("%H:%M"),
         "entry_to": entry_to.strftime("%H:%M"),
         "qty": qty,
+        "symbols": symbols,
+        "margin_pct": round(min(100.0, max(1.0, margin)), 2),
+    }
+
+
+#: Intraday margin blocked per trade, % of its value (Groww MIS, 5x); the practice wallet's default too.
+DEFAULT_MARGIN_PCT = 20.0
+
+
+def capital(kept: list[dict], margin_pct: float = DEFAULT_MARGIN_PCT) -> dict:
+    """The money the kept trades needed: each trade's full value (qty × entry price), the most in use at one moment
+    (trades open at the same time add up; one that closes at a minute frees its money before another opens then),
+    the busiest day, and the intraday margin that blocks (`margin_pct` of the value)."""
+    if not kept:
+        return {"peak_value": 0.0, "peak_margin": 0.0, "peak_at": None, "peak_open": 0, "max_trade_value": 0.0,
+                "avg_trade_value": 0.0, "margin_pct": margin_pct, "return_pct": None, "return_on_margin_pct": None,
+                "per_day": []}
+    events: list[tuple[int, int, float]] = []
+    for k in kept:
+        value = float(k["qty"]) * float(k["entry_price"])
+        events.append((int(k["entry_ts"]), 1, value))
+        events.append((int(k["exit_ts"]), 0, -value))
+    events.sort()
+    used = peak = 0.0
+    open_now = peak_open = 0
+    peak_at = None
+    day_peak: dict[str, float] = {}
+    for ts, kind, value in events:
+        used += value
+        open_now += 1 if kind else -1
+        day = dt.datetime.fromtimestamp(ts, IST).date().isoformat()
+        day_peak[day] = max(day_peak.get(day, 0.0), used)
+        if used > peak + 1e-9:
+            peak, peak_at, peak_open = used, ts, open_now
+    values = [float(k["qty"]) * float(k["entry_price"]) for k in kept]
+    gross = sum(k["gross"] for k in kept)
+    margin = peak * margin_pct / 100.0
+    return {
+        "peak_value": round(peak, 2),
+        "peak_margin": round(margin, 2),
+        "peak_at": dt.datetime.fromtimestamp(peak_at, IST).isoformat(timespec="minutes") if peak_at else None,
+        "peak_open": peak_open,
+        "max_trade_value": round(max(values), 2),
+        "avg_trade_value": round(sum(values) / len(values), 2),
+        "margin_pct": margin_pct,
+        "return_pct": round(gross / peak * 100, 2) if peak else None,
+        "return_on_margin_pct": round(gross / margin * 100, 2) if margin else None,
+        "per_day": [{"day": d, "peak_value": round(v, 2), "peak_margin": round(v * margin_pct / 100.0, 2)} for d, v in sorted(day_peak.items())],
     }
 
 
@@ -1014,8 +1107,15 @@ def evaluate(trades: list[dict], choice: dict, settings: dict | None = None, wit
     from_min = _time_minutes(_hhmm(choice["entry_from"], "09:20"))
     to_min = _time_minutes(_hhmm(choice["entry_to"], "15:30"))
     cap = int((settings or {}).get("max_trades_per_stock") or 0)
+    wanted = set(choice["symbols"])
     by_symbol: dict[str, list[dict]] = {}
+    universe: dict[str, int] = {}
+    excluded = 0
     for t in trades:
+        universe[t["symbol"]] = universe.get(t["symbol"], 0) + 1
+        if wanted and t["symbol"] not in wanted:
+            excluded += 1
+            continue
         by_symbol.setdefault(t["symbol"], []).append(t)
     kept: list[dict] = []
     refused = held = window = capped = 0
@@ -1065,8 +1165,12 @@ def evaluate(trades: list[dict], choice: dict, settings: dict | None = None, wit
             per_day[t["day"]] = per_day.get(t["day"], 0) + 1
     kept.sort(key=lambda r: (r["entry_ts"], r["symbol"]))
     out = _summarize(kept)
-    out["skipped"] = {"refused": refused, "in_position": held, "outside_window": window, "stock_cap": capped}
+    out["skipped"] = {"refused": refused, "in_position": held, "outside_window": window, "stock_cap": capped,
+                      "unticked": excluded}
     out["base_trades"] = len(trades)
+    out["capital"] = capital(kept, choice["margin_pct"])
+    # Every stock of the run with its base trades (signals), for the Stocks tab's tick boxes.
+    out["universe"] = [{"symbol": sym, "signals": n} for sym, n in sorted(universe.items())]
     out["choice"] = choice
     out["settings"] = settings_for_choice(choice, settings)
     if with_trades:
@@ -1128,6 +1232,16 @@ def _summarize(kept: list[dict]) -> dict:
             }
         )
     stock_rows.sort(key=lambda r: -r["gross"])
+    # Each stock on each day (the By day rows open into their stocks, the By stock rows into their days).
+    pairs: dict[tuple[str, str], dict] = {}
+    for k in kept:
+        p = pairs.setdefault((k["symbol"], k["day"]), {"symbol": k["symbol"], "day": k["day"], "trades": 0, "wins": 0, "gross": 0.0, "net": 0.0})
+        p["trades"] += 1
+        p["wins"] += 1 if k["gross"] > 0 else 0
+        p["gross"] += k["gross"]
+        p["net"] += k["net"]
+    pair_rows = [{**p, "gross": round(p["gross"], 2), "net": round(p["net"], 2)} for p in pairs.values()]
+    pair_rows.sort(key=lambda r: (r["day"], -r["gross"]))
     reasons: dict[str, dict] = {}
     for k in kept:
         r = reasons.setdefault(k["reason"], {"reason": k["reason"], "trades": 0, "gross": 0.0, "wins": 0})
@@ -1159,6 +1273,7 @@ def _summarize(kept: list[dict]) -> dict:
         },
         "per_day": day_rows,
         "per_stock": stock_rows,
+        "per_stock_day": pair_rows,
         "by_reason": reason_rows,
     }
 
@@ -1197,13 +1312,38 @@ def _toggles(choice: dict) -> list[tuple[str, str, dict]]:
     return out
 
 
-def recommend(trades: list[dict], choice: dict, settings: dict | None = None) -> dict:
-    """What each rule adds on top of the current choice, and the best combination a greedy search finds."""
+JUDGES = ("NET", "ROC")
+
+
+def _roc(out: dict) -> float | None:
+    """Return on capital: net P&L after charges ÷ the most margin in use at one moment, in %. None without trades."""
+    margin = (out.get("capital") or {}).get("peak_margin") or 0.0
+    return round(out["totals"]["net"] / margin * 100, 2) if margin > 0 else None
+
+
+def _brief(out: dict) -> dict:
+    """The totals plus the capital they needed and the return on it."""
+    cap = out.get("capital") or {}
+    return {**out["totals"], "peak_margin": cap.get("peak_margin", 0.0), "peak_value": cap.get("peak_value", 0.0), "roc": _roc(out)}
+
+
+def _score(brief: dict, judge: str) -> float:
+    if judge == "ROC":
+        return brief["roc"] if brief["roc"] is not None else float("-inf")
+    return brief["net"]
+
+
+def recommend(trades: list[dict], choice: dict, settings: dict | None = None, judge: str = "NET") -> dict:
+    """What each rule adds on top of the current choice, and the best combination a greedy search finds.
+
+    `judge` NET ranks by P&L after charges; ROC by return on capital (net ÷ the most margin in use at once), so a set
+    that makes a little less with far less money can win."""
+    judge = judge if judge in JUDGES else "NET"
     choice = clean_choice(choice)
-    now = evaluate(trades, choice, settings, with_trades=False)["totals"]
+    now = _brief(evaluate(trades, choice, settings, with_trades=False))
     rows = []
     for kind, name, changed in _toggles(choice):
-        got = evaluate(trades, changed, settings, with_trades=False)["totals"]
+        got = _brief(evaluate(trades, changed, settings, with_trades=False))
         on_now = (
             name in choice["entries"] if kind == "entry" else name in choice["exits"] if kind == "exit" else name in choice["targets"] if kind == "target" else False
         )
@@ -1226,26 +1366,37 @@ def recommend(trades: list[dict], choice: dict, settings: dict | None = None) ->
                 "win_pct_changed": got["win_pct"],
                 "profit_factor_changed": got["profit_factor"],
                 "green_pct_changed": got["green_pct"],
+                "capital_now": now["peak_margin"],
+                "capital_changed": got["peak_margin"],
+                "roc_now": now["roc"],
+                "roc_changed": got["roc"],
+                "delta_roc": round(got["roc"] - now["roc"], 2) if got["roc"] is not None and now["roc"] is not None else None,
             }
         )
-    rows.sort(key=lambda r: -r["delta_net"])
-    # Greedy: from the current choice, take the single change that adds the most net, until nothing adds.
+    if judge == "ROC":
+        rows.sort(key=lambda r: -(r["roc_changed"] if r["roc_changed"] is not None else float("-inf")))
+    else:
+        rows.sort(key=lambda r: -r["delta_net"])
+    # Greedy: from the current choice, take the single change that adds the most (net or return on capital), until
+    # nothing adds; a set left with fewer than SEARCH_MIN_TRADES trades is never picked.
     best_choice = dict(choice)
     best = now
     steps: list[dict] = []
     for _ in range(SEARCH_STEPS):
         candidates = []
         for kind, name, changed in _toggles(best_choice):
-            got = evaluate(trades, changed, settings, with_trades=False)["totals"]
-            if got["trades"] >= SEARCH_MIN_TRADES and got["net"] > best["net"] + 1e-9:
-                candidates.append((got["net"], kind, name, changed, got))
+            got = _brief(evaluate(trades, changed, settings, with_trades=False))
+            if got["trades"] >= SEARCH_MIN_TRADES and _score(got, judge) > _score(best, judge) + 1e-9:
+                candidates.append((_score(got, judge), kind, name, changed, got))
         if not candidates:
             break
         candidates.sort(key=lambda c: -c[0])
         _, kind, name, changed, got = candidates[0]
-        steps.append({"kind": kind, "name": name, "net_before": best["net"], "net_after": got["net"], "trades": got["trades"]})
+        steps.append({"kind": kind, "name": name, "net_before": best["net"], "net_after": got["net"], "trades": got["trades"],
+                      "roc_before": best["roc"], "roc_after": got["roc"]})
         best_choice, best = changed, got
     return {
+        "judge": judge,
         "now": now,
         "rows": rows,
         "best": {"choice": best_choice, "totals": best, "steps": steps, "settings": settings_for_choice(best_choice, settings)},

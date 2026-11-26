@@ -102,6 +102,13 @@ def test_the_combiner_applies_checks_exits_stops_and_the_in_position_rule():
     assert base["totals"]["trades"] == 2 and [k["reason"] for k in base["trades"]] == ["MA_CROSS", "MA_CROSS"]
     assert base["trades"][0]["gross"] == 40.0 and base["trades"][1]["gross"] == 10.0
     assert base["trades"][0]["net"] < 40.0  # charges taken off
+    # each stock on each day adds up to the day rows and the stock rows
+    pairs = base["per_stock_day"]
+    assert sum(p["trades"] for p in pairs) == 2
+    for d in base["per_day"]:
+        assert round(sum(p["gross"] for p in pairs if p["day"] == d["day"]), 2) == d["gross"]
+    for st in base["per_stock"]:
+        assert round(sum(p["gross"] for p in pairs if p["symbol"] == st["symbol"]), 2) == st["gross"]
     # the RSI check refuses A; B is kept
     got = lab.evaluate(trades, {"entries": ["rsi"], "exits": ["cross"], "stop": "NONE"})
     assert got["totals"]["trades"] == 1 and got["skipped"]["refused"] == 1 and got["trades"][0]["side"] == "SHORT"
@@ -127,9 +134,30 @@ def test_the_combiner_applies_checks_exits_stops_and_the_in_position_rule():
     # unknown names are dropped, not an error
     assert lab.clean_choice({"entries": ["nope", "rsi"], "exits": ["x"], "stop": "weird"}) == {
         "entries": ["rsi"], "exits": [], "stop": "NONE", "targets": [], "entry_from": "09:20", "entry_to": "15:30", "qty": 0,
+        "symbols": [], "margin_pct": 20.0,
     }
     # the settings the replay needs for this choice ride along
     assert stop["settings"]["use_stop"] and stop["settings"]["stop_type"] == "ATR" and stop["settings"]["cross_exit"]
+
+
+def test_ticked_stocks_and_the_capital_the_trades_needed():
+    trades = _synthetic_trades()
+    other = {**trades[0], "symbol": "Y", "entry_price": 50.0, "exits": {**trades[0]["exits"], "cross": [trades[1]["entry_ts"], 51.0]}}
+    rows = trades + [other]
+    every = lab.evaluate(rows, {"entries": [], "exits": ["cross"], "stop": "NONE"})
+    assert every["totals"]["trades"] == 3 and [u["symbol"] for u in every["universe"]] == ["X", "Y"]
+    assert every["universe"][0]["signals"] == 2
+    cap = every["capital"]
+    # X's A (10 x 100) and Y (10 x 50) are open together 10:00-11:00; both free their money at 11:00 before B
+    # (10 x 104) opens then, so the most in use at once is 1,500, not 1,000 + 500 + 1,040
+    assert cap["peak_value"] == 1500.0 and cap["peak_open"] == 2 and cap["max_trade_value"] == 1040.0
+    assert cap["peak_margin"] == 300.0 and cap["margin_pct"] == 20.0
+    assert cap["return_pct"] == round(every["totals"]["gross"] / 1500.0 * 100, 2)
+    only_y = lab.evaluate(rows, {"entries": [], "exits": ["cross"], "stop": "NONE", "symbols": ["y"], "margin_pct": 50})
+    assert only_y["totals"]["trades"] == 1 and only_y["trades"][0]["symbol"] == "Y" and only_y["skipped"]["unticked"] == 2
+    assert only_y["capital"]["peak_value"] == 500.0 and only_y["capital"]["peak_margin"] == 250.0
+    assert len(only_y["universe"]) == 2  # the tab still lists every stock of the run
+    assert lab.evaluate([], {"stop": "NONE"})["capital"]["peak_value"] == 0.0
 
 
 def test_recommend_lists_every_rule_and_climbs_to_a_better_choice(monkeypatch):
@@ -144,6 +172,17 @@ def test_recommend_lists_every_rule_and_climbs_to_a_better_choice(monkeypatch):
     assert rec["rows"][0]["delta_net"] >= rec["rows"][-1]["delta_net"]
     # turning the cross exit off makes 100 on A: the greedy search finds it
     assert rec["best"]["totals"]["net"] > rec["now"]["net"] and rec["best"]["steps"]
+    # judged by return on capital: every row carries the capital it needs and the return on it, best first
+    roc = lab.recommend(trades, {"entries": [], "exits": ["cross"], "stop": "NONE"}, judge="ROC")
+    assert roc["judge"] == "ROC" and roc["now"]["peak_margin"] > 0 and roc["now"]["roc"] is not None
+    got = [r["roc_changed"] for r in roc["rows"] if r["roc_changed"] is not None]
+    assert got == sorted(got, reverse=True)
+    assert roc["best"]["totals"]["roc"] >= roc["now"]["roc"]
+    # a set that makes less money with far less capital wins on return, not on rupees
+    big = {"net": 1000.0, "roc": 1.0}
+    small = {"net": 600.0, "roc": 6.0}
+    assert lab._score(small, "ROC") > lab._score(big, "ROC") and lab._score(big, "NET") > lab._score(small, "NET")
+    assert lab._score({"net": 0.0, "roc": None}, "ROC") == float("-inf")
 
 
 @pytest.mark.asyncio
@@ -252,6 +291,36 @@ def test_api_starts_evaluates_recommends_and_deletes(tmp_path, monkeypatch):
         rec = client.post(f"/api/strategy-lab/{job_id}/recommend", json={"entries": [], "exits": ["cross"], "stop": "ATR"})
         assert rec.status_code == 200 and rec.json()["rows"] and "best" in rec.json()
         assert client.get("/api/strategy-lab/nope").status_code == 404
+        # "Backtest this in the replay": the lab's switches go on the bot; with reset the rest goes back to its default
+        from models import BotConfig as Cfg
+
+        with database.session_factory()() as db:
+            row = db.get(Cfg, 1)
+            row.use_vwap, row.always_in, row.sma_fast, row.flip_orders = True, True, 7, True
+            db.commit()
+        keep = client.post(f"/api/strategy-lab/{job_id}/apply", json={"entries": [], "exits": ["cross"], "stop": "ATR"})
+        assert keep.status_code == 200, keep.text
+        with database.session_factory()() as db:
+            row = db.get(Cfg, 1)
+            assert row.use_vwap is False and row.always_in is True and row.sma_fast == 7 and row.flip_orders is True
+            row.sma_fast = 9  # the number the run read
+            db.commit()
+        reset = client.post(f"/api/strategy-lab/{job_id}/apply", json={"entries": ["rsi"], "exits": ["cross"], "stop": "TSL", "qty": 250, "reset": True})
+        assert reset.status_code == 200, reset.text
+        with database.session_factory()() as db:
+            row = db.get(Cfg, 1)
+            assert row.use_rsi is True and row.use_stop is True and row.stop_type == "TSL" and row.cross_exit is True
+            assert row.always_in is False and row.flip_orders is False and row.entry_mode == "SMA"  # back to defaults
+            assert row.sma_fast == 9 and row.sma_slow == 21 and row.qty == 250  # the lab's numbers put back
+        # "Apply to bot": another bot, no replay
+        import bots
+
+        other = client.post(f"/api/strategy-lab/{job_id}/apply", json={"entries": ["vwap"], "exits": ["cross"], "stop": "ATR", "to_bot": 3})
+        assert other.status_code == 200 and other.json()["bot"] == 3, other.text
+        with database.session_factory()() as db:
+            assert db.get(Cfg, bots.config_id_for(3)).use_vwap is True and db.get(Cfg, 1).use_vwap is False
+        assert client.post(f"/api/strategy-lab/{job_id}/apply", json={"to_bot": 9}).status_code == 422
+        assert client.post("/api/strategy-lab/nope/apply", json={}).status_code == 404
         assert client.delete(f"/api/strategy-lab/{job_id}").status_code == 200
         assert client.get(f"/api/strategy-lab/{job_id}").status_code == 404
     database.reset_engine()

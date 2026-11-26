@@ -1,12 +1,13 @@
 "use client";
 
-import { ByTrend, HandoffTable } from "./HandoffTrail";
+import { ByTrend, HandoffSection } from "./HandoffTrail";
 import { TrendReadings } from "./TrendReadings";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, FileDown, LineChart, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, FileDown, LineChart, ListPlus, Loader2, Play, RotateCcw, Trash2 } from "lucide-react";
+import { BacktestQueuePanel } from "@/components/Scalp/BacktestQueue";
 import clsx from "clsx";
 import { readReverse } from "@/components/Terminal/ReverseOwnSettings";
-import { inr, smaApi, type DaySwing, type ReplayDayRow, type ReplayOrigin, type ReplayRun, type ReplayRunSource, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
+import { inr, smaApi, type DaySwing, type ReplayCapitalPeak, type ReplayDayRow, type ReplayOrigin, type ReplayRun, type ReplayRunSource, type ReplayStockRow, type ScalpPick, type ScalpPickRule } from "@/lib/smaApi";
 import { SortTh, useSort } from "./sortable";
 import { ColumnHint, inOrder, useColumnOrder } from "@/components/ui/columnOrder";
 import { Badge, Skeleton, pnlTone } from "./ui";
@@ -617,8 +618,27 @@ export function filtersShort(s: Settings): string {
 // Column keys of the three Backtests tables; their order is dragged and kept per browser (columnOrder.tsx).
 type RunColKey = "run" | "days" | "strategy" | "trades" | "win" | "profit" | "loss" | "net" | "dd" | "actions";
 const RUN_COLS: RunColKey[] = ["run", "days", "strategy", "trades", "win", "profit", "loss", "net", "dd", "actions"];
-type DayColKey = "date" | "trades" | "wl" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative" | "swing";
-const DAY_COLS: DayColKey[] = ["date", "trades", "wl", "profit", "loss", "gross", "charges", "net", "cumulative", "swing"];
+type DayColKey = "date" | "trades" | "wl" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative" | "swing" | "capital";
+const DAY_COLS: DayColKey[] = ["date", "trades", "wl", "profit", "loss", "gross", "charges", "net", "cumulative", "swing", "capital"];
+
+/** One day's capital: the most it had blocked at one moment (open trades' value × the wallet's margin %), when, how many
+ * positions, and the day's P&L as % of it. */
+function DayCapital({ peak, marginPct, pnl }: { peak?: ReplayCapitalPeak; marginPct: number; pnl: number }) {
+  if (!peak || !(peak.peak_value > 0)) return <span className="text-slate-500">—</span>;
+  const cap = (peak.peak_value * marginPct) / 100;
+  const at = peak.peak_at ? peak.peak_at.slice(11, 16) : null;
+  return (
+    <span
+      className="whitespace-nowrap"
+      title={`Most in open trades at once: ${inr(peak.peak_value)} of shares (${peak.peak_positions} position${peak.peak_positions === 1 ? "" : "s"}${at ? ` at ${at}` : ""}) × ${marginPct} % margin = ${inr(cap)}. The day's P&L is ${((pnl / cap) * 100).toFixed(2)} % of it.`}
+    >
+      {inr(cap)}
+      <span className="text-slate-500">
+        {at ? ` @${at}` : ""} · {peak.peak_positions} pos · <span className={pnlTone(pnl)}>{((pnl / cap) * 100).toFixed(1)}%</span>
+      </span>
+    </span>
+  );
+}
 
 /** A day's highest and lowest P&L with times and which came first (display only; on the backtest basis switch). */
 function SwingText({ s: raw, compact = false }: { s?: DaySwing | null; compact?: boolean }) {
@@ -869,6 +889,50 @@ export function BacktestRuns() {
       .finally(() => setStarting(null));
   };
 
+  // The backtest queue (backtest_queue.py): runs queued again play one after another, never next to another replay.
+  const [queueKey, setQueueKey] = useState(0);
+  const [queueing, setQueueing] = useState<string | null>(null);
+  const [queueNote, setQueueNote] = useState<string | null>(null);
+  const queueable = (run: ReplayRun) =>
+    run.id > 0 && !scalpPickOf(run.settings) && (run.symbols.length > 0 || Boolean(run.settings.as_armed));
+  /** Queue runs again: each run's stocks and days on its bot, with the bot's settings as they are when it starts. */
+  const queueRuns = async (list: ReplayRun[], key: string) => {
+    const ok = list.filter(queueable);
+    if (!ok.length) {
+      setError("None of these runs can be queued again (pick runs and live days are not replays of a stock list).");
+      return;
+    }
+    setQueueing(key);
+    setQueueNote(null);
+    let done = 0;
+    try {
+      for (const run of ok) {
+        await smaApi.backtestQueueAddReplay({
+          date: run.start_date,
+          end_date: run.end_date,
+          start: run.start_time || "09:15",
+          symbols: run.symbols,
+          bot: Math.min(4, Number(run.settings.bot ?? 1) || 1),
+          as_armed: Boolean(run.settings.as_armed),
+          play_handoffs: run.settings.play_handoffs == null ? true : Boolean(run.settings.play_handoffs),
+          note: `again from run #${run.id}`,
+        });
+        done += 1;
+      }
+      setError(null);
+      const skipped = list.length - ok.length;
+      setQueueNote(
+        `Queued ${done} run${done === 1 ? "" : "s"}${skipped ? ` (${skipped} skipped: not a stock-list replay)` : ""}. ` +
+          "They play one after another at full speed, each with its bot's settings as they are when it starts.",
+      );
+    } catch (err: unknown) {
+      setError(`${done ? `Queued ${done}, then: ` : ""}${err instanceof Error ? err.message : "Could not queue it"}`);
+    } finally {
+      setQueueing(null);
+      setQueueKey((k) => k + 1);
+    }
+  };
+
   /** One run as a PDF: its settings, totals, day-wise P&L and every trade. */
   const downloadPdf = useCallback(async (run: ReplayRun) => {
     setPrinting(run.id);
@@ -1024,6 +1088,10 @@ export function BacktestRuns() {
           {error}
         </p>
       ) : null}
+      {queueNote ? <p className="px-4 pt-2 text-xs text-emerald-300">{queueNote}</p> : null}
+      <div className="px-4">
+        <BacktestQueuePanel bot={1} refreshKey={queueKey} />
+      </div>
       {runs.length === 0 ? (
         <p className="px-4 py-6 text-sm text-slate-400">
           No runs yet. Use “Replay past days” above: pick a From and To date and press Start.
@@ -1073,6 +1141,16 @@ export function BacktestRuns() {
                   </button>
                 ))}
               </span>
+              <button
+                type="button"
+                disabled={queueing !== null}
+                onClick={() => void queueRuns(picked.map((id) => runs.find((x) => x.id === id)).filter((x): x is ReplayRun => Boolean(x)), "ticked")}
+                title="Add the ticked runs to the backtest queue: each run's stocks and days again on its bot, one after another"
+                className="inline-flex min-h-9 items-center gap-1 rounded-md border border-sky-400/50 px-2 font-semibold text-sky-200 hover:bg-sky-500/10 disabled:opacity-60"
+              >
+                {queueing === "ticked" ? <Loader2 size={13} aria-hidden className="animate-spin" /> : <ListPlus size={13} aria-hidden />}
+                Queue ticked <NewTag id="bt-queue-runs" link={false} />
+              </button>
               <button
                 type="button"
                 onClick={() => setPicked([])}
@@ -1259,6 +1337,26 @@ actions: <td className="px-2 py-2 text-right align-top">
                               <RotateCcw size={13} aria-hidden />
                             )}
                             <span className="hidden lg:inline">Run again</span>
+                          </button>
+                        ) : null}
+                        {queueable(run) ? (
+                          <button
+                            type="button"
+                            aria-label={`Queue run ${run.id} again`}
+                            title="Queue: the same stocks and days on the same bot, played when no other replay is playing (bot's settings as they are then)"
+                            disabled={queueing !== null}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void queueRuns([run], `run-${run.id}`);
+                            }}
+                            className="mr-1 inline-flex min-h-9 min-w-9 items-center justify-center gap-1 rounded-md border border-sky-400/40 px-2 text-xs font-semibold text-sky-200 hover:bg-sky-500/10 disabled:opacity-60"
+                          >
+                            {queueing === `run-${run.id}` ? (
+                              <Loader2 size={13} aria-hidden className="animate-spin" />
+                            ) : (
+                              <ListPlus size={13} aria-hidden />
+                            )}
+                            <span className="hidden lg:inline">Queue</span>
                           </button>
                         ) : null}
                         <button
@@ -1544,6 +1642,15 @@ function RunDetailBody({
   const stocks = run.stocks ?? [];
   type DayKey = "date" | "trades" | "wins" | "profit" | "loss" | "gross" | "charges" | "net" | "cumulative";
   const dayCols = useColumnOrder<DayColKey>("backtests.cols.days", DAY_COLS);
+  // The practice wallet's margin share (20 % = 5x), for each day's capital.
+  const [marginPct, setMarginPct] = useState(20);
+  useEffect(() => {
+    smaApi
+      .wallet()
+      .then((w) => setMarginPct(w?.margin_pct || 20))
+      .catch(() => undefined);
+  }, []);
+  const capByDay = useMemo(() => new Map((run.capital?.days ?? []).map((c) => [c.date, c])), [run.capital]);
   const { sorted: sortedDays, sort: daySort, onSort: onDaySort } = useSort<ReplayDayRow, DayKey>(days, (d, k) => d[k]);
   return (
     <section aria-label={heading ?? `Run ${run.id} day-wise P&L`} className="border-t border-white/10 px-2 py-3 sm:px-4">
@@ -1589,12 +1696,7 @@ function RunDetailBody({
       {(run.by_regime ?? []).length ? <ByTrend groups={run.by_regime ?? []} /> : null}
       <TrendReadings runId={run.id} symbols={run.symbols ?? []} />
       {(run.handoff_trail ?? []).length ? (
-        <div className="mb-4">
-          <div className="mb-1 px-2 text-xs uppercase tracking-wider text-slate-400">
-            Hand-offs in this run ({(run.handoff_trail ?? []).length}) · where each stock was sent
-          </div>
-          <HandoffTable rows={[...(run.handoff_trail ?? [])].reverse()} showDay={run.start_date !== run.end_date} basis={basis} />
-        </div>
+        <HandoffSection rows={[...(run.handoff_trail ?? [])].reverse()} showDay={run.start_date !== run.end_date} basis={basis} />
       ) : null}
       <div className="overflow-x-auto">
         <ColumnHint moved={dayCols.moved} onReset={dayCols.reset} />
@@ -1614,6 +1716,11 @@ function RunDetailBody({
                 swing: (
                   <th {...dayCols.dragProps("swing")} className="px-2 py-1.5 text-left font-medium" title={`The day's highest and lowest P&L (closed + open, ${basisWords(basis)}), when, and which came first`}>
                     Day high / low <NewTag id="bt-day-swing" />
+                  </th>
+                ),
+                capital: (
+                  <th {...dayCols.dragProps("capital")} className="px-2 py-1.5 text-left font-medium" title={`Wallet money the day used: the most it had blocked at one moment (open trades' value × ${marginPct} % margin), when, how many positions, and the day's P&L as % of it`}>
+                    Capital <NewTag id="bt-day-capital" />
                   </th>
                 ),
               })}
@@ -1664,7 +1771,8 @@ gross: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.gross))}>{signed(
 charges: <td className="px-2 py-1.5 text-right text-amber-300">{inr(d.charges)}</td>,
 net: <td className={clsx("px-2 py-1.5 text-right font-semibold", pnlTone(d.net))}>{signed(d.net)}</td>,
 cumulative: <td className={clsx("px-2 py-1.5 text-right", pnlTone(d.cumulative))}>{signed(d.cumulative)}</td>,
-swing: <td className="px-2 py-1.5 text-xs">{heading ? <span className="text-slate-500">—</span> : <SwingText s={run.day_swings?.[d.date]} compact />}</td>
+swing: <td className="px-2 py-1.5 text-xs">{heading ? <span className="text-slate-500">—</span> : <SwingText s={run.day_swings?.[d.date]} compact />}</td>,
+capital: <td className="px-2 py-1.5 text-xs"><DayCapital peak={capByDay.get(d.date)} marginPct={marginPct} pnl={d.net} /></td>
 })}
 </tr>
                 {isOpen
@@ -1687,7 +1795,8 @@ net: <td className={clsx("px-2 py-1 text-right", pnlTone(sd.net))}>{signed(sd.ne
 cumulative: <td className="px-2 py-1 text-right text-slate-500" title="Share of the day's P&L">
                           {d.net !== 0 ? `${Math.round((sd.net / Math.abs(d.net)) * 100)}% of day` : "—"}
                         </td>,
-swing: <td className="px-2 py-1" />
+swing: <td className="px-2 py-1" />,
+capital: <td className="px-2 py-1" />
 })}
 </tr>
                     ))
@@ -1712,7 +1821,8 @@ gross: <td className={clsx("px-2 py-2 text-right", pnlTone(t.gross))}>{signed(t.
 charges: <td className="px-2 py-2 text-right text-amber-300">{inr(t.charges)}</td>,
 net: <td className={clsx("px-2 py-2 text-right font-semibold", pnlTone(t.net))}>{signed(t.net)}</td>,
 cumulative: <td className="px-2 py-2 text-right text-slate-400">max DD {signed(t.max_drawdown)}</td>,
-swing: <td className="px-2 py-2" />
+swing: <td className="px-2 py-2" />,
+capital: <td className="px-2 py-2 text-xs">{run.capital?.peak_value ? <DayCapital peak={run.capital} marginPct={marginPct} pnl={t.net} /> : null}</td>
 })}
 </tr>
             </tfoot>

@@ -57,6 +57,7 @@ import fast_bot
 import tsl_calc as tsl_calc_mod
 import regime_study
 import second_candle
+import trend_hold
 import strategy_lab
 import trend_log
 import morning_study
@@ -493,6 +494,7 @@ def _boot_backtest_server() -> asyncio.Task:
     backtest_server.add_busy_check(lambda: regime_study.study().running)
     backtest_server.add_busy_check(lambda: strategy_lab.lab().running)
     backtest_server.add_busy_check(lambda: second_candle.test().running)
+    backtest_server.add_busy_check(lambda: trend_hold.test().running)
     backtest_server.add_busy_check(lambda: morning_study.study().running)
     backtest_server.add_busy_check(lambda: trend_compare.comparer().running)
     backtest_server.add_busy_check(lambda: stock_rank.jobs().running)
@@ -3225,8 +3227,13 @@ _backtest_queue_task: asyncio.Task | None = None
 _backtest_wake_task: asyncio.Task | None = None
 
 
-async def _queue_start(body: dict) -> None:
-    """Start one queued auto-arm backtest through the ordinary route (every refusal applies)."""
+async def _queue_start(body: dict, kind: str = "AUTOARM") -> None:
+    """Start one queued backtest through the ordinary route (every refusal applies): an auto-arm backtest, or a plain
+    replay (a run queued again from the Backtests tab)."""
+    if kind == "REPLAY":
+        fields = {k: v for k, v in body.items() if k in ReplayStart.model_fields}
+        await replay_start(ReplayStart(**{**fields, "speed": max(SPEEDS)}))
+        return
     await replay_auto_arm(AutoArmStart(**{**body, "speed": max(SPEEDS)}))
 
 
@@ -3252,6 +3259,13 @@ def _start_backtest_queue() -> None:
 
 class QueueAdd(AutoArmStart):
     pass
+
+
+class QueueReplay(ReplayStart):
+    #: Replays play on bots 1-4 only (each has its own replay player).
+    bot: int = Field(default=1, ge=1, le=4)
+    #: Shown on the queue list, e.g. "again from run #12".
+    note: str = Field(default="", max_length=60)
 
 
 class QueueSchedule(BaseModel):
@@ -3286,6 +3300,28 @@ async def backtest_queue_add(body: QueueAdd):
     state = await asyncio.to_thread(backtest_queue.load)
     try:
         item = backtest_queue.add(state, body.model_dump(exclude={"speed"}))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    await asyncio.to_thread(backtest_queue.save, state)
+    return {"added": item.id, **backtest_queue.view(state)}
+
+
+@app.post("/api/backtest-queue/replay")
+async def backtest_queue_add_replay(body: QueueReplay):
+    """Add one ordinary replay to the queue (the Backtests tab's Queue: a run's stocks and days again on its bot, with the
+    bot's settings as they are when it starts). Plays when no other replay is playing, at full speed. Practice money."""
+    if server_role.is_scanner():
+        raise HTTPException(409, "Backtests run on the main desk or the backtest server, not on the scanner.")
+    try:
+        parse_replay_range(body.date, body.end_date, allow_today=True)
+        parse_start(body.start)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not body.as_armed and not body.symbols:
+        raise HTTPException(400, "Pick the stocks to replay.")
+    state = await asyncio.to_thread(backtest_queue.load)
+    try:
+        item = backtest_queue.add(state, body.model_dump(exclude={"speed"}), kind="REPLAY")
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     await asyncio.to_thread(backtest_queue.save, state)
@@ -5961,6 +5997,10 @@ class StrategyLabChoice(BaseModel):
     entry_from: str = "09:20"
     entry_to: str = "15:30"
     qty: int = Field(default=0, ge=0, le=1_000_000)
+    #: Only these stocks count (the Stocks tab's tick boxes); empty = every stock of the run.
+    symbols: list[str] = Field(default_factory=list, max_length=strategy_lab.MAX_STOCKS)
+    #: Intraday margin % of a trade's value, for the capital it needs (20 = Groww MIS 5x).
+    margin_pct: float = Field(default=strategy_lab.DEFAULT_MARGIN_PCT, ge=1, le=100)
 
 
 def _lab_job_or_404(job_id: str) -> tuple[dict, list[dict]]:
@@ -6002,8 +6042,10 @@ async def strategy_lab_start(body: StrategyLabStart):
         last = dt.date.fromisoformat(body.end_date) if body.end_date else first
     except ValueError as exc:
         raise HTTPException(400, "Dates must be YYYY-MM-DD.") from exc
-    if last >= dt.datetime.now(IST).date():
-        raise HTTPException(400, "The lab reads finished days only: pick an end date before today.")
+    now_ist = dt.datetime.now(IST)
+    today_closed = now_ist.time() >= dt.time(15, 30)  # after the close today is a finished day too (not cached)
+    if last > now_ist.date() or (last == now_ist.date() and not today_closed):
+        raise HTTPException(400, "The lab reads finished days only: today counts once the market closes at 15:30.")
     bot_engine = _bots_by_number().get(body.bot)
     if bot_engine is None:
         raise HTTPException(400, "Bot must be 1-4.")
@@ -6048,11 +6090,63 @@ async def strategy_lab_evaluate(job_id: str, body: StrategyLabChoice):
     return await asyncio.to_thread(strategy_lab.evaluate, rows, body.model_dump(), job.get("settings"))
 
 
+class StrategyLabRecommend(StrategyLabChoice):
+    #: NET = the most P&L after charges; ROC = the best return on capital (net ÷ the most margin in use at once).
+    judge: Literal["NET", "ROC"] = "NET"
+
+
 @app.post("/api/strategy-lab/{job_id}/recommend")
-async def strategy_lab_recommend(job_id: str, body: StrategyLabChoice):
-    """What each rule adds on top of this choice, and the best combination a greedy search finds."""
+async def strategy_lab_recommend(job_id: str, body: StrategyLabRecommend):
+    """What each rule adds on top of this choice, and the best combination a greedy search finds (judged by net P&L
+    or by return on capital)."""
     job, rows = _lab_job_or_404(job_id)
-    return await asyncio.to_thread(strategy_lab.recommend, rows, body.model_dump(), job.get("settings"))
+    return await asyncio.to_thread(strategy_lab.recommend, rows, body.model_dump(), job.get("settings"), body.judge)
+
+
+class StrategyLabApply(StrategyLabChoice):
+    #: Every other strategy setting back to its default first, then the lab's switches and numbers (the replay then
+    #: trades only what the lab tested). Off = only the lab's switches change; everything else stays as the bot has it.
+    reset: bool = False
+    #: That bot's backtest is loading / playing / paused and the page asked to stop it first.
+    stop_replay: bool = False
+    confirm_live: bool = False
+    #: The bot to put it on (1-5); none = the run's own bot ("Numbers from"). "Apply to bot" picks it.
+    to_bot: int | None = Field(default=None, ge=1, le=5)
+
+
+@app.post("/api/strategy-lab/{job_id}/apply")
+async def strategy_lab_apply(job_id: str, body: StrategyLabApply):
+    """Put the lab's choice on a bot (the run's own, or `to_bot`; "Backtest this in the replay" and "Apply to bot"): the switches of `settings_for_choice`
+    and, with `reset`, every other strategy field back at its default with the lab's numbers on top. One write, checked
+    like Save (dry run first). The Trade list, PAPER/LIVE, name and per-stock settings stay. No order is placed."""
+    job, _rows = _lab_job_or_404(job_id)
+    bot = int(body.to_bot or job.get("bot") or 1)
+    desk = str(bot)
+    eng = _desk_engine(desk)
+    if (eng.load_config().trading_mode or "PAPER").upper() == "LIVE" and not body.confirm_live:
+        raise HTTPException(409, f"{_desk_label(desk)} is LIVE: confirm before changing its settings")
+    session = replays.get(bot)
+    if session is not None and session.status in ("LOADING", "PLAYING", "PAUSED"):
+        if not body.stop_replay:
+            raise HTTPException(409, f"Bot {bot}'s backtest is playing: stop it or let it finish first")
+        await session.stop()
+    choice = strategy_lab.clean_choice(body.model_dump())
+    settings = job.get("settings") or {}
+    fields = dict(strategy_lab.settings_for_choice(choice, settings))
+    if body.reset:
+        defaults = {k: v for k, v in strategy_defaults().items() if v is not None}
+        fields = {**defaults, **strategy_lab.numbers_for_bot(settings, choice), **fields}
+    allowed = set(ConfigUpdate.model_fields) - COPY_SKIP
+    fields = {k: v for k, v in fields.items() if k in allowed}
+    if isinstance(fields.get("review_check_minutes"), str):
+        fields["review_check_minutes"] = [int(x) for x in fields["review_check_minutes"].split(",") if x.strip().isdigit()] or None
+        if fields["review_check_minutes"] is None:
+            fields.pop("review_check_minutes")
+    data = {"settings": fields, "stock_settings": {}}
+    write = SettingsImport(file={}, stock_settings=False, confirm_live=body.confirm_live)
+    await asyncio.to_thread(_import_desk, desk, data, write, True)
+    result = await asyncio.to_thread(_import_desk, desk, data, write)
+    return {**result, "bot": bot, "reset": body.reset}
 
 
 @app.delete("/api/strategy-lab/{job_id}")
@@ -6255,6 +6349,128 @@ async def hold_test_run(body: HoldTest):
 
     rows = [r.model_dump() for r in body.rows]
     return await hold_test.run(rows, load, days=body.days, target_pct=body.target_pct)
+
+
+class TrendHoldStart(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=trend_hold.MAX_STOCKS)
+    date: str
+    end_date: str | None = None
+    #: The bot whose SMA periods (and, with minutes 0, candle size) the trend is read on; 0 qty = that bot's qty.
+    bot: int = Field(default=1, ge=1, le=5)
+    kind: Literal["TREND", "PHASE", "EITHER", "BOTH"] = "TREND"
+    min_checks: int = Field(default=6, ge=1, le=7)
+    strong_only: bool = True
+    phase_min: int = Field(default=5, ge=1, le=60)
+    side: Literal["BOTH", "UP", "DOWN"] = "BOTH"
+    minutes: Literal[0, 1, 3, 5, 10, 15] = 0
+    candles: Literal["NORMAL", "HA"] = "NORMAL"
+    first: str = "10:00"
+    last: str = "14:00"
+    every_min: Literal[1, 2, 3, 5, 10, 15, 30] = 5
+    square_off: str = "15:15"
+    qty: int = Field(default=0, ge=0, le=1_000_000)
+    price_min: float = Field(default=0, ge=0)
+    price_max: float = Field(default=0, ge=0)
+    max_day: int = Field(default=20, ge=1, le=trend_hold.MAX_DAY)
+
+
+def _hhmm_time(text: str, what: str) -> dt.time:
+    try:
+        hh, mm = text.split(":")
+        return dt.time(int(hh), int(mm))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HTTPException(400, f"{what} must be HH:MM.") from exc
+
+
+@app.get("/api/trend-hold")
+async def trend_hold_get(rows: bool = True):
+    """Trend hold test (trend_hold.py): progress, the last report and its picks. Read-only."""
+    return trend_hold.test().view(with_rows=rows)
+
+
+@app.post("/api/trend-hold/start")
+async def trend_hold_start(body: TrendHoldStart):
+    """Does a strong trend / strong phase keep going to the end of the day? Past days of the picked stocks on cached
+    Groww 1-minute candles, read on a bot's SMA periods. Arithmetic only: no order, nothing armed. Same hours rule as
+    the Second candle test."""
+    _refuse_when_paused()
+    if server_role.is_desk() and market_is_open() and not desk_market_hours_free():
+        raise HTTPException(409, "During market hours run the Trend hold test on the backtest server, so it never shares the bots' Groww limit.")
+    try:
+        first_day, last_day = parse_replay_range(body.date, body.end_date)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    days = [first_day + dt.timedelta(days=i) for i in range((last_day - first_day).days + 1)]
+    days = [d for d in days if d.weekday() < 5][: trend_hold.MAX_DAYS]
+    times = {k: _hhmm_time(getattr(body, k), k.replace("_", " ").capitalize()) for k in ("first", "last", "square_off")}
+    if not dt.time(9, 15) <= times["first"] <= dt.time(15, 25) or not dt.time(9, 15) <= times["last"] <= dt.time(15, 25):
+        raise HTTPException(400, "Read times must be between 09:15 and 15:25.")
+    if not dt.time(9, 20) <= times["square_off"] <= dt.time(15, 30):
+        raise HTTPException(400, "Square-off must be between 09:20 and 15:30.")
+    if min(times["first"], times["last"]) >= times["square_off"]:
+        raise HTTPException(400, "The first read must be before the square-off.")
+    eng = engine if body.bot == 1 else bot_engines.get(body.bot)
+    if eng is None:
+        raise HTTPException(404, f"No bot {body.bot}")
+    cfg = eng.load_config()
+    rule = trend_hold.Rule(
+        kind=body.kind, min_checks=body.min_checks, strong_only=body.strong_only, phase_min=body.phase_min, side=body.side,
+        minutes=body.minutes or int(cfg.candle_minutes or 5), sma_fast=int(cfg.sma_fast), sma_slow=int(cfg.sma_slow),
+        candles=body.candles, first=times["first"], last=times["last"], every_min=body.every_min,
+        square_off=times["square_off"], qty=body.qty or int(cfg.qty or 1), price_min=body.price_min,
+        price_max=body.price_max, max_day=body.max_day, bot=body.bot,
+    )
+
+    async def fetch(name, start, end):
+        return await fetch_frame(_scan_broker(), name, start, end)
+
+    try:
+        out = trend_hold.test().start(body.symbols, fetch, days, rule, wait=groww_pressure.wait_for_bots)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    out["params"]["bot_name"] = getattr(cfg, "bot_name", None) or f"Bot {body.bot}"
+    return out
+
+
+@app.post("/api/trend-hold/stop")
+async def trend_hold_stop():
+    """Stop after the stock being read; the report covers the stocks read so far."""
+    return trend_hold.test().stop()
+
+
+@app.get("/api/trend-hold/chart")
+async def trend_hold_chart(symbol: str, day: str, start: str = "09:15", end: str = "15:30", seconds: bool = False):
+    """One stock's price on one day, by minute (cached 1-minute candles) and, with `seconds`, by second where the bots
+    recorded them (tick_store, last 10 days). Read-only."""
+    try:
+        d = dt.date.fromisoformat(day)
+    except ValueError as exc:
+        raise HTTPException(400, "day must be YYYY-MM-DD.") from exc
+    _hhmm_time(start, "Start")
+    _hhmm_time(end, "End")
+    name = symbol.strip().upper()
+
+    async def fetch(n, a, b):
+        return await fetch_frame(_scan_broker(), n, a, b)
+
+    await groww_pressure.wait_for_bots()
+    try:
+        tape = await strategy_lab.load_tape(name, d, d, fetch)
+    except Exception as exc:  # noqa: BLE001 - no Groww login, a refused download: say so, never a bare 500
+        raise HTTPException(409, f"Could not load {name}'s candles for {day}: {str(exc)[:200]}") from exc
+    out = {"symbol": name, "day": day, "minutes": trend_hold.chart_points(tape, d, start, end), "seconds": []}
+    if seconds:
+        sh, sm = start.split(":")
+        eh, em = end.split(":")
+        lo = int(dt.datetime.combine(d, dt.time(int(sh), int(sm)), tzinfo=trend_hold.IST).timestamp())
+        hi = int(dt.datetime.combine(d, dt.time(int(eh), int(em)), tzinfo=trend_hold.IST).timestamp())
+        try:
+            out["seconds"] = await asyncio.to_thread(tick_store.between, name, lo, hi)
+        except Exception:  # noqa: BLE001 - seconds are a bonus
+            out["seconds"] = []
+    return out
 
 
 def _tape_for(symbol: str):

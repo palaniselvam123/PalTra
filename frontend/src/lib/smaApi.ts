@@ -1113,6 +1113,33 @@ export type SecondCandleReport = {
   stopped?: boolean;
 };
 export type SecondCandleStock = { symbol: string; best_trail_pct: number | null; best_trail_total: number | null } & SecondCandleGroup;
+/** Trend hold test (backend trend_hold.py): does a strong trend / phase keep going to the end of the day? */
+export type TrendHoldKind = "TREND" | "PHASE" | "EITHER" | "BOTH";
+export type TrendHoldRow = {
+  symbol: string; day: string; at: string; side: "LONG" | "SHORT"; price: number; passed: number; of: number;
+  trend: string | null; phase: string | null; phase_candles: number; why: string;
+  entry: number; exit: number; exit_at: string; points: number; pct: number; pnl: number; charges: number; net: number;
+  best_pts: number; best_pct: number; best_at: string; worst_pts: number; worst_pct: number; worst_at: string;
+  best_rs: number; worst_rs: number; lost_at: string | null; held_to_end: boolean; strong_reads: number; after_reads: number;
+  lost_pts: number | null; lost_pnl: number | null; minutes: number; curve: number[];
+};
+export type TrendHoldReport = {
+  trades: number; days?: number; stocks?: number; held?: number; held_pct?: number; wins?: number; win_pct?: number;
+  pnl?: number; net?: number; lost_pnl?: number; avg_pct?: number | null; avg_best_pct?: number | null; avg_worst_pct?: number | null;
+  by_day?: { day: string; trades: number; pnl: number; net: number; held: number; wins: number; running: number }[];
+  by_checks?: { passed: number; trades: number; win_pct: number; held_pct: number; avg_pct: number | null; avg_best_pct: number | null; pnl: number }[];
+  answer: string[]; stopped?: boolean;
+};
+export type TrendHoldView = {
+  status: "IDLE" | "RUNNING" | "DONE" | "FAILED"; done: number; total: number; errors: { symbol: string; error: string }[];
+  params: Record<string, unknown>; started_at: string | null; finished_at: string | null; report: TrendHoldReport | null; rows: TrendHoldRow[];
+};
+export type TrendHoldStart = {
+  symbols: string[]; date: string; end_date?: string; bot: number; kind: TrendHoldKind; min_checks: number; strong_only: boolean;
+  phase_min: number; side: "BOTH" | "UP" | "DOWN"; minutes: number; candles: "NORMAL" | "HA"; first: string; last: string;
+  every_min: number; square_off: string; qty: number; price_min: number; price_max: number; max_day: number;
+};
+export type TrendHoldChart = { symbol: string; day: string; minutes: [number, number, number, number, number][]; seconds: [number, number][] };
 export type SecondCandleView = {
   status: "IDLE" | "RUNNING" | "DONE" | "FAILED";
   done: number;
@@ -3147,6 +3174,8 @@ export type QueueItem = {
   body: AutoArmBody;
   label: string;
   origin: "manual" | "schedule";
+  /** AUTOARM = an auto-arm backtest; REPLAY = an ordinary replay (a run queued again from the Backtests tab). */
+  kind?: "AUTOARM" | "REPLAY";
   status: "QUEUED" | "PLAYING" | "DONE" | "FAILED" | "STOPPED" | "INTERRUPTED" | "CANCELLED";
   added_at: number;
   started_at: number | null;
@@ -3177,6 +3206,17 @@ export const smaApi = {
   backtestQueue: () => request<BacktestQueue>("/api/backtest-queue"),
   backtestQueueAdd: (body: AutoArmBody) =>
     request<BacktestQueue & { added: string }>("/api/backtest-queue", { method: "POST", body: JSON.stringify(body) }),
+  /** Queue an ordinary replay (a run's stocks and days again on its bot); plays at full speed when no replay plays. */
+  backtestQueueAddReplay: (body: {
+    date: string;
+    end_date?: string | null;
+    start?: string;
+    symbols?: string[];
+    bot: number;
+    as_armed?: boolean;
+    play_handoffs?: boolean;
+    note?: string;
+  }) => request<BacktestQueue & { added: string }>("/api/backtest-queue/replay", { method: "POST", body: JSON.stringify(body) }),
   backtestQueueRemove: (id: string) => request<BacktestQueue>(`/api/backtest-queue/${encodeURIComponent(id)}`, { method: "DELETE" }),
   backtestQueueClear: () => request<BacktestQueue>("/api/backtest-queue/clear", { method: "POST" }),
   backtestQueuePause: (paused: boolean) =>
@@ -3455,6 +3495,15 @@ export const smaApi = {
     dir_rule?: CandleDirRule;
     ha?: boolean;
   }) => request<SecondCandleView>("/api/second-candle/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
+  /** Trend hold test (trend_hold.py; arithmetic on real candles, no order). */
+  trendHold: (rows = true) => request<TrendHoldView>(`/api/trend-hold${rows ? "" : "?rows=false"}`, undefined, 30000, false),
+  trendHoldStart: (body: TrendHoldStart) => request<TrendHoldView>("/api/trend-hold/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
+  trendHoldStop: () => request<TrendHoldView>("/api/trend-hold/stop", { method: "POST" }, 20000, false),
+  trendHoldChart: (symbol: string, day: string, start: string, end: string, seconds: boolean) =>
+    request<TrendHoldChart>(
+      `/api/trend-hold/chart?symbol=${encodeURIComponent(symbol)}&day=${day}&start=${start}&end=${end}&seconds=${seconds}`,
+      undefined, 60000, false
+    ),
   secondCandleStop: () => request<SecondCandleView>("/api/second-candle/stop", { method: "POST" }, 20000, false),
   regimeStudyStart: (body: { symbols: string[]; days: number; minutes: number; window: number }) =>
     request<RegimeStudy>("/api/regime-study/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
@@ -3468,8 +3517,11 @@ export const smaApi = {
     request<{ job: StrategyLabJob; result: StrategyLabResult; rules: StrategyLabRules }>(`/api/strategy-lab/${encodeURIComponent(id)}`, undefined, 30000, false),
   strategyLabEvaluate: (id: string, choice: StrategyLabChoice) =>
     request<StrategyLabResult>(`/api/strategy-lab/${encodeURIComponent(id)}/evaluate`, { method: "POST", body: JSON.stringify(choice) }, 30000, false),
-  strategyLabRecommend: (id: string, choice: StrategyLabChoice) =>
-    request<StrategyLabRecommend>(`/api/strategy-lab/${encodeURIComponent(id)}/recommend`, { method: "POST", body: JSON.stringify(choice) }, 60000, false),
+  strategyLabRecommend: (id: string, choice: StrategyLabChoice, judge: StrategyLabJudge = "NET") =>
+    request<StrategyLabRecommend>(`/api/strategy-lab/${encodeURIComponent(id)}/recommend`, { method: "POST", body: JSON.stringify({ ...choice, judge }) }, 60000, false),
+  /** Put the lab's choice on the run's bot (with `reset`, every other strategy setting back to its default first). */
+  strategyLabApply: (id: string, body: StrategyLabChoice & { reset?: boolean; stop_replay?: boolean; confirm_live?: boolean; to_bot?: number }) =>
+    request<{ changed?: string[]; bot: number; reset: boolean }>(`/api/strategy-lab/${encodeURIComponent(id)}/apply`, { method: "POST", body: JSON.stringify(body) }, 30000, false),
   strategyLabDelete: (id: string) => request<StrategyLabView>(`/api/strategy-lab/${encodeURIComponent(id)}`, { method: "DELETE" }, 20000, false),
   /** Saved scans: the days, and one day's runs (latest day when none is given). */
   /** A desk's open P&L through a day, one point a minute ("1"-"4" or "research"; latest day when none is given). */
@@ -4006,6 +4058,23 @@ export type StrategyLabChoice = {
   entry_from?: string;
   entry_to?: string;
   qty?: number;
+  /** Only these stocks count (the Stocks tab's tick boxes); empty = every stock of the run. */
+  symbols?: string[];
+  /** Intraday margin % of a trade's value, for the capital it needs (20 = 5x). */
+  margin_pct?: number;
+};
+/** The money the kept trades needed (strategy_lab.capital). */
+export type StrategyLabCapital = {
+  peak_value: number;
+  peak_margin: number;
+  peak_at: string | null;
+  peak_open: number;
+  max_trade_value: number;
+  avg_trade_value: number;
+  margin_pct: number;
+  return_pct: number | null;
+  return_on_margin_pct: number | null;
+  per_day: { day: string; peak_value: number; peak_margin: number }[];
 };
 export type StrategyLabJob = {
   id: string;
@@ -4068,9 +4137,14 @@ export type StrategyLabResult = {
   totals: StrategyLabTotals;
   per_day: { day: string; trades: number; gross: number; net: number; cum_gross: number }[];
   per_stock: { symbol: string; trades: number; win_pct: number; gross: number; net: number; days: number; green_days: number; per_trade: number }[];
+  /** Each stock on each day (older results have none). */
+  per_stock_day?: { symbol: string; day: string; trades: number; wins: number; gross: number; net: number }[];
   by_reason: { reason: string; trades: number; gross: number; wins: number }[];
-  skipped: { refused: number; in_position: number; outside_window: number; stock_cap: number };
+  skipped: { refused: number; in_position: number; outside_window: number; stock_cap: number; unticked?: number };
   base_trades: number;
+  capital?: StrategyLabCapital;
+  /** Every stock of the run with its base trades (signals). */
+  universe?: { symbol: string; signals: number }[];
   choice: Required<StrategyLabChoice>;
   settings: Record<string, unknown>;
   trades?: StrategyLabTrade[];
@@ -4093,14 +4167,25 @@ export type StrategyLabRecommendRow = {
   win_pct_changed: number;
   profit_factor_changed: number | null;
   green_pct_changed: number;
+  /** The most margin in use at one moment, and net ÷ it in % (null without trades). */
+  capital_now?: number;
+  capital_changed?: number;
+  roc_now?: number | null;
+  roc_changed?: number | null;
+  delta_roc?: number | null;
 };
+/** How the lab's search judges a set of rules: the most P&L after charges, or the best return on capital. */
+export type StrategyLabJudge = "NET" | "ROC";
+/** Totals plus the capital they needed (`peak_margin`, `peak_value`) and the return on it (`roc`, %). */
+export type StrategyLabBrief = StrategyLabTotals & { peak_margin?: number; peak_value?: number; roc?: number | null };
 export type StrategyLabRecommend = {
-  now: StrategyLabTotals;
+  judge?: StrategyLabJudge;
+  now: StrategyLabBrief;
   rows: StrategyLabRecommendRow[];
   best: {
     choice: Required<StrategyLabChoice>;
-    totals: StrategyLabTotals;
-    steps: { kind: string; name: string; net_before: number; net_after: number; trades: number }[];
+    totals: StrategyLabBrief;
+    steps: { kind: string; name: string; net_before: number; net_after: number; trades: number; roc_before?: number | null; roc_after?: number | null }[];
     settings: Record<string, unknown>;
   };
 };

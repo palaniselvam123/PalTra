@@ -62,7 +62,17 @@ function BotChips({ value, onChange }: { value: number[]; onChange: (v: number[]
  * another replay); the schedule queues today's auto-arm backtest on the ticked bots every weekday after a time.
  * Practice money only: nothing is armed or ordered.
  */
-export function BacktestQueuePanel({ form, bot }: { form: () => Promise<Omit<AutoArmBody, "bot">>; bot: number }) {
+export function BacktestQueuePanel({
+  form,
+  bot,
+  refreshKey = 0,
+}: {
+  /** The auto-arm form's body; without it (the Backtests tab) only the list and pause / clear are shown. */
+  form?: () => Promise<Omit<AutoArmBody, "bot">>;
+  bot: number;
+  /** Changed by the parent after it queued something, so the list reloads at once. */
+  refreshKey?: number;
+}) {
   const [q, setQ] = useState<BacktestQueue | null>(null);
   const [bots, setBots] = useState<number[]>([bot]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -91,7 +101,7 @@ export function BacktestQueuePanel({ form, bot }: { form: () => Promise<Omit<Aut
     void load();
     const t = window.setInterval(() => void load(), 10_000);
     return () => window.clearInterval(t);
-  }, [load]);
+  }, [load, refreshKey]);
 
   const act = async (key: string, fn: () => Promise<BacktestQueue | null>, ok?: string) => {
     setBusy(key);
@@ -112,6 +122,7 @@ export function BacktestQueuePanel({ form, bot }: { form: () => Promise<Omit<Aut
       "add",
       async () => {
         if (!bots.length) throw new Error("Tick at least one bot.");
+        if (!form) throw new Error("Use the auto-arm replay form to queue an auto-arm backtest.");
         const body = await form();
         let last: BacktestQueue | null = null;
         for (const b of bots) last = await smaApi.backtestQueueAdd({ ...body, bot: b });
@@ -126,7 +137,7 @@ export function BacktestQueuePanel({ form, bot }: { form: () => Promise<Omit<Aut
       async () => {
         if (!schedBots.length) throw new Error("Tick at least one bot for the schedule.");
         let template: Partial<AutoArmBody> | undefined;
-        if (withTemplate) {
+        if (withTemplate && form) {
           const body = await form();
           const { date: _d, end_date: _e, ...rest } = body;
           void _d;
@@ -151,17 +162,23 @@ export function BacktestQueuePanel({ form, bot }: { form: () => Promise<Omit<Aut
         <span className="text-slate-400">one after another, so the server never plays two at once</span>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
-        Queue the form above on
-        <BotChips value={bots} onChange={setBots} />
-        <button
-          type="button"
-          onClick={() => void addToQueue()}
-          disabled={busy !== null}
-          className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 font-semibold text-sky-200 ring-1 ring-inset ring-sky-400/50 disabled:opacity-50"
-        >
-          {busy === "add" ? <Loader2 size={13} className="animate-spin" /> : null}
-          Add to queue
-        </button>
+        {form ? (
+          <>
+            Queue the form above on
+            <BotChips value={bots} onChange={setBots} />
+            <button
+              type="button"
+              onClick={() => void addToQueue()}
+              disabled={busy !== null}
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-3 font-semibold text-sky-200 ring-1 ring-inset ring-sky-400/50 disabled:opacity-50"
+            >
+              {busy === "add" ? <Loader2 size={13} className="animate-spin" /> : null}
+              Add to queue
+            </button>
+          </>
+        ) : (
+          <span className="text-slate-400">Queue a run with its Queue button, or tick runs and press Queue ticked.</span>
+        )}
         {q ? (
           <>
             <button
@@ -230,6 +247,7 @@ export function BacktestQueuePanel({ form, bot }: { form: () => Promise<Omit<Aut
         </ul>
       ) : null}
 
+      {form ? (
       <div className="space-y-2 border-t border-white/10 pt-3">
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
           <CalendarClock size={14} className="text-sky-300" />
@@ -273,6 +291,7 @@ export function BacktestQueuePanel({ form, bot }: { form: () => Promise<Omit<Aut
           keep its Auto scan on during the market. The bots must be in PAPER.
         </p>
       </div>
+      ) : null}
       {msg ? <p className={msg.ok ? "text-xs text-emerald-300" : "text-xs font-semibold text-amber-300"}>{msg.text}</p> : null}
     </div>
   );

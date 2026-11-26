@@ -1839,6 +1839,26 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   **No stall while it runs**: the page polls `?rows=false` during a run and loads the rows once at the end; `GET
   /api/second-candle` sends `SecondCandle.view_json` (the rows encoded in a worker thread, cached per finished run), the
   report is saved off the loop, and `strategy_lab.load_tape` reads / writes / joins the cached day files in a thread.
+- `backend/trend_hold.py` – **Trend hold test** (read-only research; the Scalp page's "Trend hold" tab, group 3 Test an idea,
+  `components/Scalp/TrendHold.tsx`; no order path, nothing armed or read by the strategy; owner's request: does a strong
+  trend / strong phase keep going to the end of the day?). Past days (From / To, at most `MAX_DAYS` 30 weekdays) of the
+  picked stocks (scan lists, up to `MAX_STOCKS` 250) on the cached 1-minute candles (`strategy_lab.load_tape`), read on a
+  bot's (1-5) SMA periods and candle (`minutes` 0 = the bot's) the way the Trend quality card reads them (`day_reads`: the
+  7 checks of `trend_strength.read`, or `ha_trend.checks` on Heikin Ashi, and the phase now; the day is enriched once and
+  each minute reads the candles closed by then, same answers as `auto_arm.strong_read`). Every `every_min` from `first`
+  to `last`, `qualifies`: `kind` TREND (at least `min_checks` of 7 for the SMAs' side; `strong_only` = the card's Strong
+  label too) / PHASE (BULL / BEAR, not too early, ≥ `phase_min` candles) / EITHER / BOTH, `side`, LTP inside
+  `price_min`..`price_max`. Each stock once a day at its first qualifying read (at most `max_day` a day, `cap_days`),
+  entered at that minute's open the trend's way with `qty` (0 = the bot's), held to `square_off` (`follow`: points, %,
+  ₹ before / after charges, best / worst and when, `curve` = signed % per minute); the read keeps being taken: `lost_at`
+  the first that no longer passes, `held_to_end`, `lost_pnl` (closing there). `summarize`: totals, by day, by checks
+  passed, plain-words `answer`. `TrendHold` (one at a time, after `groww_pressure.wait_for_bots`, last run in
+  `trend_hold.json` next to the SMA DB, `TREND_HOLD_FILE`, keeps the backtest server awake). `GET /api/trend-hold`,
+  `POST /api/trend-hold/start` (same hours rule as the Second candle test), `POST /api/trend-hold/stop`,
+  `GET /api/trend-hold/chart?symbol=&day=&start=&end=&seconds=` (the day's 1-minute candles; with `seconds` the bots'
+  recorded per-second prices, `tick_store.between`, when there are any). The tab: summary cards, an average-move line
+  (minutes after the pick, % or ₹, all / stayed strong / lost), running P&L by day, the clicked pick's price by minute or
+  second with in / lost / best / worst / out marks, by-checks table, sortable picks table, filters, CSV, Arm / Arm ticked.
 - `backend/first_candles.py` – **First candles** on the Most active card (read-only; `components/Scalp/FirstCandles.tsx`; no
   order path, nothing in the strategy reads it): "Read first candles" reads, for the stocks the card's filters show (up to
   200), the latest session's first N candles (`candle_no` 1-6, `minutes` 1/3/5/10/15, closed candles only) from the 1-minute
@@ -1957,9 +1977,25 @@ spinning top), body and range) / Matched / Call columns
   skipped, one that starts while the previous kept trade on that stock is open is skipped (crosses only open trades while
   flat), the trade ends at the earliest of its chosen exits / stop / targets / square-off (same minute: stop, target,
   exit), P&L before charges and after (`charges.calculate_charges`), per stock, per day (running total), by exit reason,
-  skipped counts, the trades (`MAX_TRADES_OUT`), and `settings` = the BotConfig fields of that choice
-  (`settings_for_choice`). `recommend` (`POST …/recommend`): every rule toggled one at a time against the choice ("what
-  each rule adds", `delta_net`) and a greedy climb (`SEARCH_STEPS`, `SEARCH_MIN_TRADES`) to the best found.
+  skipped counts, `per_stock_day` (each stock on each day: the By day rows open into their stocks and the By stock rows into their days, Open all / Close all), the trades (`MAX_TRADES_OUT`), and `settings` = the BotConfig fields of that choice
+  (`settings_for_choice`). **Capital** (`capital`, `out["capital"]`; display only): each kept trade's full value
+  (qty × entry price), the most in use at one moment (`peak_value`: trades open together add up, one closing at a minute
+  frees its money before another opens then; `peak_at`, `peak_open`), the margin an intraday account blocks for it
+  (`peak_margin` = `Choice.margin_pct`, default `DEFAULT_MARGIN_PCT` 20 = 5×), the return on both, the largest / average
+  trade and each day's peak; the tab's Capital tiles and "Margin %" box. **Ticked stocks** (`Choice.symbols`, empty = every
+  stock; `out["universe"]` = every stock of the run with its signals, `skipped.unticked`): the result's **Stocks** tab
+  (`StrategyLab.StockPicker`: tick boxes, Tick all / Untick all / Invert / Only winners / losers / with trades / armed now /
+  Top N by P&L, search, sortable; each stock's P&L with the same rules and every stock in) keeps only the ticked stocks in
+  every number, "Backtest this in the replay" replays only them, and **Arm ticked** opens the usual Arm ticked prompt.
+  **Backtest this in the replay** (`POST /api/strategy-lab/{id}/apply`, `StrategyLabApply`: the choice plus `reset`,
+  `stop_replay`, `confirm_live`, `to_bot` 1-5 (none = the run's bot); then `replayStart` on the run's or ticked stocks and days; **Apply to bot** (a bot picker next to it) sends `to_bot` and starts no replay, so the bot trades the result on its next signals, a LIVE bot after the page asks): the switches of
+  `settings_for_choice` go on the run's bot through `_import_desk` (dry run first, Save's checks; Trade list, PAPER/LIVE,
+  name and per-stock settings stay); with **Reset the bot's other settings first** (`reset`, the tick box next to the
+  button) every other strategy field goes back to its default (`strategy_defaults`) and the lab's numbers are put on
+  (`numbers_for_bot`: SMAs, ATR, quantity, candle, cut-off / square-off, filter ranges, TSL / VWAP / decel numbers,
+  `entry_mode` SMA), so the replay trades only what the lab tested. A backtest already playing on that bot is stopped only
+  with `stop_replay` (the page asks), else 409. `recommend` (`POST …/recommend`, `judge` `NET` | `ROC`): every rule toggled one at a time against the choice ("what
+  each rule adds", `delta_net`, and the capital it needs `capital_changed` = peak margin with the return on it `roc_changed` = net ÷ that, %) and a greedy climb (`SEARCH_STEPS`, `SEARCH_MIN_TRADES`) to the best found, judged by net or by return on capital (`_score`); the page shows it above the rule ticks (`StrategyLab.BestFound`: Judge by, default return on capital, Use it).
   `choice_from_cfg` is the bot's own switches, the run's starting choice. `GET /api/strategy-lab` (runs, `rules` with
   labels), `GET /api/strategy-lab/{id}` (the run's choice evaluated), `POST /api/strategy-lab/stop`, `DELETE
   /api/strategy-lab/{id}`. UI: lists / days / bot / name, Read the days, the runs, three rule boxes (Select all / Clear),
