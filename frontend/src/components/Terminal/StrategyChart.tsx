@@ -2509,7 +2509,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   // Classic daily pivots from the previous session (pivots.py): P, R1 / S1, R2 / S2 as labelled lines.
   const pv = view?.pivots ?? null;
   const pivotsOn = shown(look.pivots, (view?.pivot_target ?? "OFF") !== "OFF");
-  const pivotKey = pivotsOn && pv ? [pv.p, pv.r1, pv.r2, pv.s1, pv.s2].join(",") : "";
+  const pivotKey = pivotsOn && pv ? [pv.p, pv.r1, pv.r2, pv.s1, pv.s2, pv.cpr_high, pv.cpr_low, pv.pdh, pv.pdl].join(",") : "";
   useEffect(() => {
     const series = candleRef.current;
     if (!series) return;
@@ -2523,6 +2523,10 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       ["S1", pv.s1, look.pivots.color],
       ["S2", pv.s2, look.pivots.color],
     ];
+    // The Central Pivot Range (its two lines around P) and yesterday's high / low, when the server sends them.
+    const mid = look.pivots.color2 ?? look.pivots.color;
+    if (pv.cpr_high != null && pv.cpr_low != null) lines.push(["CPR top", pv.cpr_high, mid], ["CPR bottom", pv.cpr_low, mid]);
+    if (pv.pdh != null && pv.pdl != null) lines.push(["Yest. high", pv.pdh, look.pivots.color], ["Yest. low", pv.pdl, look.pivots.color]);
     pivotLines.current = lines.map(([title, price, color]) =>
       series.createPriceLine({
         price,

@@ -71,6 +71,7 @@ import always_in
 import ema_filter
 import heikin_ashi
 import macd
+import index_check
 import pattern_check
 import stack_entry
 import triple_exit
@@ -431,7 +432,7 @@ SNAPSHOT_FIELDS = (
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "use_macd_grow", "macd_grow_candles", "macd_shrink_exit", "macd_shrink_candles", "ha_colours", "ha_scope",
-    "pc_entry", "pc_exit", "pc_minutes", "pc_set", "pc_within", "triple_exit",
+    "pc_entry", "pc_exit", "pc_minutes", "pc_set", "pc_within", "triple_exit", "use_index", "index_rule",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "reverse_on_exit", "reverse_colour_exit", "reverse_settings",
     "exit_join", "exit_group", "exit_need", "exit_within",
@@ -1194,7 +1195,7 @@ _FILTER_KEYS = (
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "use_macd_grow", "macd_grow_candles", "macd_shrink_exit", "macd_shrink_candles", "ha_colours", "ha_scope",
-    "pc_entry", "pc_exit", "pc_minutes", "pc_set", "pc_within", "triple_exit",
+    "pc_entry", "pc_exit", "pc_minutes", "pc_set", "pc_within", "triple_exit", "use_index", "index_rule",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -1487,6 +1488,8 @@ class StrategyEngine:
         # (side, the closed candle at the entry) already traded. Memory only.
         self._stack_tried: dict[str, int] = {}
         self._stack_done: dict[str, tuple[str, int]] = {}
+        # Nifty's 1-minute tape while a stock's entry check reads the market (index_check.py); None until read.
+        self._index_tape: pd.DataFrame | None = None
         # Daily pivot levels per (stock, trading day) (pivots.py); the earlier session never changes.
         self._pivot_cache: dict[tuple[str, dt.date], dict] = {}
         # Day high / low target per open trade (day_target.py): (symbol, trade id) -> (name, level, trigger) or None.
@@ -1916,6 +1919,13 @@ class StrategyEngine:
             self.ltp = self._ltps.get(view, 0.0)
         # The chart stock's candles when `_view_frame` works them out afresh on this pass: (tape, averages, frame).
         self._view_fresh = None
+        # Nifty's 1-minute candles for the stocks whose entry check reads the market (index_check.py). Quotes only:
+        # the index is never armed, held or ordered. A failed read keeps the last one.
+        if any(index_check.on(_cfg_for(cfg, s)) for s in watch):
+            try:
+                self._index_tape = (await self.broker.refresh(index_check.INDEX))[1]
+            except Exception:  # noqa: BLE001
+                pass
         for symbol in watch:
             if not symbol:
                 continue
@@ -3491,6 +3501,13 @@ class StrategyEngine:
             )
             if pattern:
                 entry_block = f"{entry_block}; {pattern}" if entry_block else pattern
+        if index_check.on(cfg):
+            # Nifty direction (index_check.py): the market must go the signal's way.
+            market = index_check.entry_reason(
+                self._index_tape, "LONG" if signal == "BULLISH" else "SHORT", cfg, self._exit_minutes(self._focus, cfg),
+            )
+            if market:
+                entry_block = f"{entry_block}; {market}" if entry_block else market
         only_flow = flow_exit.only_mode(cfg)
         if flow_exit.entry_on(cfg) and not only_flow:
             # Executed volume (flow_exit.py): the real order's own side must have done the set % of the shares traded.

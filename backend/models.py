@@ -485,6 +485,9 @@ class BotConfig(Base):
     high52_side: Mapped[str | None] = mapped_column(String, nullable=True, default="LONG")
     high52_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     level_line: Mapped[str | None] = mapped_column(String, nullable=True, default="BB_MIDDLE")
+    # Nifty direction check (index_check.py): entries only while Nifty goes the trade's way. SMA | DAY | BOTH.
+    use_index: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    index_rule: Mapped[str | None] = mapped_column(String, nullable=True, default="SMA")
     st_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     st_period: Mapped[int | None] = mapped_column(Integer, nullable=True, default=10)
     st_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=3.0)

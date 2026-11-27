@@ -412,6 +412,7 @@ export function strategyLabel(s: Settings): string {
     if (s.use_macd_grow) parts.push(`MACD histogram growing ${s.macd_grow_candles ?? 2} entry`);
     if (s.macd_shrink_exit) parts.push(`MACD histogram ${s.macd_shrink_candles ?? 2} exit`);
     if (s.pc_entry) parts.push("candle-pattern check");
+    if (s.use_index) parts.push("Nifty check");
     if (s.pc_exit) parts.push("candle-pattern exit");
     if (s.triple_exit && s.sma_medium) parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_medium} exit`);
     if (s.use_cvd) parts.push(`Cum. delta ${s.cvd_lookback ?? 5} entry`);
@@ -716,6 +717,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["MACD histogram growing entry", (s) => (s.use_macd_grow ? `On (${s.macd_grow_candles ?? 2} candles)` : "Off")],
   ["MACD histogram exit", (s) => (s.macd_shrink_exit ? `On (${s.macd_shrink_candles ?? 2} candles against)` : "Off")],
   ["Three-SMA entry (gaps widening)", (s) => (s.stack_entry ? `On (third SMA ${s.stack_third ?? 50}, widening ${s.stack_widen ?? 2} candle(s), each gap at least ${s.stack_min_gap ?? 0.05}%${s.stack_only ? ", only this opens trades" : ""})` : "Off")],
+  ["Nifty direction check", (s) => (s.use_index ? `On (${{ SMA: "Nifty's averages", DAY: "Nifty up / down on the day", BOTH: "averages and the day" }[String(s.index_rule ?? "SMA")] ?? s.index_rule})` : "Off")],
   ["Candle-pattern check", (s) => (s.pc_entry ? `On (${String(s.pc_set ?? "STRONG").toUpperCase() === "ALL" ? "any" : "strong"} patterns, last ${s.pc_within ?? 1} candle(s), ${Number(s.pc_minutes ?? 0) || "bot's own"} min)` : "Off")],
   ["Candle-pattern exit", (s) => (s.pc_exit ? "On" : "Off")],
   ["Fast / medium SMA exit", (s) => (s.triple_exit && s.sma_medium ? `On (${s.sma_fast ?? 9} / ${s.sma_medium})` : "Off")],
@@ -740,7 +742,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ],
   ["Heikin Ashi colours", (s) => (s.ha_colours ? (s.ha_scope === "ENTRY" ? "Entries only" : s.ha_scope === "EXIT" ? "Exits only" : "On") : "Off")],
   ["Fresh trend entry", (s) => (s.use_fresh ? `On (volume ${s.fresh_rvol ?? 1.5}× usual)` : "Off")],
-  ["Price level entry", (s) => (s.use_level ? `On (${{ BB_MIDDLE: "Bollinger middle", BB_UPPER: "outer Bollinger band", PIVOT_P: "pivot P", PIVOT_R1: "R1 / S1" }[String(s.level_line ?? "BB_MIDDLE")] ?? s.level_line})` : "Off")],
+  ["Price level entry", (s) => (s.use_level ? `On (${{ BB_MIDDLE: "Bollinger middle", BB_UPPER: "outer Bollinger band", PIVOT_P: "pivot P", PIVOT_R1: "R1 / S1", CPR: "CPR top / bottom", PREV_DAY: "yesterday's high / low" }[String(s.level_line ?? "BB_MIDDLE")] ?? s.level_line})` : "Off")],
   ["52-week high entry", (s) => (s.use_high52 ? `On (${{ LONG: "buys at the 52-week high only", SHORT: "sells at the 52-week low only", BOTH: "buys at the high, sells at the low" }[String(s.high52_side ?? "LONG")] ?? s.high52_side}${Number(s.high52_pct ?? 0) > 0 ? `, within ${s.high52_pct}%` : ", a close at the level"})` : "Off")],
   ["Supertrend entry", (s) => (s.use_supertrend ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],
   ["Supertrend exit", (s) => (s.st_exit ? `On (${s.st_period ?? 10}, ${s.st_mult ?? 3})` : "Off")],

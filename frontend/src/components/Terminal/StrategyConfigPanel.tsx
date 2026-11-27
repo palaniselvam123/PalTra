@@ -455,6 +455,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     macd_grow_candles: Math.min(5, Math.max(1, Math.round(Number(form.macd_grow_candles ?? 2)) || 2)),
     macd_shrink_exit: Boolean(form.macd_shrink_exit),
     macd_shrink_candles: Math.min(5, Math.max(1, Math.round(Number(form.macd_shrink_candles ?? 2)) || 2)),
+    use_index: Boolean(form.use_index),
+    index_rule: ["SMA", "DAY", "BOTH"].includes(String(form.index_rule)) ? (String(form.index_rule) as SmaConfig["index_rule"]) : "SMA",
     pc_entry: Boolean(form.pc_entry),
     pc_exit: Boolean(form.pc_exit),
     pc_minutes: PATTERN_CHECK_SIZES.includes(Number(form.pc_minutes ?? 0)) ? Number(form.pc_minutes ?? 0) : 0,
@@ -481,7 +483,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     use_high52: Boolean(form.use_high52),
     high52_side: ["LONG", "SHORT", "BOTH"].includes(String(form.high52_side)) ? (String(form.high52_side) as SmaConfig["high52_side"]) : "LONG",
     high52_pct: Math.min(20, Math.max(0, Number(form.high52_pct ?? 0) || 0)),
-    level_line: ["BB_MIDDLE", "BB_UPPER", "PIVOT_P", "PIVOT_R1"].includes(String(form.level_line)) ? (String(form.level_line) as SmaConfig["level_line"]) : "BB_MIDDLE",
+    level_line: ["BB_MIDDLE", "BB_UPPER", "PIVOT_P", "PIVOT_R1", "CPR", "PREV_DAY"].includes(String(form.level_line)) ? (String(form.level_line) as SmaConfig["level_line"]) : "BB_MIDDLE",
     st_exit: Boolean(form.st_exit),
     slope_exit: Boolean(form.slope_exit),
     slope_minutes: SLOPE_MINUTES.includes(Number(form.slope_minutes ?? 0)) ? Number(form.slope_minutes ?? 0) : 0,
@@ -2216,6 +2218,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             Buy only while the cumulative delta is rising, sell only while it is falling
           </label>
           </Only>
+          <IndexCheckCard form={form} set={set} isOwn={isOwn} />
           <Only s="ind colour">
           <PatternCheckCard form={form} set={set} isOwn={isOwn} />
           </Only>
@@ -2313,7 +2316,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               className="accent-[#10B981]"
             />
             {isOwn("use_level") && <OwnTag />}
-            Enter only beyond a price level
+            <span id="sma-level">Enter only beyond a price level</span>
             <InfoTip label="About the price level check">
               The signal candle must close beyond the line picked below, on the trade&apos;s side: a buy above it, a sell below
               it. Bollinger middle: the 20-candle average (Bollinger numbers in this step). Upper band: a buy above the upper
@@ -2336,7 +2339,13 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                 <option value="BB_UPPER">Upper band for a buy, lower band for a sell</option>
                 <option value="PIVOT_P">Pivot P</option>
                 <option value="PIVOT_R1">R1 for a buy, S1 for a sell</option>
+                <option value="CPR">CPR: above its top for a buy, below its bottom for a sell</option>
+                <option value="PREV_DAY">Yesterday&apos;s high for a buy, yesterday&apos;s low for a sell</option>
               </select>
+              <span>
+                <NewTag id="set-cpr-prev-day" /> CPR (Central Pivot Range) = the two lines around the pivot P, from
+                yesterday&apos;s high, low and close. Turn on Indicators → Pivot points on the chart to see them.
+              </span>
             </label>
           ) : null}
           <label id="sma-fresh" className="mt-4 flex scroll-mt-24 items-center gap-2 text-sm text-slate-300">
@@ -4150,6 +4159,13 @@ export function activeRules(f: SmaConfig): Rule[] {
   check("use_candle_dir", f.use_candle_dir, `Last ${n(f.candle_dir_count, 2)} candles must move the trade's way`);
   check("use_ema", f.use_ema, `EMA ${n(f.ema_fast, 9)} must be on the trade's side of EMA ${n(f.ema_slow, 200)}`);
   check("use_macd", f.use_macd, `MACD ${n(f.macd_fast, 12)}/${n(f.macd_slow, 26)}/${n(f.macd_signal, 9)} must be on the trade's side of its signal line`);
+  check(
+    "use_index",
+    f.use_index,
+    { SMA: "Nifty's averages must point the trade's way", DAY: "Nifty must be up on the day for a buy, down for a sell", BOTH: "Nifty must be up on the day and its averages up for a buy (the mirror for a sell)" }[
+      String(f.index_rule ?? "SMA")
+    ] ?? "Nifty must go the trade's way"
+  );
   check("pc_entry", f.pc_entry, `A ${patternSetWords(f)} candle pattern of the trade's side on the last ${n(f.pc_within, 1) > 1 ? `${n(f.pc_within, 1)} ` : ""}closed ${patternSizeWords(f)}`);
   check("use_macd_grow", f.use_macd_grow, `MACD histogram must have grown the trade's way ${n(f.macd_grow_candles, 2)} candle(s) in a row`);
   check("use_cvd", f.use_cvd, `Cumulative delta must have moved the trade's way over the last ${n(f.cvd_lookback, 5)} candles`);
@@ -4162,6 +4178,8 @@ export function activeRules(f: SmaConfig): Rule[] {
       BB_UPPER: "Price beyond the outer Bollinger band (buy above the upper, sell below the lower)",
       PIVOT_P: "Price beyond the pivot P (buy above, sell below)",
       PIVOT_R1: "Price beyond R1 / S1 (buy above R1, sell below S1)",
+      CPR: "Price beyond the CPR (buy above its top, sell below its bottom)",
+      PREV_DAY: "Price beyond yesterday's range (buy above its high, sell below its low)",
     }[String(f.level_line ?? "BB_MIDDLE")] ?? "Price beyond the chosen level"
   );
   check("use_fresh", f.use_fresh, `Fresh trend only: a new cross, beyond VWAP, the gap widening${Number(f.fresh_rvol ?? 1.5) > 0 ? `, volume ${n(f.fresh_rvol, 1.5)}× usual` : ""}`);
@@ -6956,6 +6974,58 @@ function patternSetWords(f: SmaConfig): string {
 }
 
 /** Candle patterns as an extra entry check (and the numbers the pattern exit in step 3 shares), pattern_check.py. */
+function IndexCheckCard({
+  form,
+  set,
+  isOwn,
+}: {
+  form: SmaConfig;
+  set: (key: keyof SmaConfig, value: string | boolean | number) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  return (
+    <div id="sma-index-check" className="mt-4 scroll-mt-24 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset ring-white/10">
+      <div className="flex items-center gap-1">
+        Market direction (Nifty) <NewTag id="set-index-check" />
+        <InfoTip label="About the Nifty direction check">
+          Most intraday losses come from buying a stock while the whole market is falling. With this on, a buy goes only
+          while Nifty 50 is going up and a sell only while it is going down; otherwise the signal is skipped like the other
+          checks, and late entry can take it once the market turns. &quot;Averages&quot; reads Nifty&apos;s own two moving
+          averages (this bot&apos;s SMA periods) on the same candle size the bot trades. &quot;Up / down on the day&quot;
+          compares Nifty with its first price today. An index has no traded volume, so there is no VWAP rule. If Nifty
+          cannot be read (no Groww login), entries are refused and the reason says so. Force, news and hand-off orders do
+          not read it.
+        </InfoTip>
+      </div>
+      <label className="mt-2 flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={Boolean(form.use_index)}
+          onChange={(e) => set("use_index", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        {isOwn("use_index") && <OwnTag />}
+        Buy only while Nifty is going up, sell only while it is going down
+      </label>
+      {form.use_index ? (
+        <label className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          {isOwn("index_rule") && <OwnTag />}
+          Nifty is &quot;going up&quot; when
+          <select
+            value={String(form.index_rule ?? "SMA")}
+            onChange={(e) => set("index_rule", e.target.value)}
+            className="min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100"
+          >
+            <option value="SMA">its fast average is above its slow average</option>
+            <option value="DAY">it is above its first price today</option>
+            <option value="BOTH">both</option>
+          </select>
+        </label>
+      ) : null}
+    </div>
+  );
+}
+
 function PatternCheckCard({
   form,
   set,

@@ -66,6 +66,8 @@ import heikin_ashi
 import ha_trend
 import trend_phases
 import trend_strength
+import index_check
+import pivots
 
 SESSION_OPEN_SEC = 9 * 3600 + 15 * 60  # 09:15 IST, seconds after IST midnight
 
@@ -223,6 +225,20 @@ class ChopRow:
     # above third) / BEARISH (the mirror) / None (not lined up, or the third SMA not formed), the signed gaps in %
     # (fast vs slow, slow vs third), for how many closed candles the lines have been stacked, and for how many candles
     # in a row BOTH gaps have widened (0 = not widening now).
+    # Against the market (the pass reads Nifty once): Nifty's move today in % and this stock's day move minus it
+    # (positive = stronger than Nifty). None when Nifty could not be read.
+    index_move_pct: float | None = None
+    rs_pct: float | None = None
+    # Central Pivot Range from the previous session (pivots.levels): its width in % of the pivot (narrow = a trending
+    # day is more likely, wide = sideways), where the last price sits (ABOVE / INSIDE / BELOW), and yesterday's high / low
+    # with whether the price is beyond them (ABOVE the high / BELOW the low / INSIDE).
+    cpr_width_pct: float | None = None
+    cpr_side: str | None = None
+    cpr_high: float | None = None
+    cpr_low: float | None = None
+    prev_high: float | None = None
+    prev_low: float | None = None
+    prev_side: str | None = None
     sma_third: int = 0
     stack3: str | None = None
     gap_fast_slow_pct: float | None = None
@@ -326,6 +342,36 @@ def ha_bars(bars: pd.DataFrame) -> pd.DataFrame:
 
 MAX_SKIP_CANDLES = 12
 WIDEN_MAX = 30  # candles the three-SMA read looks back for the stack's age and the widening run
+
+
+def day_levels(frame_1m: pd.DataFrame, ltp: float | None) -> dict:
+    """The row's CPR and previous-day reads (pivots.levels on the latest session in the download). {} when unknown."""
+    try:
+        day = dt.datetime.fromtimestamp(int(frame_1m["ts"].iloc[-1]), IST).date()
+        lv = pivots.levels(frame_1m, day)
+    except Exception:  # noqa: BLE001
+        lv = None
+    if lv is None or ltp is None:
+        return {}
+
+    def where(low: float, high: float) -> str:
+        return "ABOVE" if ltp > high else "BELOW" if ltp < low else "INSIDE"
+
+    return {
+        "cpr_width_pct": lv["cpr_width_pct"], "cpr_high": lv["cpr_high"], "cpr_low": lv["cpr_low"],
+        "cpr_side": where(lv["cpr_low"], lv["cpr_high"]),
+        "prev_high": lv["pdh"], "prev_low": lv["pdl"], "prev_side": where(lv["pdl"], lv["pdh"]),
+    }
+
+
+def with_index(rows: list, index_move: float | None) -> None:
+    """Set each row's move against the market: its day move minus Nifty's (in place)."""
+    if index_move is None:
+        return
+    for row in rows:
+        row.index_move_pct = round(float(index_move), 4)
+        if row.day_move_pct is not None:
+            row.rs_pct = round(float(row.day_move_pct) - float(index_move), 4)
 
 
 def pick_third(third, slow: int) -> int:
@@ -507,6 +553,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         three = three_read(bars3, sma_fast, sma_slow, third)
     return replace(
         base,
+        **day_levels(frame_1m, ltp),
         **three,
         **activity(frame_1m),
         **trend,
@@ -867,6 +914,13 @@ class ChopScanner:
         except Exception as exc:  # noqa: BLE001
             log.exception("chop scan failed")
             errors[str(exc)[:200] or type(exc).__name__] = 1
+        if rows:
+            # Nifty once per pass, for each row's move against the market. A failed read leaves the column empty.
+            try:
+                index_tape = await fetch(index_check.INDEX, window_start(now, WARMUP_DAYS), end)
+                with_index(rows, index_check.day_move(index_tape))
+            except Exception:  # noqa: BLE001
+                log.info("chop scan: Nifty could not be read for the vs-Nifty column")
         # The most trending first, then mixed, then choppy. Inside a bucket:
         # TRENDING keeps the longest run on top; CHOPPY keeps the most crosses on top.
         bucket = {TRENDING: 0, MIXED: 1, CHOPPY: 2}
