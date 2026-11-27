@@ -361,6 +361,8 @@ class OpenPosition:
     # and the Supertrend line of the last closed candle read in stage 2.
     plan_r: float | None = None
     plan_stage: int = 0
+    #: The level the profit safety net last moved the stop to (memory only): a stop filled there is NET_SL_HIT.
+    net_stop: float | None = None
     plan_bar: int | None = None
     plan_line: float | None = None
     # Exits set to AND (exit_join.py): which grouped exits have fired and when (memory only).
@@ -6268,6 +6270,8 @@ class StrategyEngine:
             tighter = level > float(pos.sl_trigger) if pos.direction == "LONG" else level < float(pos.sl_trigger)
             if tighter:
                 await self._move_stop(pos, symbol, level, "safety-net stop")
+            if pos.sl_trigger is not None and abs(float(pos.sl_trigger) - level) < 1e-6:
+                pos.net_stop = level
 
     async def _watch_pressure_fade(self, cfg: BotConfig) -> None:
         """Most active stocks: close once the buyers (a buy) or sellers (a sell) fade to the set % (pressure_exit.py)."""
@@ -6516,6 +6520,7 @@ class StrategyEngine:
                     "GAP_SL_HIT": "moving stop hit — flat",
                     "TSL_HIT": "trailing stop hit — flat",
                     "ST_SL_HIT": "Supertrend stop hit — flat",
+                    "NET_SL_HIT": "profit safety net hit — flat",
                     "BB_TARGET": "Bollinger band target — flat",
                     "BB_MIDDLE": "Bollinger middle band exit — flat",
                     "GAP_FADE": "SMA gap faded — flat",
@@ -8319,6 +8324,7 @@ _ALERT_REASON = {
     "TSL_HIT": "trailing stop",
     "ST_SL_HIT": "Supertrend stop",
     "PLAN_SL_HIT": "stop plan stop (breakeven / Supertrend)",
+    "NET_SL_HIT": "profit safety net",
     "PLAN_STOP": "stop plan level reached",
     "STOP_LOST": "Groww dropped the stop, closed at the market",
     "SOLD_ON_GROWW": "closed on Groww outside the bot",
@@ -8809,12 +8815,14 @@ STOP_SOLD_OUTSIDE = "SOLD_ON_GROWW"
 #: an exit that skipped the cancel left the stop working on Groww, where it could later open the other side.
 _STOP_FILLS = frozenset({
     "ATR_SL_HIT", "TSL_HIT", "ST_SL_HIT", "GAP_SL_HIT", "VWAP_SL_HIT", "PLAN_SL_HIT", smart_stop.HIT_REASON,
-    "SOLD_ON_GROWW", "STOP_LOST",
+    target_net.STOP_REASON, "SOLD_ON_GROWW", "STOP_LOST",
 })
 
 
 def _stop_reason(pos: "OpenPosition") -> str:
     """The exit reason for a stop of this position that filled."""
+    if pos.net_stop is not None and pos.sl_trigger is not None and abs(float(pos.sl_trigger) - pos.net_stop) < 1e-6:
+        return target_net.STOP_REASON  # the stop sits where the profit safety net put it
     if pos.plan_stage:
         return stop_plan.HIT_REASON
     if pos.trailing:

@@ -137,6 +137,7 @@ STRATEGY_GUIDE = {
     "exit_reasons": {
         "MA_CROSS": "opposite SMA cross",
         "ATR_SL_HIT": "ATR stop",
+        "NET_SL_HIT": "profit safety net (the stop it moved up)",
         "GAP_SL_HIT": "SMA-gap moving stop",
         "TSL_HIT": "trailing stop",
         "ST_SL_HIT": "Supertrend stop",

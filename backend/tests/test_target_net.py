@@ -120,3 +120,28 @@ async def test_profit_start_runs_the_net_without_any_target():
     eng.ltp = 102.9
     await eng._watch_profit_net(cfg)
     assert calls == [(102.9, target_net.EXIT_REASON)]
+
+
+@pytest.mark.asyncio
+async def test_a_stop_the_net_moved_is_booked_as_the_safety_net():
+    """Owner's PAGEIND case: the net moved the ATR stop up and the hit read "ATR SL"; it now reads as the net."""
+    import strategy_engine
+
+    eng, _calls = _engine("LONG", 100.0)
+    pos = eng.positions["SHREECEM"]
+    pos.qty = 1
+
+    async def move(p, symbol, level, label):
+        p.sl_trigger = level
+        return True
+
+    eng._move_stop = move
+    assert strategy_engine._stop_reason(pos) == "ATR_SL_HIT"
+    eng.ltp = 101.0
+    pos.high = 101.0
+    cfg = SimpleNamespace(target_net=True, target_net_start="PCT", target_net_start_pct=0.5, symbol="SHREECEM")
+    await eng._watch_profit_net(cfg)
+    assert strategy_engine._stop_reason(pos) == target_net.STOP_REASON == "NET_SL_HIT"
+    assert target_net.STOP_REASON in strategy_engine._STOP_FILLS  # a stop's own fill: nothing cancelled, no 2nd exit
+    pos.sl_trigger = 100.9  # another stop tightened past the net: its own name again
+    assert strategy_engine._stop_reason(pos) == "ATR_SL_HIT"

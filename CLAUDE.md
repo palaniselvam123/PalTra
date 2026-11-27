@@ -317,7 +317,9 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (70) % of the best profit per share (`floor`, best = `pos.high` / `low`, stateless, so a restart finds the same net), and
   `target_net_keep2` (75) % once the best profit is `target_net_at2` (2.0, 0 = none) × the start distance; a price at the
   floor closes (`TARGET_NET` via `_exit_now`, LIVE stop cancelled first) and, with the stop on, the stop moves up to it
-  (`_move_stop`, tighter only; a hit there shows as the stop). The old mode that held a trade past the pivot / day target
+  (`_move_stop`, tighter only; `OpenPosition.net_stop`, memory only). A hit of the stop where the net put it is booked as
+  `NET_SL_HIT` (`target_net.STOP_REASON`, in `_STOP_FILLS`: a stop's own fill; shown as "Profit safety net", owner's
+  PAGEIND case where it read "ATR SL"); once another stop tightens past it, the stop type's own name again. The old mode that held a trade past the pivot / day target
   was removed (owner's request): those targets close as usual again, and a saved `TARGET` start reads as `PCT`
   (`target_net.start`, frontend `netStartOf`). Counts as an exit for `strategyChecks.noExitOn`.
 - `backend/order_gate.py` – **Simple order-flow check** (owner's request: the waiting / executed settings were hard to set
