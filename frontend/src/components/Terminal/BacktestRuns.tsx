@@ -413,6 +413,7 @@ export function strategyLabel(s: Settings): string {
     if (s.macd_shrink_exit) parts.push(`MACD histogram ${s.macd_shrink_candles ?? 2} exit`);
     if (s.pc_entry) parts.push("candle-pattern check");
     if (s.pc_exit) parts.push("candle-pattern exit");
+    if (s.triple_exit && s.sma_medium) parts.push(`SMA ${s.sma_fast ?? 9}/${s.sma_medium} exit`);
     if (s.use_cvd) parts.push(`Cum. delta ${s.cvd_lookback ?? 5} entry`);
     if (s.cvd_div_exit) parts.push(`Cum. delta divergence ${s.cvd_div_lookback ?? 10} exit`);
     if (s.reverse_on_exit) parts.push(`Reverse on ${String(s.reverse_on_exit).toLowerCase().replace(/,/g, " / ")} exit`);
@@ -716,6 +717,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["MACD histogram exit", (s) => (s.macd_shrink_exit ? `On (${s.macd_shrink_candles ?? 2} candles against)` : "Off")],
   ["Candle-pattern check", (s) => (s.pc_entry ? `On (${String(s.pc_set ?? "STRONG").toUpperCase() === "ALL" ? "any" : "strong"} patterns, last ${s.pc_within ?? 1} candle(s), ${Number(s.pc_minutes ?? 0) || "bot's own"} min)` : "Off")],
   ["Candle-pattern exit", (s) => (s.pc_exit ? "On" : "Off")],
+  ["Fast / medium SMA exit", (s) => (s.triple_exit && s.sma_medium ? `On (${s.sma_fast ?? 9} / ${s.sma_medium})` : "Off")],
   ["Cumulative delta entry", (s) => (s.use_cvd ? `On (${s.cvd_lookback ?? 5} candles)` : "Off")],
   ["Cumulative delta divergence exit", (s) => (s.cvd_div_exit ? `On (${s.cvd_div_lookback ?? 10} candles)` : "Off")],
   ["Reverse instead of only closing", (s) => (s.reverse_on_exit ? String(s.reverse_on_exit) : "Off")],

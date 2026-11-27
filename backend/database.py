@@ -185,6 +185,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "pc_minutes": "INTEGER DEFAULT 0",
             "pc_set": "VARCHAR(8) DEFAULT 'STRONG'",
             "pc_within": "INTEGER DEFAULT 1",
+            "triple_exit": "BOOLEAN DEFAULT 0",
             "use_cvd": "BOOLEAN DEFAULT 0",
             "cvd_lookback": "INTEGER DEFAULT 5",
             "cvd_div_exit": "BOOLEAN DEFAULT 0",

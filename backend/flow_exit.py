@@ -48,7 +48,7 @@ CONFIRM_REASONS = frozenset({
     "MA_CROSS", "PROFITABLE_TREND_EXHAUSTION", "COLOUR_TURN", "SMA9_VTURN", "SMA9_TURN", "SMA9_TURN_AGAINST",
     "SMA9_BEND", "SMA9_DECEL", "COUNTER_CANDLES", "SMALL_CANDLE_EXIT", "EXIT_CANDLE_CROSS", "SUPERTREND",
     "BB_MIDDLE", "BB_TARGET", "EMA_CROSS", "MACD_CROSS", "MACD_SHRINK", "CVD_DIVERGENCE", "SLOW_SMA_BREACH",
-    "PATTERN_EXIT",
+    "PATTERN_EXIT", "FAST_MEDIUM_CROSS",
 })
 WINDOWS = (0, 1, 2, 3, 5, 10, 15)  # the ready-made choices on the Settings card
 MAX_WINDOW = 60  # a custom window: any whole number of minutes from 1 to this (0 = the exit candle)

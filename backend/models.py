@@ -451,6 +451,8 @@ class BotConfig(Base):
     pc_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     pc_set: Mapped[str | None] = mapped_column(String(8), nullable=True, default="STRONG")
     pc_within: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    # Three-line mode (sma_medium set): close on the fast / medium SMA cross against the trade (triple_exit.py).
+    triple_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Cumulative delta (cum_delta.py): entry only while it moves the trade's way, exit on a price / delta divergence.
     use_cvd: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     cvd_lookback: Mapped[int | None] = mapped_column(Integer, nullable=True, default=5)

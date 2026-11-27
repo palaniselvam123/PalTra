@@ -43,6 +43,7 @@ export function noExitOn(cfg: Partial<SmaConfig> | null | undefined): boolean {
     !cfg.macd_exit &&
     !cfg.macd_shrink_exit &&
     !cfg.pc_exit &&
+    !(cfg.triple_exit && cfg.sma_medium != null) &&
     !cfg.cvd_div_exit &&
     !cfg.st_exit &&
     !cfg.slope_exit &&
@@ -214,6 +215,8 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
   if (cfg.ema_exit) out.push({ name: `EMA cross exit (${cfg.ema_fast ?? 9}/${cfg.ema_slow ?? 200})`, when: candle, code: "EMA_CROSS" });
   if (cfg.macd_exit) out.push({ name: `MACD cross exit (${cfg.macd_fast ?? 12}/${cfg.macd_slow ?? 26}/${cfg.macd_signal ?? 9})`, when: candle, code: "MACD_CROSS" });
   if (cfg.macd_shrink_exit) out.push({ name: `MACD histogram exit (${cfg.macd_shrink_candles ?? 2} candles against)`, when: candle, code: "MACD_SHRINK" });
+  if (cfg.triple_exit && cfg.sma_medium != null)
+    out.push({ name: `Fast / medium SMA cross (${cfg.sma_fast ?? 9} / ${cfg.sma_medium})`, when: candle, code: "FAST_MEDIUM_CROSS" });
   if (cfg.pc_exit) out.push({ name: `Candle pattern against the trade`, when: candle, code: "PATTERN_EXIT" });
   if (cfg.cvd_div_exit) out.push({ name: `Cumulative delta divergence (${cfg.cvd_div_lookback ?? 10} candles)`, when: candle, code: "CVD_DIVERGENCE" });
   const exitCandle = num(cfg.exit_candle_minutes, 0);
