@@ -616,6 +616,8 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     stack_third: Math.min(200, Math.max(3, Math.round(Number(form.stack_third ?? 50)) || 50)),
     stack_min_gap: Math.min(5, Math.max(0, Number(form.stack_min_gap ?? 0.05) || 0)),
     stack_only: Boolean(form.stack_only),
+    stack_fresh: Boolean(form.stack_fresh),
+    stack_fresh_candles: Math.min(30, Math.max(1, Math.round(Number(form.stack_fresh_candles ?? 6)) || 6)),
     tq_only: form.tq_only !== false,
     tq_exit: Boolean(form.tq_exit),
     tq_exit_score: Math.min(100, Math.max(0, Math.round(Number(form.tq_exit_score ?? 40)))) || 0,
@@ -4369,7 +4371,7 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({
       group: "enter",
       key: "stack_entry",
-      text: `Three SMAs (${stackLines(f)}): a flat stock is entered once they are stacked and both gaps have widened ${f.stack_widen ?? 2} candle(s) in a row${Number(f.stack_min_gap ?? 0.05) > 0 ? `, each gap at least ${f.stack_min_gap ?? 0.05}%` : ""}${f.stack_only ? " (only this opens trades)" : ""}`,
+      text: `Three SMAs (${stackLines(f)}): a flat stock is entered once they are stacked and both gaps have widened ${f.stack_widen ?? 2} candle(s) in a row${Number(f.stack_min_gap ?? 0.05) > 0 ? `, each gap at least ${f.stack_min_gap ?? 0.05}%` : ""}${f.stack_fresh ? `, lined up within the last ${f.stack_fresh_candles ?? 6} candle(s)` : ""}${f.stack_only ? " (only this opens trades)" : ""}`,
       off: { stack_entry: false },
     });
   if (f.tq_entry)
@@ -6794,7 +6796,7 @@ function StackEntry({
   set: (key: keyof SmaConfig, value: string | boolean) => void;
   isOwn: (key: keyof SmaConfig) => boolean;
 }) {
-  const own = (["stack_entry", "stack_widen", "stack_third", "stack_min_gap", "stack_only"] as const).some((k) => isOwn(k));
+  const own = (["stack_entry", "stack_widen", "stack_third", "stack_min_gap", "stack_only", "stack_fresh", "stack_fresh_candles"] as const).some((k) => isOwn(k));
   const box = "min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9";
   const on = Boolean(form.stack_entry);
   const fast = Number(form.sma_fast ?? 9);
@@ -6850,6 +6852,20 @@ function StackEntry({
           The third SMA must be longer than the slow SMA ({slow}) and at most 200, or nothing is entered.
         </p>
       ) : null}
+      <label className="mt-2 flex flex-wrap items-center gap-2 pl-6 text-sm text-slate-300">
+        <input type="checkbox" disabled={!on} checked={Boolean(form.stack_fresh)} onChange={(e) => set("stack_fresh", e.target.checked)} />
+        Only a fresh line-up: the three lines lined up within the last
+        <input type="number" min={1} max={30} step={1} disabled={!on || !form.stack_fresh} value={Number(form.stack_fresh_candles ?? 6)}
+          onChange={(e) => set("stack_fresh_candles", e.target.value)} className={box} aria-label="Candles since the three lines lined up, at most" />
+        candle(s)
+        <NewTag id="set-stack-fresh" />
+        <InfoTip label="About a fresh line-up">
+          Without this, a stock whose three lines have been in order since yesterday can still be entered when its gaps start
+          widening again. With it, the entry is taken only when the lines lined up (the three crossed into order) no more than
+          this many closed candles ago, so you join a trend that has just started. Counted on the bot&apos;s own candles; once
+          the line-up is older than this, that trend is not entered.
+        </InfoTip>
+      </label>
       <label className="mt-2 flex items-center gap-2 pl-6 text-sm text-slate-300">
         <input type="checkbox" disabled={!on} checked={Boolean(form.stack_only)} onChange={(e) => set("stack_only", e.target.checked)} />
         Only this opens trades (the SMA cross and the other signals open nothing; a cross still closes a trade)

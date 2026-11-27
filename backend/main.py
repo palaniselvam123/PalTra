@@ -1014,6 +1014,8 @@ class ConfigUpdate(BaseModel):
     stack_third: int | None = Field(default=None, ge=3, le=stack_entry_mod.THIRD_MAX)
     stack_min_gap: float | None = Field(default=None, ge=0, le=5)
     stack_only: bool | None = None
+    stack_fresh: bool | None = None
+    stack_fresh_candles: int | None = Field(default=None, ge=1, le=stack_entry_mod.FRESH_MAX)
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -2202,6 +2204,8 @@ def _gap_dict(row) -> dict:
         "stack_third": int(getattr(row, "stack_third", None) or stack_entry_mod.THIRD_DEFAULT),
         "stack_min_gap": stack_entry_mod.min_gap(row),
         "stack_only": bool(getattr(row, "stack_only", False)),
+        "stack_fresh": bool(getattr(row, "stack_fresh", False)),
+        "stack_fresh_candles": int(getattr(row, "stack_fresh_candles", None) or stack_entry_mod.FRESH_DEFAULT),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),
@@ -6106,6 +6110,8 @@ class StrategyLabChoice(BaseModel):
     #: `stack_gap` %, one of strategy_lab.STACK_GAPS).
     source: Literal["CROSS", "STACK"] = "CROSS"
     stack_gap: float = Field(default=0.05, ge=0, le=5)
+    #: Only a fresh line-up: the lines stacked at most this many candles before the entry (0 = not checked).
+    stack_fresh: int = Field(default=0, ge=0, le=stack_entry_mod.FRESH_MAX)
 
 
 def _lab_job_or_404(job_id: str) -> tuple[dict, list[dict]]:

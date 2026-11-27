@@ -350,11 +350,13 @@ def snap_gap(value) -> float:
     return min(STACK_GAPS, key=lambda g: abs(g - v))
 
 
-def _stack_signals(rich: pd.DataFrame, s: dict) -> list[tuple[int, str, list[float]]]:
+def _stack_signals(rich: pd.DataFrame, s: dict) -> list[tuple[int, str, list[float], int]]:
     """The three-SMA entries on the bot's candles, as `stack_entry.call` takes them: (closed candle, side, the gap levels
     it is the entry for). Lines in order shortest to longest; both gaps widening `stack_widen` closed candles in a row
     (chop_scan.three_read's count); each widening run entered once per gap level, at the first candle its smaller gap
-    reached that level; a run widening `stack_entry.RUN_CAP` candles or more is too old to join."""
+    reached that level; a run widening `stack_entry.RUN_CAP` candles or more is too old to join. The last item is how many
+    closed candles in a row the lines have been stacked that way (chop_scan.three_read's `stack3_candles`), for the
+    "fresh line-up" check (`stack_entry.fresh_need`)."""
     lines = s.get("stack_lines")
     if not lines or "close" not in rich:
         return []
@@ -365,15 +367,20 @@ def _stack_signals(rich: pd.DataFrame, s: dict) -> list[tuple[int, str, list[flo
         g1 = (f - m) / m * 100.0
         g2 = (m - t) / t * 100.0
     need = max(1, int(s.get("stack_widen") or 2))
-    out: list[tuple[int, str, list[float]]] = []
+    out: list[tuple[int, str, list[float], int]] = []
     widen = 0
+    age = 0
+    age_sign = 0.0
     used: dict[tuple[str, int], set[float]] = {}
     for i in range(1, len(close)):
         x1, x2, p1, p2 = g1[i], g2[i], g1[i - 1], g2[i - 1]
         if not (np.isfinite(x1) and np.isfinite(x2)) or not ((x1 > 0 and x2 > 0) or (x1 < 0 and x2 < 0)):
             widen = 0
+            age, age_sign = 0, 0.0
             continue
         sign = 1.0 if x1 > 0 else -1.0
+        age = age + 1 if age_sign == sign else 1
+        age_sign = sign
         grew = np.isfinite(p1) and np.isfinite(p2) and abs(x1) > abs(p1) and abs(x2) > abs(p2)
         same = np.isfinite(p1) and np.isfinite(p2) and p1 * sign > 0 and p2 * sign > 0
         widen = (widen + 1 if same else 1) if grew else 0
@@ -386,7 +393,7 @@ def _stack_signals(rich: pd.DataFrame, s: dict) -> list[tuple[int, str, list[flo
         steps = [g for g in STACK_GAPS if g not in taken and floor >= g]
         if steps:
             taken.update(steps)
-            out.append((i, side, steps))
+            out.append((i, side, steps, age))
     return out
 
 
@@ -469,7 +476,7 @@ def choice_from_cfg(cfg) -> dict:
         targets.append("pivot_r2")
     source = "STACK" if stack_entry.enabled(cfg) and stack_entry.only(cfg) else "CROSS"
     return {"entries": entries, "exits": exits, "stop": stop, "targets": targets, "source": source,
-            "stack_gap": snap_gap(stack_entry.min_gap(cfg))}
+            "stack_gap": snap_gap(stack_entry.min_gap(cfg)), "stack_fresh": stack_entry.fresh_need(cfg)}
 
 
 def settings_for_choice(choice: dict, base: dict | None = None) -> dict:
@@ -530,6 +537,10 @@ def settings_for_choice(choice: dict, base: dict | None = None) -> dict:
     out["stack_only"] = stack
     if stack:
         out["stack_min_gap"] = snap_gap(choice.get("stack_gap"))
+        fresh = _fresh(choice.get("stack_fresh"))
+        out["stack_fresh"] = bool(fresh)
+        if fresh:
+            out["stack_fresh_candles"] = fresh
         if base and base.get("stack_widen"):
             out["stack_widen"] = int(base["stack_widen"])
     return out
@@ -1097,7 +1108,11 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
             signals.append((i, "LONG", "cross", None))
         elif a >= 0 > b:
             signals.append((i, "SHORT", "cross", None))
-    signals += [(i, side, "stack", steps) for i, side, steps in _stack_signals(rich, s) if i < len(x.ts) - 1]
+    ages: dict[int, int] = {}
+    for i, side, steps, age in _stack_signals(rich, s):
+        if i < len(x.ts) - 1:
+            signals.append((i, side, "stack", steps))
+            ages[i] = age
     signals.sort(key=lambda sig: (sig[0], sig[2]))
     for i, side, source, gap_steps in signals:
         if x.day[i] not in wanted:
@@ -1189,7 +1204,7 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
                 # What opened it: "cross" (SMA cross) or "stack" (three SMAs stacked, gaps widening; gap_steps = the
                 # "each gap at least" levels this is the entry for).
                 "source": source,
-                **({"gap_steps": gap_steps} if gap_steps is not None else {}),
+                **({"gap_steps": gap_steps, "stack_age": ages.get(i, 0)} if gap_steps is not None else {}),
                 "cross_ts": int(x.ts[i]),
                 "entry_ts": entry_ts,
                 "entry_price": entry,
@@ -1501,7 +1516,16 @@ def clean_choice(raw: dict | None) -> dict:
         "margin_pct": round(min(100.0, max(1.0, margin)), 2),
         "source": str(raw.get("source") or "CROSS").upper() if str(raw.get("source") or "CROSS").upper() in ENTRY_SOURCES else "CROSS",
         "stack_gap": snap_gap(raw.get("stack_gap", 0.05)),
+        # Only a fresh line-up: the lines stacked no more than this many candles before the entry (0 = not checked).
+        "stack_fresh": _fresh(raw.get("stack_fresh")),
     }
+
+
+def _fresh(value) -> int:
+    try:
+        return max(0, min(stack_entry.FRESH_MAX, int(value or 0)))
+    except (TypeError, ValueError):
+        return 0
 
 
 #: Intraday margin blocked per trade, % of its value (Groww MIS, 5x); the practice wallet's default too.
@@ -1595,6 +1619,8 @@ def evaluate(trades: list[dict], choice: dict, settings: dict | None = None, wit
         if t.get("source", "cross") != source:
             continue
         if source == "stack" and not any(abs(float(g) - gap) < 1e-9 for g in t.get("gap_steps") or []):
+            continue
+        if source == "stack" and choice["stack_fresh"] and int(t.get("stack_age") or 0) > choice["stack_fresh"]:
             continue
         universe[t["symbol"]] = universe.get(t["symbol"], 0) + 1
         if wanted and t["symbol"] not in wanted:

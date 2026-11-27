@@ -376,6 +376,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "stack_third": "INTEGER DEFAULT 50",
             "stack_min_gap": "FLOAT DEFAULT 0.05",
             "stack_only": "BOOLEAN DEFAULT 0",
+            "stack_fresh": "BOOLEAN DEFAULT 0",
+            "stack_fresh_candles": "INTEGER DEFAULT 6",
             "use_or_volume": "BOOLEAN DEFAULT 0",
             "use_or_vwap": "BOOLEAN DEFAULT 0",
             "use_or_spread": "BOOLEAN DEFAULT 0",

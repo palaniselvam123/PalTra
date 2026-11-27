@@ -6,7 +6,9 @@ card's "3 SMAs" read as a bot strategy). A flat armed stock is entered when, on 
 * the three moving averages are **stacked** one way: fast above slow above the third = a buy, the mirror = a sell;
 * **both gaps** (fast vs slow, slow vs third) have **widened** on each of the last `stack_widen` (1-10, default 2)
   closed candles in a row, so the trend is still opening up;
-* each gap is at least `stack_min_gap` % wide (0-5, default 0.05; 0 = any), so lines that barely differ do not count.
+* each gap is at least `stack_min_gap` % wide (0-5, default 0.05; 0 = any), so lines that barely differ do not count;
+* with `stack_fresh` (off by default) the three lines lined up no more than `stack_fresh_candles` (1-30, default 6)
+  closed candles ago (owner's request: only fresh trends, not a stack that has stood since yesterday and widens again).
 
 The three lines: SMA fast / slow and a third, longer one (`stack_third`, default 50, longer than the slow SMA). A bot
 that already trades three lines (`sma_medium` set) uses its own fast / medium / slow and `stack_third` is not read.
@@ -49,6 +51,21 @@ def widen_need(cfg) -> int:
     except (TypeError, ValueError):
         value = 2
     return max(1, min(WIDEN_MAX, value))
+
+
+FRESH_DEFAULT = 6
+FRESH_MAX = 30  # chop_scan.WIDEN_MAX: how far back the stacked count goes
+
+
+def fresh_need(cfg) -> int:
+    """Candles the lines may have been lined up at most (0 = not checked)."""
+    if not bool(getattr(cfg, "stack_fresh", False)):
+        return 0
+    try:
+        value = int(getattr(cfg, "stack_fresh_candles", FRESH_DEFAULT) or FRESH_DEFAULT)
+    except (TypeError, ValueError):
+        value = FRESH_DEFAULT
+    return max(1, min(FRESH_MAX, value))
 
 
 def min_gap(cfg) -> float:
@@ -111,6 +128,11 @@ def call(frame: pd.DataFrame | None, cfg) -> tuple[str | None, int | None, str]:
         return None, None, f"{names} stacked {word}, widening {widened} of {need} candle(s) ({gaps})"
     if floor > 0 and min(abs(a), abs(b)) < floor:
         return None, None, f"{names} stacked {word} and widening, but a gap is under {floor:g}% ({gaps})"
+    fresh = fresh_need(cfg)
+    stacked = int(got.get("stack3_candles") or 0)
+    if fresh and stacked > fresh:
+        return None, None, (f"{names} stacked {word} for {stacked}{'+' if stacked >= FRESH_MAX else ''} candles, "
+                            f"more than the {fresh} allowed (not a fresh line-up) ({gaps})")
     if widened >= RUN_CAP:
         # The read counts a run only this far back, so its start is not known: too old to join, and never traded twice.
         return None, None, f"{names} stacked {word}, widening for {RUN_CAP}+ candles: too late to join ({gaps})"

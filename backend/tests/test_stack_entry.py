@@ -148,3 +148,20 @@ def test_api_saves_the_settings(tmp_path, monkeypatch):
         assert client.put("/api/config", json={"stack_widen": 0}).status_code == 422
         assert client.put("/api/config", json={"stack_third": 500}).status_code == 422
     database.reset_engine()
+
+
+def test_only_a_fresh_line_up_when_ticked():
+    """stack_fresh: the three lines must have lined up no more than N closed candles ago (owner's request)."""
+    side, _, _ = stack_entry.call(_frame(RISE), _cfg())
+    assert side == "LONG"
+    import chop_scan
+
+    stacked = chop_scan.three_read(_frame(RISE).iloc[:-1], 3, 6, 12)["stack3_candles"]
+    assert stacked > 2
+    side, _, note = stack_entry.call(_frame(RISE), _cfg(stack_fresh=True, stack_fresh_candles=stacked - 1))
+    assert side is None and "not a fresh line-up" in note and f"more than the {stacked - 1} allowed" in note
+    assert stack_entry.call(_frame(RISE), _cfg(stack_fresh=True, stack_fresh_candles=stacked))[0] == "LONG"
+    # off = not checked, whatever the number
+    assert stack_entry.call(_frame(RISE), _cfg(stack_fresh=False, stack_fresh_candles=1))[0] == "LONG"
+    assert stack_entry.fresh_need(NS(stack_fresh=True, stack_fresh_candles=99)) == stack_entry.FRESH_MAX
+    assert stack_entry.fresh_need(NS(stack_fresh=False, stack_fresh_candles=4)) == 0

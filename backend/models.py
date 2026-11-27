@@ -721,6 +721,9 @@ class BotConfig(Base):
     stack_third: Mapped[int | None] = mapped_column(Integer, nullable=True, default=50)
     stack_min_gap: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.05)
     stack_only: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Only a fresh line-up: the three lines stacked no more than stack_fresh_candles closed candles ago (stack_entry).
+    stack_fresh: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    stack_fresh_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=6)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
