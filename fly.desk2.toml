@@ -32,10 +32,10 @@ kill_timeout = '15s'
   source = 'data'
   destination = '/data'
 
-# A shared-CPU machine: the second desk's Fly account is on the Free plan, which refuses performance
-# machines. 2 shared CPUs and 2 GB run the desk, the bots and replays; a heavy replay can slow its pages.
-# On a Pay As You Go account switch to cpu_kind = 'performance', memory_mb = 4096 like fly.toml.
+# Two dedicated performance CPUs and 4 GB, like fly.toml (owner's choice). The shared CPUs used first were
+# throttled by Fly once their burst allowance ran out, and backtests then froze the desk for 5-20 s at a time.
+# Performance machines need the account on Pay As You Go (the Free plan refuses them and the deploy fails).
 [[vm]]
-  cpu_kind = 'shared'
+  cpu_kind = 'performance'
   cpus = 2
-  memory_mb = 2048
+  memory_mb = 4096
