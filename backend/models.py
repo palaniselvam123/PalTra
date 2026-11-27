@@ -444,6 +444,13 @@ class BotConfig(Base):
     macd_grow_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
     macd_shrink_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     macd_shrink_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
+    # Candle patterns as an entry check and an exit (pattern_check.py): the patterns of the "Candle pattern" entry
+    # mode, read on pattern candles of pc_minutes (0 = the bot's exit candle), STRONG or ALL.
+    pc_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    pc_exit: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    pc_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    pc_set: Mapped[str | None] = mapped_column(String(8), nullable=True, default="STRONG")
+    pc_within: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
     # Cumulative delta (cum_delta.py): entry only while it moves the trade's way, exit on a price / delta divergence.
     use_cvd: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     cvd_lookback: Mapped[int | None] = mapped_column(Integer, nullable=True, default=5)

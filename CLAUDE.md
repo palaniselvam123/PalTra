@@ -950,6 +950,21 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   entry (`shrunk_against`): for a buy each bar lower (green shrinking or red growing), for a sell each higher. Groupable in
   "How exits combine" (key `MACD`), confirmable by the executed volume (`flow_exit.CONFIRM_REASONS`), counts as an exit for
   `strategyChecks.noExitOn`. Settings anchors `#sma-macd-hist` / `#sma-macd-shrink`. The Strategy lab does not know them.
+- `backend/pattern_check.py` – **Candle patterns as an entry check and an exit** (owner's request: the "Candle pattern"
+  entry mode's patterns as support for whatever opens the trade; `pc_entry` / `pc_exit` off by default; `pc_minutes` 0 =
+  the candle the bot's exits read (`_exit_minutes`) or 1/3/5/10/15/30/60; `pc_set` `STRONG` default | `ALL` (adds the
+  soft ones: hammer, inverted hammer, harami, tweezers, dragonfly / gravestone doji); `pc_within` 1-5; per bot and per
+  stock, PAPER and LIVE, replays too). The pattern candles are grouped from 09:15 from the 1-minute tape (`_tapes`,
+  `candle_patterns.tf_candles`, closed only) and named by `candle_patterns.candle_pattern`. **Entry check**: in
+  `apply_signal` next to the smaller-candle check, a pattern of the signal's side must be on one of the last `pc_within`
+  closed pattern candles (`entry_reason`), else refused like the other checks (joins `entry_block`, so late entry can
+  wait for it); direct orders never read it. **Exit**: `StrategyEngine._watch_pattern_exit` (held-stock loop, after the
+  MACD histogram exit), once per closed pattern candle (`pos.pc_bar`) that closed after the entry, closes on a pattern
+  against the signal side (`PATTERN_EXIT` via `_exit_now`, LIVE stop cancelled first; a LIVE position restored without
+  its stop id is left to that stop). Groupable in "How exits combine" (key `PATTERN`), confirmable by the executed volume
+  (`flow_exit.CONFIRM_REASONS`), counts as an exit for `strategyChecks.noExitOn`. Settings → 2. Checks before entering
+  (`StrategyConfigPanel.PatternCheckCard`, anchor `#sma-pattern-check`) and 3. When to exit (`#sma-pattern-exit`), shown
+  with the "Indicator checks" or "Candle colour & patterns" style. The Strategy lab does not know them.
 - `backend/cum_delta.py` – cumulative delta (CVD) check and divergence exit (off by default, per bot and per stock, PAPER
   and LIVE, replays too). Groww gives no buy / sell split, so each candle's delta is estimated (owner's choice): volume ×
   (close − open) ÷ (high − low) (0 for no range or no volume), summed from each IST session's first candle (`series`).

@@ -65,10 +65,11 @@ export const STYLES: TradeStyle[] = [
     title: "Candle colour & patterns",
     what: "Trade the candles themselves: green buys, red sells; or candle patterns; or the day's second candle.",
     best: "Fast scalps on active stocks. Needs a body-size floor so tiny candles do not flip the trade.",
-    shows: "Candle direction check, Heikin Ashi colours, smaller-candle rules, counter candles, entry-candle check",
+    shows: "Candle direction check, Heikin Ashi colours, smaller-candle rules, counter candles, entry-candle check, candle-pattern check and exit",
     on: (f) =>
       ["COLOUR", "PATTERN", "NTH_CANDLE"].includes(txt(f.entry_mode)) || yes(f.use_candle_dir) || yes(f.ha_colours) ||
-      txt(f.sc_minutes) !== "" || txt(f.small_exit_minutes) !== "" || txt(f.small_exit_upper) !== "" || num(f.counter_exit_count) > 0 || yes(f.entry_candle_confirm) || yes(f.extreme_entry),
+      txt(f.sc_minutes) !== "" || txt(f.small_exit_minutes) !== "" || txt(f.small_exit_upper) !== "" || num(f.counter_exit_count) > 0 || yes(f.entry_candle_confirm) || yes(f.extreme_entry) ||
+      yes(f.pc_entry) || yes(f.pc_exit),
   },
   {
     id: "turn",

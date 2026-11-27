@@ -71,6 +71,7 @@ import always_in
 import ema_filter
 import heikin_ashi
 import macd
+import pattern_check
 import cum_delta
 import reverse_exit
 import exit_join
@@ -307,6 +308,8 @@ class OpenPosition:
     macd_shrink_bar: int | None = None
     # Cumulative delta divergence exit (cum_delta.py): the last closed candle read.
     cvd_bar: int | None = None
+    # Candle-pattern exit (pattern_check.py): the last closed pattern candle read.
+    pc_bar: int | None = None
     # Last exit candle read by the mixed-candle exit (exit_candle.py), memory only.
     xc_bar: int | None = None
     # Watch smaller candles (small_candles.py): the last closed candle read per size, and what each size says.
@@ -423,6 +426,7 @@ SNAPSHOT_FIELDS = (
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "use_macd_grow", "macd_grow_candles", "macd_shrink_exit", "macd_shrink_candles", "ha_colours", "ha_scope",
+    "pc_entry", "pc_exit", "pc_minutes", "pc_set", "pc_within",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "reverse_on_exit", "reverse_colour_exit", "reverse_settings",
     "exit_join", "exit_group", "exit_need", "exit_within",
@@ -1181,6 +1185,7 @@ _FILTER_KEYS = (
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "use_macd_grow", "macd_grow_candles", "macd_shrink_exit", "macd_shrink_candles", "ha_colours", "ha_scope",
+    "pc_entry", "pc_exit", "pc_minutes", "pc_set", "pc_within",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -2152,6 +2157,7 @@ class StrategyEngine:
         await self._watch_ema_exit(symbol_cfg)
         await self._watch_macd_exit(symbol_cfg)
         await self._watch_macd_shrink(symbol_cfg)
+        await self._watch_pattern_exit(symbol_cfg)
         await self._watch_cvd_exit(symbol_cfg)
         await self._watch_exit_candle(symbol_cfg)
         await self._watch_small_candles(symbol_cfg)
@@ -3408,6 +3414,15 @@ class StrategyEngine:
             )
             if small:
                 entry_block = f"{entry_block}; {small}" if entry_block else small
+        if pattern_check.entry_on(cfg):
+            # Candle patterns as an entry check (pattern_check.py): a pattern of the signal's side on one of the last
+            # closed pattern candles.
+            pattern = pattern_check.entry_reason(
+                self._tapes.get(self._focus), "LONG" if signal == "BULLISH" else "SHORT", cfg,
+                self._exit_minutes(self._focus, cfg),
+            )
+            if pattern:
+                entry_block = f"{entry_block}; {pattern}" if entry_block else pattern
         only_flow = flow_exit.only_mode(cfg)
         if flow_exit.entry_on(cfg) and not only_flow:
             # Executed volume (flow_exit.py): the real order's own side must have done the set % of the shares traded.
@@ -5914,6 +5929,36 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} MACD histogram exit — {note}"
         await self._exit_now(cfg, self.ltp, macd.SHRINK_REASON)
 
+    async def _watch_pattern_exit(self, cfg: BotConfig) -> None:
+        """Once per closed pattern candle that closed after the entry: exit on a candle pattern against the trade
+        (pattern_check.py)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or not pattern_check.exit_on(cfg) or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
+            return
+        size = pattern_check.minutes(cfg, self._exit_minutes(symbol, cfg))
+        tape = self._tapes.get(symbol)
+        if tape is None or getattr(tape, "empty", True) or len(tape) < 2:
+            return
+        # A new pattern candle can only have closed when the newest closed minute ends one; skip the grouping else.
+        last_closed = int(tape["ts"].iloc[-2])
+        if size > 1 and not closes_bucket(last_closed, size) and pos.pc_bar is not None:
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        start, note = pattern_check.exit_read(
+            tape, pos.signal_direction, cfg, self._exit_minutes(symbol, cfg), opened.timestamp()
+        )
+        if start is None or pos.pc_bar == start:
+            return
+        pos.pc_bar = start
+        if not note:
+            return
+        self._signals[symbol] = f"{symbol} candle-pattern exit — {note}"
+        await self._exit_now(cfg, self.ltp, pattern_check.REASON)
+
     async def _watch_cvd_exit(self, cfg: BotConfig) -> None:
         """Once per closed candle: exit on a price / cumulative delta divergence against the trade (cum_delta.py)."""
         pos = self.position
@@ -6538,6 +6583,7 @@ class StrategyEngine:
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
                     "MACD_CROSS": "MACD crossed its signal line against the trade — flat",
                     "MACD_SHRINK": "MACD histogram moved against the trade — flat",
+                    pattern_check.REASON: "candle pattern against the trade — flat",
                     "CVD_DIVERGENCE": "price made a new extreme without the cumulative delta — flat",
                     "SUPERTREND": "Supertrend turned against the trade — flat",
                     "SMA9_BEND": "SMA 9 bent — flat",
@@ -8338,6 +8384,7 @@ _ALERT_REASON = {
     "EMA_CROSS": "EMA cross against the trade",
     "MACD_CROSS": "MACD cross against the trade",
     "MACD_SHRINK": "MACD histogram against the trade",
+    pattern_check.REASON: "candle pattern against the trade",
     "MANUAL_REVERSE": "reversed by hand",
     "CVD_DIVERGENCE": "price / cumulative delta divergence",
     "SUPERTREND": "Supertrend turned against the trade",
@@ -8834,7 +8881,7 @@ def _stop_reason(pos: "OpenPosition") -> str:
 
 
 _TAKEN_EXITS = (
-    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", "MACD_SHRINK", cum_delta.EXIT_REASON, "SUPERTREND",
+    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", "MACD_SHRINK", pattern_check.REASON, cum_delta.EXIT_REASON, "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST", "SMA9_DECEL",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
     "BREAKOUT_STOP", "PIVOT_TARGET", day_target.EXIT_REASON, target_net.EXIT_REASON, stop_plan.EXIT_REASON, small_candles.REASON,
