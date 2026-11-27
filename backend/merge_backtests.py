@@ -15,7 +15,9 @@ What is copied, for every finished / stopped / interrupted run of the source:
 - with `--pnl`, its replay P&L log (`replay_pnl` in open_pnl.db; the P&L dashboard and the run's day high / low),
 - with `--trend`, its trend readings (`trend_reads.db`).
 
-A run already here (same start time, days and settings) is skipped, so running it twice copies nothing twice. Before
+A run already here (same start time, days and settings) is skipped, so running it twice copies nothing twice; its
+P&L log points and trend readings are still copied if they are missing (so a P&L file fixed later can be run again).
+A damaged source file (a copy cut short) stops the tool before anything is written. Before
 writing, each target file is backed up next to itself (`*.before-merge`).
 """
 from __future__ import annotations
@@ -80,13 +82,15 @@ def merge_sma(src: sqlite3.Connection, dst: sqlite3.Connection) -> tuple[dict[in
     counts = {"runs": 0, "skipped": 0, "trades": 0, "reviews": 0, "handoffs": 0}
     run_cols = [c for c in _cols(dst, "replay_run") if c != "id"]
     trade_cols = [c for c in _cols(dst, "trade_log") if c != "id"]
-    have = {_key(r) for r in _rows(dst, "SELECT * FROM replay_run")}
+    have = {_key(r): int(r["id"]) for r in _rows(dst, "SELECT * FROM replay_run")}
     runs: dict[int, int] = {}
+    known: dict[int, int] = {}  # runs copied before: old id → their id here (for the P&L log / trend readings)
     for run in _rows(src, "SELECT * FROM replay_run ORDER BY id"):
         if str(run.get("status") or "").upper() not in DONE:
             continue
         if _key(run) in have:
             counts["skipped"] += 1
+            known[int(run["id"])] = have[_key(run)]
             continue
         try:
             settings = json.loads(run.get("settings") or "{}")
@@ -113,6 +117,7 @@ def merge_sma(src: sqlite3.Connection, dst: sqlite3.Connection) -> tuple[dict[in
                 row = dict(r, run_id=new, trade_id=trades.get(int(tid), tid) if tid is not None else None)
                 _insert(dst, table, row, cols)
                 counts[key] += 1
+    counts["known"] = known
     return runs, counts
 
 
@@ -133,6 +138,19 @@ def merge_keyed(src: sqlite3.Connection, dst: sqlite3.Connection, table: str, ru
     return n
 
 
+def _healthy(path: str) -> str:
+    """'' when the file is a readable SQLite database, else why not (a copy cut short reads as malformed)."""
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            row = con.execute("PRAGMA quick_check").fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error as exc:
+        return str(exc)
+    return "" if row and row[0] == "ok" else str(row[0] if row else "no answer")
+
+
 def _target(name: str) -> str:
     return os.path.join("/data", name)
 
@@ -151,6 +169,12 @@ def main(argv: list[str] | None = None) -> int:
         if not os.path.isfile(path):
             print(f"Not found: {path}")
             return 1
+    for path in (a.sma, a.pnl, a.trend):
+        if path and os.path.isfile(path):
+            bad = _healthy(path)
+            if bad:
+                print(f"{path} is damaged ({bad}). Copy it again (a copy cut short does this); nothing was written.")
+                return 1
     if os.path.abspath(a.sma) == os.path.abspath(a.into):
         print("The source and the target are the same file.")
         return 1
@@ -184,7 +208,10 @@ def main(argv: list[str] | None = None) -> int:
             if not _has(d, table):
                 d.executescript(";".join(r[0] for r in s.execute(
                     "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND tbl_name = ?", (table,))))
-            n = merge_keyed(s, d, table, runs if a.write else {k: k for k in runs})
+            # Runs copied now and runs copied on an earlier pass both get their rows (INSERT OR IGNORE: never twice).
+            mapping = dict(counts["known"])
+            mapping.update(runs if a.write else {k: k for k in runs})
+            n = merge_keyed(s, d, table, mapping)
             if a.write:
                 d.commit()
             else:

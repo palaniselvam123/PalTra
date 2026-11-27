@@ -86,3 +86,41 @@ def test_copies_finished_runs_with_new_ids_and_skips_them_the_second_time(tmp_pa
 def test_a_copied_run_says_so():
     assert run_source.describe({"copied_from": "backtest"})["via"] == "copied from the backtest server"
     assert run_source.describe({})["via"] is None
+
+
+def test_a_later_pass_adds_the_pnl_log_of_runs_copied_before(tmp_path):
+    src, dst = tmp_path / "bt.db", tmp_path / "desk.db"
+    src_pnl, dst_pnl = tmp_path / "bt_pnl.db", tmp_path / "desk_pnl.db"
+    _db(src, [(1, "FINISHED", "SBIN")])
+    _db(dst, [])
+    base = ["--sma", str(src), "--into", str(dst), "--into-pnl", str(dst_pnl)]
+    assert merge_backtests.main(base + ["--write"]) == 0  # runs first, without the P&L file
+    _pnl(src_pnl, [1])
+    assert merge_backtests.main(base + ["--pnl", str(src_pnl), "--write"]) == 0
+    con = sqlite3.connect(dst)
+    assert con.execute("SELECT count(*) FROM replay_run").fetchone()[0] == 1  # the run is not copied twice
+    new_id = con.execute("SELECT id FROM replay_run").fetchone()[0]
+    con.close()
+    pnl = sqlite3.connect(dst_pnl)
+    assert pnl.execute("SELECT count(*) FROM replay_pnl WHERE run_id = ?", (new_id,)).fetchone()[0] == 2
+    pnl.close()
+    assert merge_backtests.main(base + ["--pnl", str(src_pnl), "--write"]) == 0  # and again: still 2 points
+    pnl = sqlite3.connect(dst_pnl)
+    assert pnl.execute("SELECT count(*) FROM replay_pnl").fetchone()[0] == 2
+    pnl.close()
+
+
+def test_a_damaged_file_stops_before_anything_is_written(tmp_path, capsys):
+    src, dst = tmp_path / "bt.db", tmp_path / "desk.db"
+    _db(src, [(1, "FINISHED", "SBIN")])
+    _db(dst, [])
+    broken = tmp_path / "bt_pnl.db"
+    _pnl(broken, [1])
+    data = broken.read_bytes()
+    broken.write_bytes(data[: len(data) // 2] + b"\0" * 2048)  # a copy cut short
+    args = ["--sma", str(src), "--into", str(dst), "--pnl", str(broken), "--write"]
+    assert merge_backtests.main(args) == 1
+    assert "damaged" in capsys.readouterr().out
+    con = sqlite3.connect(dst)
+    assert con.execute("SELECT count(*) FROM replay_run").fetchone()[0] == 0
+    con.close()
