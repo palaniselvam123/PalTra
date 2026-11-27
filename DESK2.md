@@ -118,3 +118,19 @@ pritra then becomes the only desk. In this order:
    `cpu_kind = 'performance'`, `memory_mb = 4096`.
 6. Close the old account last.
 
+## Copy the backtest server's runs too
+
+The main desk's copy brings only the backtests run on paltra. Runs made on **paltra-backtest** live on that server's
+own volume. `backend/merge_backtests.py` adds them to pritra's database **next to** what is there (new ids, nothing
+overwritten, a run already copied is skipped, each target file backed up as `*.before-merge` first). Copied runs say
+"copied from the backtest server" and never count in pritra's practice wallet.
+
+1. Old account (`fly auth login`): open the backtest server's page once so its machine starts, then
+   `fly ssh console -a paltra-backtest` and inside:
+   `python -c "import sqlite3; [sqlite3.connect('/data/'+f).backup(sqlite3.connect('/tmp/'+f)) for f in ('sma_terminal.db','open_pnl.db','trend_reads.db')]"`,
+   `exit`. Then `fly ssh sftp get /tmp/sma_terminal.db bt_sma.db -a paltra-backtest` (and `open_pnl.db` →
+   `bt_pnl.db`, `trend_reads.db` → `bt_trend.db`).
+2. New account: `fly ssh sftp shell -a pritra`, `put bt_sma.db /data/bt_sma.db` (and the other two), Ctrl+D.
+3. `fly ssh console -a pritra`, inside: `cd /app && python merge_backtests.py --sma /data/bt_sma.db --pnl
+   /data/bt_pnl.db --trend /data/bt_trend.db` (counts only), then the same with `--write`. No restart needed.
+

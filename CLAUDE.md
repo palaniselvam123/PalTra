@@ -3103,6 +3103,12 @@ No credentials are needed. The desk starts on the simulated feed.
     variables `DEPLOY_BACKTEST` / `DEPLOY_SCANNER` false a merge deploys nothing (the release gate's note says
     so); the health watcher reads `https://pritra.fly.dev/api/health/deep` (`scripts/health_watch.sh`; the repo
     variable `HEALTH_URL` overrides it). Steps in `DESK2.md`, "Closing the old account"
+  - **the backtest server's runs** (`backend/merge_backtests.py`, run on pritra: `python merge_backtests.py --sma …
+    [--pnl …] [--trend …] [--write]`): copies another server's finished / stopped / interrupted `replay_run` rows with
+    their `trade_log`, `review_log`, `handoff_log`, `replay_pnl` and `trend_reads` rows under new ids (dry run without
+    `--write`; a run already here, same start / days / settings, is skipped; targets backed up as `*.before-merge`).
+    Copied runs carry `copied_from` in their settings: `run_source.describe` says "copied from the backtest server"
+    and `paper_wallet._counted` leaves them out
   - it needs the repo secret `FLY_API_TOKEN`
     (`fly tokens create deploy -a paltra`); the deploy job runs in the
     `production` environment, which GitHub creates on first use (add required
