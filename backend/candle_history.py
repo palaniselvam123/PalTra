@@ -256,10 +256,12 @@ def build_payload(
     sma_fast = getattr(cfg, "sma_fast", 9) or 9
     sma_slow = getattr(cfg, "sma_slow", 21) or 21
     atr_period = getattr(cfg, "atr_period", 14) or 14
+    # The third (medium) SMA, so a past range draws the same three lines the bot traded on.
+    sma_medium = getattr(cfg, "sma_medium", None) or None
     candles: list[dict] = []
     blocked: list[dict] = []
     if not frame.empty:
-        enriched = enrich(resample(frame, interval), sma_fast, sma_slow, atr_period)
+        enriched = enrich(resample(frame, interval), sma_fast, sma_slow, atr_period, sma_medium)
         lo, hi = _epoch(start), _epoch(end)
         # Keep the bar that holds From even when it opened a little earlier.
         lo -= lo % 60
@@ -267,7 +269,7 @@ def build_payload(
         keep = (enriched["ts"] >= lo) & (enriched["ts"] <= hi)
         candles = [row for row, inside in zip(candle_rows(enriched), keep) if inside]
         # Refused crosses are judged on 1-minute candles, as the bot trades them.
-        minute = enrich(frame, sma_fast, sma_slow, atr_period) if interval != 1 else enriched
+        minute = enrich(frame, sma_fast, sma_slow, atr_period, sma_medium) if interval != 1 else enriched
         blocked = [b for b in filter_blocks(minute, cfg) if lo <= b["time"] <= hi]
     markers = _markers(symbol, candles[0]["time"], candles[-1]["time"], interval * 60, run_id, book, bot) if candles else []
     return {

@@ -254,3 +254,16 @@ def test_markers_show_one_replay_run_not_every_replay_of_the_day(db):
 
     assert entries() == [102.0, 103.0]  # practice trades + the latest replay run only
     assert entries(run_id=1) == [101.0]  # one named run
+
+
+def test_history_draws_the_third_sma_when_the_bot_has_one(db):
+    """A bot on SMA 9 / 21 / 50 (sma_medium 21, slow 50): a past range carries the middle line too (owner's
+    OBEROIRLTY chart showed "SMA 21 –" and no third line)."""
+    cfg = SimpleNamespace(sma_fast=9, sma_medium=21, sma_slow=50, atr_period=14, atr_multiplier=1.5)
+    out = asyncio.run(load_history(_Broker(), "TCS", "2026-09-28T09:15", "2026-09-29T15:30", cfg, 5))
+    last = out["candles"][-1]
+    assert last["smaMid"] is not None and last["sma21"] is not None
+    assert out["filters"]["sma_medium"] == 21
+    # Without a medium SMA nothing changes.
+    plain = asyncio.run(load_history(_Broker(), "TCS", "2026-09-28T09:15", "2026-09-29T15:30", _CFG, 5))
+    assert plain["candles"][-1]["smaMid"] is None
