@@ -516,7 +516,8 @@ export type ChargeBreakdown = {
   total_charges?: number;
 };
 
-export type CrossScanMinutes = 1 | 2 | 3 | 5 | 10 | 15;
+/** Candle sizes the Scalp scans read: the bots' own plus 30 minutes and 1 hour (cross_scan.SCAN_MINUTES). */
+export type CrossScanMinutes = 1 | 2 | 3 | 5 | 10 | 15 | 30 | 60;
 
 /** One stock whose SMA fast / slow are about to cross (or just did) on the scan's candle. */
 export type CrossScanRow = {
@@ -1579,6 +1580,9 @@ export type ChopAuto = {
   candles?: ChopCandles;
   /** Today's first N candles left out of the trend read (0 = none). */
   skip_candles?: number;
+  /** The card's SMA periods; 0 / 0 = the main desk's own. */
+  sma_fast?: number;
+  sma_slow?: number;
   on: boolean;
   every_min: number;
   minutes: CrossScanMinutes;
@@ -1597,7 +1601,7 @@ export type ChopAuto = {
 };
 
 export type ChopAutoUpdate = Partial<
-  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max" | "lists" | "candles" | "skip_candles">
+  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max" | "lists" | "candles" | "skip_candles" | "sma_fast" | "sma_slow">
 >;
 
 /** One 1-minute review of an uncertain SMA position. Only EXIT ever closes the trade. */
@@ -3413,10 +3417,10 @@ export const smaApi = {
   walletMargin: (margin_pct: number) =>
     request<Wallet>("/api/wallet/margin", { method: "PUT", body: JSON.stringify({ margin_pct }) }, undefined, false),
   /** Start a cross scan (read-only; candles only). Returns at once; poll `crossScan`. */
-  crossScanStart: (symbols: string[], minutes: CrossScanMinutes = 5, force = false) =>
+  crossScanStart: (symbols: string[], minutes: CrossScanMinutes = 5, force = false, sma: { fast: number; slow: number } = { fast: 0, slow: 0 }) =>
     request<CrossScan>(
       "/api/cross-scan/start",
-      { method: "POST", body: JSON.stringify({ symbols, minutes, force }) },
+      { method: "POST", body: JSON.stringify({ symbols, minutes, force, sma_fast: sma.fast, sma_slow: sma.slow }) },
       20000,
       false
     ),
@@ -3426,7 +3430,7 @@ export const smaApi = {
     symbols: string[],
     minutes: CrossScanMinutes = 5,
     force = false,
-    opts: { quiet_min?: number; alert_on_quiet?: boolean; price_min?: number; price_max?: number; candles?: ChopCandles; skip_candles?: number } = {}
+    opts: { quiet_min?: number; alert_on_quiet?: boolean; price_min?: number; price_max?: number; candles?: ChopCandles; skip_candles?: number; sma_fast?: number; sma_slow?: number } = {}
   ) =>
     request<ChopScan>(
       "/api/chop-scan/start",
@@ -3442,6 +3446,9 @@ export const smaApi = {
           price_max: opts.price_max ?? 0,
           candles: opts.candles ?? "NORMAL",
           skip_candles: opts.skip_candles ?? 0,
+          // The SMA periods to read; 0 / 0 = the main desk's own.
+          sma_fast: opts.sma_fast ?? 0,
+          sma_slow: opts.sma_slow ?? 0,
         }),
       },
       20000,

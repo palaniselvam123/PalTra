@@ -30,7 +30,7 @@ log = logging.getLogger("sma.chop_auto")
 
 EVERY_CHOICES = (1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60)
 DEFAULT_EVERY = 30
-CANDLE_CHOICES = (1, 2, 3, 5, 10, 15)
+CANDLE_CHOICES = (1, 2, 3, 5, 10, 15, 30, 60)  # cross_scan.SCAN_MINUTES
 CHECK_SEC = 20
 
 
@@ -50,6 +50,9 @@ class AutoSettings:
     candles: str = "NORMAL"
     # Today's first N candles left out of the trend read (chop_scan.analyze `skip`; 0 = off).
     skip_candles: int = 0
+    # The card's SMA periods (owner's request: 20 / 50 or his own numbers); 0 / 0 = the main desk's.
+    sma_fast: int = 0
+    sma_slow: int = 0
 
 
 SCAN_LISTS = ("armed", "fno", "nifty50", "nifty100", "niftybank")
@@ -89,6 +92,12 @@ def _clean(raw: dict) -> AutoSettings:
         base.skip_candles = max(0, min(12, int(base.skip_candles or 0)))
     except (TypeError, ValueError):
         base.skip_candles = 0
+    try:
+        fast, slow = int(base.sma_fast or 0), int(base.sma_slow or 0)
+    except (TypeError, ValueError):
+        fast, slow = 0, 0
+    # Both or neither, the fast one shorter (cross_scan.pick_smas checks the same at a start).
+    base.sma_fast, base.sma_slow = (fast, slow) if 2 <= fast < slow <= 200 else (0, 0)
     base.price_min = max(0.0, float(base.price_min))
     base.price_max = max(0.0, float(base.price_max))
     raw_lists = base.lists if isinstance(base.lists, (list, tuple)) else []

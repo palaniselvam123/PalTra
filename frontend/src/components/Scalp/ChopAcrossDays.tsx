@@ -1,5 +1,6 @@
 "use client";
 
+import { sizeLabel, sizeShort } from "@/lib/scanSizes";
 import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { CalendarRange, Download, Loader2 } from "lucide-react";
@@ -399,7 +400,7 @@ export function ChopAcrossDays({
               active ? tone : "text-slate-400 ring-slate-700 hover:bg-white/5"
             )}
           >
-            {m}m
+            {sizeShort(m)}
           </button>
         );
       })}
@@ -465,7 +466,7 @@ export function ChopAcrossDays({
             label="Candle"
             value={candle}
             onChange={(v) => setCandle(Number(v))}
-            options={[{ value: 0, label: "Any size" }, ...CANDLE_CHOICES.map((m) => ({ value: m as number, label: `${m} min` }))]}
+            options={[{ value: 0, label: "Any size" }, ...CANDLE_CHOICES.map((m) => ({ value: m as number, label: sizeLabel(m) }))]}
             className="w-28"
           />
           <SelectFilter

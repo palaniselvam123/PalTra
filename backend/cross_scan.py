@@ -25,7 +25,7 @@ from typing import Awaitable, Callable
 
 import pandas as pd
 
-from candles import CANDLE_MINUTES, bucket_start, resample
+from candles import bucket_start, resample
 from groww_client import IST, market_is_open
 from indicators import enrich, sma_gap_pct
 
@@ -45,6 +45,15 @@ def _concurrency() -> int:
 CONCURRENCY = _concurrency()  # parallel candle downloads: gentle on Groww's rate limit and on the desk
 CALL_GAP_SEC = 0.2  # between starting two downloads
 WARMUP_DAYS = 4  # calendar days of 1-minute candles before now, so SMA 21 is formed at the open
+# Candle sizes the Scalp scans read (Cross scan, Trend quality). The bots' own sizes stop at 15 (candles.CANDLE_MINUTES);
+# 30 minutes and 1 hour are for the scans only (owner's request). Nothing in the strategy reads them.
+SCAN_MINUTES = (1, 2, 3, 5, 10, 15, 30, 60)
+# SMA periods a scan may be asked for (owner's request: 20 / 50 and his own numbers). 0 / 0 = the main desk's.
+SMA_MIN, SMA_MAX = 2, 200
+SESSION_MINUTES = 375  # 09:15-15:30
+SESSION_CLOSE_SEC = 15 * 3600 + 30 * 60  # 15:30 IST, seconds after IST midnight
+MAX_WINDOW_DAYS = 29  # candle_history refuses more than 30 days in one download
+OTHER_SIZES_DAYS = 15  # the most days downloaded only so the bigger sizes (30 min, 1 hour) of a row can be read
 MIN_RESCAN_SEC = 60  # "Scan now" at most once a minute
 LOOKBACK = 3  # closed candles whose gap slope is read (the bot's heads-up uses the same)
 GIVE_UP_AFTER = 5  # this many failures before any success: stop and say why
@@ -143,8 +152,12 @@ def closed_bars(frame_1m: pd.DataFrame, minutes: int, now: dt.datetime) -> pd.Da
     if bars is None or bars.empty:
         return pd.DataFrame()
     now_ts = int(now.timestamp())
-    # A bar is closed once its whole span is in the past.
-    bars = bars[bars["ts"].astype("int64") + minutes * 60 <= now_ts]
+    # A bar is closed once its whole span is in the past, or the session it is in has ended: the day's last candle of
+    # a size that does not divide the session (the 15:15 candle of 30 minutes or 1 hour) closes at 15:30.
+    ts = bars["ts"].astype("int64")
+    day_close = (ts + 19_800) // 86_400 * 86_400 - 19_800 + SESSION_CLOSE_SEC
+    ends = (ts + minutes * 60).where(ts + minutes * 60 <= day_close, day_close)
+    bars = bars[ends <= now_ts]
     return bars.reset_index(drop=True)
 
 
@@ -206,6 +219,60 @@ def clean_symbols(raw: list[str]) -> list[str]:
         if _SYMBOL.match(name) and name not in out:
             out.append(name)
     return out[:MAX_SYMBOLS]
+
+
+def pick_smas(fast, slow, default_fast: int, default_slow: int) -> tuple[int, int]:
+    """The SMA periods a scan reads: the ones asked for, else the main desk's (0 / none = not asked).
+
+    Raises ValueError (in plain words) for periods outside SMA_MIN..SMA_MAX or a fast one that is not shorter."""
+    try:
+        fast, slow = int(fast or 0), int(slow or 0)
+    except (TypeError, ValueError):
+        raise ValueError("The SMA periods must be whole numbers.") from None
+    if not fast and not slow:
+        return int(default_fast), int(default_slow)
+    if not fast or not slow:
+        raise ValueError("Give both SMA periods, the fast one and the slow one.")
+    if not (SMA_MIN <= fast <= SMA_MAX and SMA_MIN <= slow <= SMA_MAX):
+        raise ValueError(f"The SMA periods must be between {SMA_MIN} and {SMA_MAX}.")
+    if fast >= slow:
+        raise ValueError("The fast SMA must be shorter than the slow SMA (for example 20 and 50).")
+    return fast, slow
+
+
+def window_days(minutes: int, sma_slow: int) -> int:
+    """Calendar days of 1-minute candles a scan on `minutes` candles needs before now for its slow SMA to be formed.
+
+    Never under WARMUP_DAYS (so SMA 21 on candles up to 15 minutes reads the same days as always) and never over
+    MAX_WINDOW_DAYS: an hour candle has 7 a session, so SMA 21 needs 4 sessions and SMA 50 needs 8."""
+    per_session = -(-SESSION_MINUTES // max(1, int(minutes)))
+    sessions = -(-(max(2, int(sma_slow)) + 1) // per_session)
+    days = -(-sessions * 7 // 5) + 2  # weekends, and a holiday to spare
+    return max(WARMUP_DAYS, min(MAX_WINDOW_DAYS, days))
+
+
+def download_days(minutes: int, sma_slow: int, sizes: tuple = ()) -> int:
+    """Days a pass downloads: its own candle's window, widened (to OTHER_SIZES_DAYS at most) for the other `sizes` a row reads."""
+    own = window_days(minutes, sma_slow)
+    others = max((window_days(m, sma_slow) for m in sizes), default=own)
+    return min(MAX_WINDOW_DAYS, max(own, min(OTHER_SIZES_DAYS, others)))
+
+
+def window_start(now: dt.datetime, days: int) -> dt.datetime:
+    """Midnight `days` calendar days before `now`, without a time zone (what the candle download takes)."""
+    return (now - dt.timedelta(days=int(days))).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+
+
+def cut_window(frame_1m: pd.DataFrame, now: dt.datetime, days: int) -> pd.DataFrame:
+    """`frame_1m` from `window_start(now, days)` on: a longer download read as a scan with that window would have."""
+    if frame_1m is None or getattr(frame_1m, "empty", True) or "ts" not in frame_1m.columns:
+        return frame_1m
+    start = window_start(now, days).replace(tzinfo=IST)
+    cut = int(start.timestamp())
+    ts = frame_1m["ts"].astype("int64")
+    if int(ts.iloc[0]) >= cut:
+        return frame_1m
+    return frame_1m[ts >= cut].reset_index(drop=True)
 
 
 def cache_key(now: dt.datetime, minutes: int) -> int:
@@ -286,8 +353,8 @@ class CrossScanner:
 
         With `job`, each stock is read by it (download and analysis) instead of `fetch` + `scan_one`.
         """
-        if minutes not in CANDLE_MINUTES:
-            raise ValueError(f"Candle size must be one of {', '.join(str(m) for m in CANDLE_MINUTES)} minutes")
+        if minutes not in SCAN_MINUTES:
+            raise ValueError(f"Candle size must be one of {', '.join(str(m) for m in SCAN_MINUTES)} minutes")
         names = clean_symbols(symbols)
         if not names:
             raise ValueError("No stocks to scan")
@@ -315,7 +382,7 @@ class CrossScanner:
         self, names: list[str], fetch: Fetch, key: tuple, minutes: int, sma_fast: int, sma_slow: int, now: dt.datetime,
         job: Job | None = None,
     ) -> None:
-        start = (now - dt.timedelta(days=WARMUP_DAYS)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+        start = window_start(now, window_days(minutes, sma_slow))
         end = now.replace(tzinfo=None)
         rows: list[ScanRow] = []
         errors: dict[str, int] = {}

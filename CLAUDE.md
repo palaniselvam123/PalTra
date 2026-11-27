@@ -1464,6 +1464,22 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   and `GET /api/chop-scan` carries `auto` (next_at, last error). On by default only on the scanner
   server; never runs on a desk with `SCANS=off` or while scans are paused. A manual Scan now counts as
   a run.
+  **30-minute and 1-hour candles, and the scan's own SMAs** (owner's request; Trend quality and Cross scan; nothing in the
+  strategy reads them, the bots' own sizes still stop at 15): `cross_scan.SCAN_MINUTES` (1/2/3/5/10/15/30/60) is the scan
+  candle and the sizes of every `*_by_minutes` read (so "Crosses today on" / "Trend on", the trend-rank alert and Scan & arm
+  take 30 and 60). `sma_fast` / `sma_slow` on `POST /api/chop-scan/start`, `POST /api/cross-scan/start`, `ChopAutoUpdate`
+  and `chop_auto.AutoSettings` (0 / 0 = the main desk's; `cross_scan.pick_smas`: both, `SMA_MIN` 2 to `SMA_MAX` 200, fast
+  shorter, else 400 in plain words). **Days downloaded**: `window_days(minutes, slow)` = the calendar days a size needs for
+  its slow SMA (never under `WARMUP_DAYS` 4, so SMA 21 on sizes up to 15 minutes reads the same days as before; at most
+  `MAX_WINDOW_DAYS` 29); a Trend quality pass downloads `download_days` (its own window, widened to at most
+  `OTHER_SIZES_DAYS` 15 for the row's 30-minute / 1-hour reads: 8 days at SMA 21, so the day's first scan asks Groww twice
+  per stock; later scans download only today). `chop_scan.scan_frames` cuts the download back to the scan's own window for
+  its own read and hands the whole of it to `analyze(..., wide=)`, which reads each bigger size on its own window. The day's
+  last candle of a size that does not divide the session (the 15:15 candle of 30 minutes or 1 hour) closes at 15:30
+  (`cross_scan.closed_bars`). The cards' Candle menu and the "Moving averages (SMA)" menu (`components/Scalp/SmaPick.tsx`,
+  `lib/scanSizes.ts`: Bot 1's own, 9 / 21, 20 / 50, 50 / 200, Custom numbers…; hidden for the colour reads, which use no
+  SMA); Trend quality keeps the choice in its auto re-scan settings, the Cross scan per browser (`scalp.cross.sma`). First
+  seen compares only saved scans with the same SMA periods.
   **Skip today's first candles** (`skip_candles` 0-12, `MAX_SKIP_CANDLES`, on `POST /api/chop-scan/start`, `ChopAutoUpdate`
   and `chop_auto.AutoSettings`; the card's "Skip today's first candles" menu; owner's case: big opening candles made a stock
   that went sideways after them read as a strong trend at 10:00): `analyze(..., skip=)` (minutes, `skip_minutes`) counts

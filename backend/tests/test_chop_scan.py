@@ -213,7 +213,9 @@ def test_crosses_are_counted_on_every_candle_size_for_the_no_cross_filter():
     )
     row = chop_scan.analyze(steady, 9, 21, 5, _at(12, 40), symbol="UP")
     assert row is not None
-    assert set(row.crosses_by_minutes) == set(CANDLE_MINUTES)
+    # Every scan size has a place (30 minutes and 1 hour too); two days are too few for an hour candle's SMA 21.
+    assert set(row.crosses_by_minutes) == set(chop_scan.SCAN_MINUTES)
+    assert row.crosses_by_minutes[60] is None and row.side_by_minutes[60] is None
     assert all(row.crosses_by_minutes[m] == 0 for m in CANDLE_MINUTES)
     assert all(row.side_by_minutes[m] == "BULLISH" for m in CANDLE_MINUTES)
     assert row.as_dict()["crosses_by_minutes"][5] == row.crosses_today == 0
@@ -248,7 +250,7 @@ def test_a_single_cross_today_carries_its_time_and_direction_on_each_size():
         assert row.last_cross_side_by_minutes[m] == "BULLISH"
         when = _dt.datetime.fromtimestamp(row.last_cross_ts_by_minutes[m], IST).time()
         assert _dt.time(10, 30) <= when <= _dt.time(12, 15), (m, when)  # longer candles cross later
-    assert set(row.last_cross_ts_by_minutes) == set(CANDLE_MINUTES)
+    assert set(row.last_cross_ts_by_minutes) == set(chop_scan.SCAN_MINUTES)
     assert row.minutes_since_last_cross is not None  # the 5-minute candle is the card's own
 
 
@@ -522,3 +524,93 @@ def test_the_pick_backtests_read_the_trend_with_the_opening_candles_skipped():
     rule = scalp_picks.rule_from_dict({"kind": "AUTOARM", "skip_candles": 3, "candles": "NORMAL"})
     assert rule.skip_candles == 3
     assert scalp_picks.rule_from_dict({"kind": "TREND", "skip_candles": 2}).skip_candles == 2
+
+
+# 30-minute and 1-hour candles, and the scan's own SMA periods (owner's request).
+def _days(n: int, step: float = 0.02, last_minutes: int = 375) -> pd.DataFrame:
+    """`n` sessions ending on DAY (weekends skipped), one steady rise; the last one `last_minutes` long."""
+    days, day = [], DAY
+    while len(days) < n:
+        if day.weekday() < 5:
+            days.append(day)
+        day -= dt.timedelta(days=1)
+    frames, price = [], 100.0
+    for i, d in enumerate(reversed(days)):
+        count = last_minutes if i == n - 1 else 375
+        closes = [price + (k + 1) * step for k in range(count)]
+        price = closes[-1]
+        frames.append(_minutes(closes, d))
+    return pd.concat(frames, ignore_index=True)
+
+
+def test_an_hour_candle_scan_reads_a_steady_rise_as_trending():
+    row = chop_scan.analyze(_days(6), 9, 21, 60, _at(15, 40), symbol="UP")
+    assert row is not None and row.minutes == 60
+    assert row.crosses_today == 0 and row.score == chop_scan.TRENDING
+    assert row.side_by_minutes[60] == "BULLISH" and row.side_by_minutes[30] == "BULLISH"
+
+
+def test_the_days_last_short_candle_closes_at_1530():
+    """The 15:15 candle of 30 minutes or 1 hour is only 15 minutes long: it is closed once the session has ended."""
+    from cross_scan import closed_bars
+
+    frame = _days(1)
+    for size, count in ((30, 13), (60, 7)):
+        assert len(closed_bars(frame, size, _at(15, 29))) == count - 1
+        assert len(closed_bars(frame, size, _at(15, 30))) == count
+    # A size that divides the session is unchanged: 15:15-15:30 closes at 15:30 as before.
+    assert len(closed_bars(frame, 15, _at(15, 29))) == 24 and len(closed_bars(frame, 15, _at(15, 30))) == 25
+
+
+def test_the_windows_grow_with_the_candle_and_the_sma():
+    from cross_scan import WARMUP_DAYS, download_days, window_days
+
+    # SMA 21 on candles up to 15 minutes reads the same four days as always.
+    assert all(window_days(m, 21) == WARMUP_DAYS for m in (1, 2, 3, 5, 10, 15))
+    assert window_days(60, 21) > window_days(30, 21) >= WARMUP_DAYS
+    assert window_days(60, 50) > window_days(60, 21)
+    assert window_days(60, 200) == 29  # never more than one download allows
+    # A 5-minute pass downloads enough for a row's 1-hour read, up to 15 days.
+    assert download_days(5, 21, chop_scan.SCAN_MINUTES) == window_days(60, 21)
+    assert download_days(5, 200, chop_scan.SCAN_MINUTES) == 15
+    assert download_days(60, 200, chop_scan.SCAN_MINUTES) == 29
+
+
+def test_a_longer_download_does_not_change_the_scans_own_read():
+    """The pass downloads more days for the 1-hour read; the 5-minute read keeps its own window."""
+    now = _at(12, 40)
+    wide = _days(9, last_minutes=205)
+    frame, same = chop_scan.scan_frames(wide, 5, 50, now)
+    assert same is wide and len(frame) < len(wide)
+    plain = chop_scan.analyze(frame, 20, 50, 5, now, symbol="UP")
+    with_wide = chop_scan.analyze(frame, 20, 50, 5, now, symbol="UP", wide=wide)
+    assert plain is not None and with_wide is not None
+    for m in (1, 2, 3, 5, 10, 15):
+        assert plain.side_by_minutes[m] == with_wide.side_by_minutes[m] == "BULLISH"
+        assert plain.gap_pct_by_minutes[m] == with_wide.gap_pct_by_minutes[m]
+    assert plain.trend == with_wide.trend and plain.rvol == with_wide.rvol
+    # Only the longer download has the 51 hour candles SMA 50 needs.
+    assert plain.side_by_minutes[60] is None and with_wide.side_by_minutes[60] == "BULLISH"
+
+
+def test_sma_periods_asked_for_or_the_desks():
+    from cross_scan import pick_smas
+
+    assert pick_smas(0, 0, 9, 21) == (9, 21)
+    assert pick_smas(None, None, 5, 13) == (5, 13)
+    assert pick_smas(20, 50, 9, 21) == (20, 50)
+    for fast, slow in ((50, 20), (20, 20), (20, 0), (0, 50), (1, 50), (20, 201)):
+        with pytest.raises(ValueError):
+            pick_smas(fast, slow, 9, 21)
+
+
+def test_a_scan_on_20_and_50_reads_those_averages():
+    """A long fall then a rise: SMA 9 is over SMA 21 long before SMA 20 is over SMA 50."""
+    fall = [200 - i * 0.05 for i in range(375)]
+    rise = [fall[-1] + i * 0.05 for i in range(15)]
+    frame = pd.concat([_minutes(fall, dt.date(2026, 10, 7)), _minutes(rise)], ignore_index=True)
+    now = _at(9, 30)
+    quick = chop_scan.analyze(frame, 9, 21, 1, now, symbol="TURN")
+    slow = chop_scan.analyze(frame, 20, 50, 1, now, symbol="TURN")
+    assert quick is not None and slow is not None
+    assert quick.side_by_minutes[1] == "BULLISH" and slow.side_by_minutes[1] == "BEARISH"

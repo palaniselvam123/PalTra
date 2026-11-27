@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { lastScanText } from "@/lib/lastScan";
 import { Activity, Loader2, RefreshCw } from "lucide-react";
+import { SmaPick } from "@/components/Scalp/SmaPick";
+import { DESK_SMA, SCAN_SIZES, cleanSma, sizeLabel, sizeShort, sizeWords, type ScanSma } from "@/lib/scanSizes";
 import { smaApi, type ChopAuto, type ChopAutoUpdate, type ChopCandles, type ChopScan as ChopScanData, type ChopPhaseSide, type ChopScanRow, type ChopScore, type ChopTrendCheck, type CrossScanMinutes, type TrendAlerts } from "@/lib/smaApi";
 import { FilterField, FilterGroup, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
@@ -22,7 +24,7 @@ import { GuideBar } from "./GuideBar";
 import { NewTag } from "@/components/ui/NewTag";
 import { api, type ActiveStock } from "@/lib/api";
 
-const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
+const CANDLE_CHOICES: CrossScanMinutes[] = [...SCAN_SIZES];
 
 type TrendDir = (typeof TREND_DIRS)[number][0];
 type TrendKind = (typeof TREND_KINDS)[number][0];
@@ -140,6 +142,10 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   const [minutes, setMinutes] = useState<CrossScanMinutes>(5);
   // Which candles the scan reads: the real ones, or Heikin Ashi (smoother colours; prices shown stay real).
   const [candles, setCandles] = useState<ChopCandles>("NORMAL");
+  // Which moving averages the scan reads (owner's request: 20 / 50 or his own numbers); 0 / 0 = Bot 1's own.
+  // The colour reads use no SMA, so they always scan with Bot 1's.
+  const [sma, setSma] = useState<ScanSma>(DESK_SMA);
+  const scanSma = colourRead(candles) ? DESK_SMA : sma;
   // Today's first N candles left out of the trend read (owner's request: big opening candles made a sideways stock
   // read as a trend). 0 = none.
   const [skipFirst, setSkipFirst] = useState(0);
@@ -266,6 +272,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             price_max: priceMax,
             candles,
             skip_candles: skipFirst,
+            sma_fast: scanSma.fast,
+            sma_slow: scanSma.slow,
           })
         );
       } catch (e: unknown) {
@@ -274,7 +282,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         setBusy(false);
       }
     },
-    [minutes, candles, skipFirst, armed, lists, quietMin, alertOnQuiet, priceMin, priceMax]
+    [minutes, candles, skipFirst, scanSma.fast, scanSma.slow, armed, lists, quietMin, alertOnQuiet, priceMin, priceMax]
   );
 
   // The server re-scans by itself (no browser needed). Tell it the card's choices, so its scans match.
@@ -286,6 +294,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
           minutes,
           candles,
           skip_candles: skipFirst,
+          sma_fast: sma.fast,
+          sma_slow: sma.slow,
           armed_only: armedOnly,
           lists,
           quiet_min: quietMin,
@@ -299,7 +309,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         });
     }, 800);
     return () => clearTimeout(id);
-  }, [synced, saved, minutes, candles, skipFirst, armedOnly, lists, quietMin, alertOnQuiet, priceMin, priceMax]);
+  }, [synced, saved, minutes, candles, skipFirst, sma.fast, sma.slow, armedOnly, lists, quietMin, alertOnQuiet, priceMin, priceMax]);
 
   const changeAuto = (change: ChopAutoUpdate) => {
     setError(null);
@@ -368,6 +378,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
           setMinutes(d.auto.minutes);
           setCandles(asCandleKind(d.auto.candles));
           setSkipFirst(Number(d.auto.skip_candles ?? 0) || 0);
+          setSma(cleanSma(d.auto.sma_fast, d.auto.sma_slow));
         }
       })
       .catch(() => {
@@ -391,7 +402,10 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
     return () => clearInterval(id);
   }, [data?.running]);
 
-  const scannedThisCandle = data?.minutes === minutes && (data?.candles ?? "NORMAL") === candles;
+  const scannedThisCandle =
+    data?.minutes === minutes &&
+    (data?.candles ?? "NORMAL") === candles &&
+    (!scanSma.fast || (data?.sma_fast === scanSma.fast && data?.sma_slow === scanSma.slow));
   // The rows on screen were read by colour (Heikin Ashi, or the real candles' colours): the trend comes from the
   // candles (ha_trend), not the SMAs. The filters follow the Candles menu, the columns the rows on screen.
   const haRead = colourRead(asCandleKind(data?.candles));
@@ -439,7 +453,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
     };
   }, [saved, data?.as_of]);
   // When each stock first showed up in this list (these filters) in today's saved scans.
-  const firstSeen = useFirstSeen(scannedThisCandle ? data?.as_of : null, data?.minutes, shownRows, passes, "chop", data?.candles ?? "NORMAL");
+  const firstSeen = useFirstSeen(scannedThisCandle ? data?.as_of : null, data?.minutes, shownRows, passes, "chop", data?.candles ?? "NORMAL", data ? { fast: data.sma_fast, slow: data.sma_slow } : undefined);
   const { sorted: rows, sort, onSort } = useSort<ChopScanRow, SortKey>(filtered, (r, k) => {
     switch (k) {
       case "symbol":
@@ -493,8 +507,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         <h2 className="flex items-center gap-2 text-sm font-semibold">
           <Activity size={15} className="text-accentSky" />{" "}
           {saved
-            ? `Trend quality — saved scan${savedTitle ? ` · ${savedTitle}` : ""} · ${minutes}-minute ${candleWords(candles)}candle`
-            : `Trend quality — how choppy each stock has looked today on the ${minutes}-minute ${candleWords(candles)}candle`}
+            ? `Trend quality — saved scan${savedTitle ? ` · ${savedTitle}` : ""} · ${sizeWords(minutes)} ${candleWords(candles)}candle`
+            : `Trend quality — how choppy each stock has looked today on the ${sizeWords(minutes)} ${candleWords(candles)}candle`}
         </h2>
         {!saved && (
         <>
@@ -544,10 +558,16 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
               label="Candle"
               value={minutes}
               onChange={(v) => setMinutes(v as CrossScanMinutes)}
-              options={CANDLE_CHOICES.map((m) => ({ value: m, label: `${m} min` }))}
+              options={CANDLE_CHOICES.map((m) => ({ value: m, label: sizeLabel(m) }))}
               className="w-28"
             />
           )}
+          {!saved && !colourRead(candles) ? <SmaPick value={sma} onChange={setSma} /> : null}
+          {!saved ? (
+            <span className="self-end pb-2" title="New: 30-minute and 1-hour candles, and the scan's own moving averages (9 / 21, 20 / 50, 50 / 200 or your own two numbers)">
+              <NewTag id="scan-sizes-sma" />
+            </span>
+          ) : null}
           {!saved && (
             <SelectFilter
               label="Candles"
@@ -624,7 +644,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                     on ? "bg-accentSky/15 text-accentSky ring-accentSky/50" : "text-slate-400 ring-slate-700 hover:bg-white/5"
                   )}
                 >
-                  {m}m
+                  {sizeShort(m)}
                 </button>
               );
             })}
@@ -674,7 +694,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                     on ? "bg-profit/15 text-profit ring-profit/50" : "text-slate-400 ring-slate-700 hover:bg-white/5"
                   )}
                 >
-                  {m}m
+                  {sizeShort(m)}
                 </button>
               );
             })}
@@ -855,7 +875,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
               ? "The scan could not read any stock, so there is nothing to show yet."
               : data?.as_of && scannedThisCandle
                 ? "No stock matches these filters. Change Show or clear the stock filter, or press Scan now after the next candle closes."
-                : `${auto?.on ? `The server scans by itself every ${auto.every_min} min while the market is open, or press Scan now.` : "Nothing is scanned until you press Scan now."} A scan reads about 200 stocks one at a time and takes a few minutes${scannedThisCandle || !data?.as_of ? "" : `; the last scan was for the ${data.minutes}-minute candle`}.`}
+                : `${auto?.on ? `The server scans by itself every ${auto.every_min} min while the market is open, or press Scan now.` : "Nothing is scanned until you press Scan now."} A scan reads about 200 stocks one at a time and takes a few minutes${scannedThisCandle || !data?.as_of ? "" : `; the last scan was for the ${sizeWords(data.minutes)} candle (SMA ${data.sma_fast}/${data.sma_slow})`}.`}
         </p>
       ) : (
         <div className="overflow-x-auto" ref={paged.anchor}>
@@ -1371,7 +1391,7 @@ function CrossSizes({ row: r }: { row: ChopScanRow }) {
   const all = CANDLE_CHOICES.map((m) => {
     const k = String(m);
     const last = lastTs[k] != null ? ` last ${istTime(lastTs[k])} ${arrow(lastSide[k])}` : "";
-    return `${m}m: ${by[k] ?? "—"}${last}`;
+    return `${sizeShort(m)}: ${by[k] ?? "—"}${last}`;
   });
   return (
     <span className="inline-flex gap-1 text-xs tabular-nums" title={`Today's SMA crosses — ${all.join(" · ")}`}>
