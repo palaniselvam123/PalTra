@@ -874,7 +874,18 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
               className="w-56"
             />
           </FilterGroup>
-        ) : null}
+        ) : (
+          <FilterGroup title="Three SMAs">
+            <p className="max-w-md self-center text-xs text-slate-400">
+              {colourRead(candles)
+                ? "Stacked and widening read the SMAs, so they are not read on colour candles: pick Normal (SMA cross) or Heikin Ashi."
+                : "Pick a Third SMA (above, for example SMA 50) and scan: then filter for stocks with the three lines stacked up or down and both gaps widening for N candles."}
+            </p>
+            <span className="self-end pb-2">
+              <NewTag id="tq-three-sma" />
+            </span>
+          </FilterGroup>
+        )}
         {!saved && trendAlert && (
           <FilterGroup title="Trend rank alert">
             <FilterField label="Alert">

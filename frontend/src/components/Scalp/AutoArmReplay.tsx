@@ -109,6 +109,9 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
       play_handoffs: handoffs,
       min_checks: th.min_checks,
       side: th.side,
+      stack: th.stack || th.widen > 0,
+      widen: th.widen,
+      third: th.third,
       pct: th.pct,
       pressure_side: th.pressure_side,
       min_value_cr: th.min_value_cr,
@@ -362,6 +365,10 @@ export function AutoArmReplay({ armed }: { armed: Map<string, string[]> }) {
 type Rules = {
   min_checks: number;
   side: "BOTH" | "UP" | "DOWN";
+  /** Three SMAs (fast / slow / third) stacked the trend's way; widen N > 0 = both gaps widening N candles too. */
+  stack: boolean;
+  widen: number;
+  third: number;
   pct: number;
   pressure_side: "BOTH" | "BUY" | "SELL";
   min_value_cr: number;
@@ -379,6 +386,9 @@ function rulesFrom(a: ScalpAlerts): Rules {
   return {
     min_checks: Math.min(7, Math.max(5, Number(a.strong_min_checks) || 6)),
     side: a.strong_side ?? "BOTH",
+    stack: Boolean(a.arm_strong_stack),
+    widen: Number(a.arm_strong_widen) || 0,
+    third: Number(a.arm_strong_third) || 50,
     pct: Number(a.pressure_pct) || 70,
     pressure_side: a.pressure_side ?? "BOTH",
     min_value_cr: Number(a.pressure_min_value_cr) || 0,
@@ -395,7 +405,9 @@ function rulesFrom(a: ScalpAlerts): Rules {
 function ruleText(t: Rules, source: "TREND" | "ACTIVE" | "BOTH"): string {
   return [
     source !== "ACTIVE"
-      ? `strong ${t.side === "BOTH" ? "up or down" : t.side.toLowerCase()} trend, ${t.min_checks === 7 ? "all 7 checks" : `${t.min_checks} of 7 checks or more`}`
+      ? `strong ${t.side === "BOTH" ? "up or down" : t.side.toLowerCase()} trend, ${t.min_checks === 7 ? "all 7 checks" : `${t.min_checks} of 7 checks or more`}${
+          t.stack || t.widen ? `, three SMAs (third SMA ${t.third}) stacked${t.widen ? ` with both gaps widening ${t.widen}+ candles` : ""}` : ""
+        }`
       : null,
     source !== "TREND"
       ? `${t.pressure_side === "BOTH" ? "buyers or sellers" : t.pressure_side === "BUY" ? "buyers" : "sellers"} at ${
@@ -462,6 +474,39 @@ function RulesBox({
                 <option value="DOWN">Down only</option>
               </select>
             </label>
+            <label className="flex flex-col gap-1">
+              <span className="flex items-center gap-1">
+                Three SMAs stacked
+                <NewTag id="arm-stack-widen" />
+              </span>
+              <select
+                value={th.stack || th.widen > 0 ? String(th.widen) : "off"}
+                onChange={(e) =>
+                  onChange(e.target.value === "off" ? { ...th, stack: false, widen: 0 } : { ...th, stack: true, widen: Number(e.target.value) })
+                }
+                className={select}
+              >
+                <option value="off">Not needed</option>
+                <option value="0">Stacked the trend&apos;s way</option>
+                {[1, 2, 3, 5, 8].map((n) => (
+                  <option key={n} value={String(n)}>
+                    Stacked, gaps widening {n}+ candle{n === 1 ? "" : "s"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {th.stack || th.widen > 0 ? (
+              <label className="flex flex-col gap-1">
+                Third SMA
+                <select value={th.third} onChange={(e) => set("third", Number(e.target.value))} className={select}>
+                  {[30, 50, 100, 200].map((n) => (
+                    <option key={n} value={n}>
+                      SMA {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
           </>
         ) : null}
         {source !== "TREND" ? (

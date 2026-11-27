@@ -190,6 +190,7 @@ def rule_from_dict(data: dict, sma_fast: int = 9, sma_slow: int = 21):
             skip_candles=int(data.get("skip_candles") or 0),
             min_rvol=float(data.get("min_rvol") or 0.0),
             min_checks=int(data.get("min_checks") or 6), side=str(data.get("side") or "BOTH"),
+            stack=bool(data.get("stack")), widen=int(data.get("widen") or 0), third=int(data.get("third") or 50),
             pct=float(data.get("pct") or 70.0), pressure_side=str(data.get("pressure_side") or "BOTH"),
             min_value_cr=float(data.get("min_value_cr") or 0.0), max_day=int(data.get("max_day") or 10),
             price_min=float(data.get("price_min") or 0.0), price_max=float(data.get("price_max") or 0.0),

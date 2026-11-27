@@ -3214,6 +3214,10 @@ export type AutoArmBody = {
   /** The picking rules (backend AutoArmStart): sent with every run so it never falls back to the server's Alerts tab. */
   min_checks?: number;
   side?: "BOTH" | "UP" | "DOWN";
+  /** Trend quality picks: three SMAs stacked the trend's way / both gaps widening N candles, with this third SMA. */
+  stack?: boolean;
+  widen?: number;
+  third?: number;
   pct?: number;
   pressure_side?: "BOTH" | "BUY" | "SELL";
   min_value_cr?: number;
@@ -4346,6 +4350,11 @@ export type ScalpAlerts = {
   /** Auto-arm only stocks priced inside this range (₹, 0 = no bound), live and in the auto-arm replay. */
   arm_price_min: number;
   arm_price_max: number;
+  /** Trend quality auto-arm: the three SMAs (fast / slow / arm_strong_third) stacked the trend's way, and with
+   * arm_strong_widen N > 0 both gaps widening for at least N closed candles. */
+  arm_strong_stack?: boolean;
+  arm_strong_widen?: number;
+  arm_strong_third?: number;
   /** Auto-arm a LIVE bot too (real Groww orders on its next signal); turning it on needs confirm_live. */
   arm_live: boolean;
   /** On a LIVE bot, at most this many stocks a day per scan (1-10). */

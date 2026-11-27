@@ -87,6 +87,8 @@ def candidates(kind: str, rows: list[dict], s, now: dt.datetime) -> list[dict]:
 
     if kind == "strong":
         found = scalp_alerts.strong_picks(rows, s, now, alerting=False)
+        stack, widen = bool(getattr(s, "arm_strong_stack", False)), int(getattr(s, "arm_strong_widen", 0) or 0)
+        found = [p for p in found if scalp_alerts.stack_refusal(p, p.get("side"), stack, widen) is None]
     else:
         found = scalp_alerts.pressure_picks(rows, s, now, alerting=False)
     lo, hi = getattr(s, "arm_price_min", 0.0), getattr(s, "arm_price_max", 0.0)
@@ -247,6 +249,11 @@ class AutoArmRule:
     skip_candles: int = 0
     min_checks: int = 6
     side: str = "BOTH"
+    #: The three SMAs (sma_fast / sma_slow / `third`) stacked the trend's way, and with `widen` N > 0 both gaps widening
+    #: for N closed candles (scalp_alerts arm_strong_stack / arm_strong_widen / arm_strong_third). Trend quality picks only.
+    stack: bool = False
+    widen: int = 0
+    third: int = 50
     pct: float = 70.0
     pressure_side: str = "BOTH"
     min_value_cr: float = 0.0
@@ -283,6 +290,7 @@ class AutoArmRule:
             "first": self.first.strftime("%H:%M"), "last": self.last.strftime("%H:%M"), "every_min": self.every_min,
             "minutes": self.minutes, "sma_fast": self.sma_fast, "sma_slow": self.sma_slow, "candles": self.candles,
             "skip_candles": self.skip_candles, "min_checks": self.min_checks, "side": self.side, "pct": self.pct,
+            "stack": self.stack, "widen": self.widen, "third": self.third,
             "pressure_side": self.pressure_side, "min_value_cr": self.min_value_cr, "min_rvol": self.min_rvol,
             "basis": self.basis, "flow_pct": self.flow_pct,
             "max_day": self.max_day,
@@ -301,7 +309,7 @@ def force_symbols(rule, picked: list[dict]) -> set[str]:
 
 
 def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fast: int, slow: int,
-                ha: bool = False, skip: int = 0) -> dict | None:
+                ha: bool = False, skip: int = 0, third: int = 0) -> dict | None:
     """One stock's strong-trend read as the Trend quality card had it at `at` (candles closed before it).
 
     The tape is cut to what the live scan downloads (`WARMUP_DAYS` calendar days from midnight, chop_scan
@@ -309,7 +317,10 @@ def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fa
     starts from the same candle: a longer tape (a multi-day run carries every earlier day) read differently.
 
     `skip` (minutes after 09:15, 0 = off): today's candles before 09:15 + skip are left out of the checks and the VWAP,
-    and a strong trend must have moved 1 ATR its way since them, as the Trend quality card reads it (chop_scan.analyze)."""
+    and a strong trend must have moved 1 ATR its way since them, as the Trend quality card reads it (chop_scan.analyze).
+
+    `third` (> slow, 0 = off): adds the card's three-SMA read (chop_scan.three_read: stack3, widen_candles…) on the same
+    candles, from as many days as that SMA needs."""
     import trend_strength
     from chop_scan import WARMUP_DAYS, _moved_since_skip, _vwap_today, closed_bars, ha_bars
     from indicators import enrich
@@ -343,11 +354,27 @@ def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fa
         enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), fast, slow)
         view = _skip_view(enriched, today_start, skip_from)
         read = trend_strength.read(view, vwap, now=now, tape=part)
+    if third and int(third) > int(slow) and isinstance(read, dict):
+        read = {**read, **_three_at(frame, day, now, cut, minutes, fast, slow, int(third), ha, bars)}
     if skip_from is None or not isinstance(read, dict):
         return read
     kept, note = _moved_since_skip(enriched, today_start, skip_from, read.get("trend"))
     notes = {**(read.get("trend_notes") or {}), **({"skip": note} if note else {})}
     return {**read, "trend": kept, "trend_notes": notes, "trend_skip_min": int(skip)}
+
+
+def _three_at(frame: pd.DataFrame, day: dt.date, now: dt.datetime, cut: int, minutes: int, fast: int, slow: int,
+              third: int, ha: bool, bars: pd.DataFrame) -> dict:
+    """The Trend quality card's three-SMA read at `now`, on enough days for the third SMA (chop_scan.analyze)."""
+    from chop_scan import WARMUP_DAYS, closed_bars, cut_window, ha_bars, three_read, window_days
+
+    need = window_days(minutes, third)
+    if need > WARMUP_DAYS:
+        before = frame[frame["ts"].astype("int64") < cut]
+        bars = closed_bars(cut_window(before, now, need), minutes, now)
+        if ha:
+            bars = ha_bars(bars)
+    return three_read(bars, fast, slow, third)
 
 
 def _skip_view(enriched: pd.DataFrame, today_start: int, skip_from: int | None) -> pd.DataFrame:
@@ -371,7 +398,14 @@ def _strong_ok(read: dict | None, rule: AutoArmRule) -> str | None:
     if rule.side != "BOTH" and rule.side != side:
         return None
     passed = sum(1 for ok in (read.get("trend_checks") or {}).values() if ok)
-    return side if passed >= rule.min_checks else None
+    if passed < rule.min_checks:
+        return None
+    if getattr(rule, "stack", False) or int(getattr(rule, "widen", 0) or 0) > 0:
+        import scalp_alerts
+
+        if scalp_alerts.stack_refusal(read, side, rule.stack, rule.widen) is not None:
+            return None
+    return side
 
 
 def strong_why(read: dict, side: str, rule: AutoArmRule) -> str:
@@ -385,6 +419,9 @@ def strong_why(read: dict, side: str, rule: AutoArmRule) -> str:
         text += " (morning rules, before 10:00)"
     if rule.skip_candles:
         text += f", first {rule.skip_candles} candle(s) skipped"
+    if read.get("stack3") and (getattr(rule, "stack", False) or getattr(rule, "widen", 0)):
+        text += (f"; SMA {rule.sma_fast} / {rule.sma_slow} / {read.get('sma_third')} stacked "
+                 f"{'up' if read['stack3'] == 'BULLISH' else 'down'}, gaps widening {read.get('widen_candles') or 0} candle(s)")
     missed = [k for k, ok in checks.items() if not ok]
     if missed:
         text += "; missed: " + ", ".join(missed)
@@ -428,7 +465,8 @@ def picks_for_day(frames: dict[str, pd.DataFrame], day: dt.date, rule: AutoArmRu
                     continue
                 try:
                     read = strong_read(frame, day, t, rule.minutes, rule.sma_fast, rule.sma_slow, ha=rule.candles == "HA",
-                                       skip=rule.skip_candles * rule.minutes)
+                                       skip=rule.skip_candles * rule.minutes,
+                                       third=rule.third if (rule.stack or rule.widen) else 0)
                 except Exception:  # noqa: BLE001 - one bad tape never stops the day
                     log.exception("auto-arm trend read failed for %s", symbol)
                     continue
