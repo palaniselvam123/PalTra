@@ -6,6 +6,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { lastScanText } from "@/lib/lastScan";
 import { Crosshair, Loader2, RefreshCw } from "lucide-react";
+import { SmaPick } from "@/components/Scalp/SmaPick";
+import { DESK_SMA, SCAN_SIZES, cleanSma, sizeLabel, type ScanSma } from "@/lib/scanSizes";
 import { smaApi, type CrossScan as CrossScanData, type CrossScanMinutes, type CrossScanRow } from "@/lib/smaApi";
 import { FilterField, FilterRow, NumberFilter, SelectFilter, TextFilter, Toggle, matchesText } from "@/components/ui/tableTools";
 import { SortTh, useSort } from "@/components/Terminal/sortable";
@@ -18,7 +20,8 @@ import { ScanListPicker, listsLabel, resolveScanSymbols, useScanLists } from "@/
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { GuideBar } from "./GuideBar";
 
-const CANDLE_CHOICES: CrossScanMinutes[] = [1, 2, 3, 5, 10, 15];
+const CANDLE_CHOICES: CrossScanMinutes[] = [...SCAN_SIZES];
+const SMA_STORE = "scalp.cross.sma";
 const POLL_MS = 3_000;
 
 type Props = {
@@ -67,6 +70,24 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
   const [data, setData] = useState<CrossScanData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [minutes, setMinutes] = useState<CrossScanMinutes>(5);
+  // Which moving averages the scan reads (owner's request: 20 / 50 or his own numbers); 0 / 0 = Bot 1's own.
+  const [sma, setSma] = useState<ScanSma>(DESK_SMA);
+  useEffect(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(SMA_STORE) || "null");
+      if (raw) setSma(cleanSma(raw.fast, raw.slow));
+    } catch {
+      /* private mode */
+    }
+  }, []);
+  const pickSma = (next: ScanSma) => {
+    setSma(next);
+    try {
+      localStorage.setItem(SMA_STORE, JSON.stringify(next));
+    } catch {
+      /* private mode */
+    }
+  };
   const [side, setSide] = useState<Side>("ALL");
   const [within, setWithin] = useState(30);
   const [query, setQuery] = useState("");
@@ -83,14 +104,14 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
       setError(null);
       try {
         const symbols = await resolveScanSymbols(lists, armed.keys());
-        setData(await smaApi.crossScanStart(symbols, minutes, force));
+        setData(await smaApi.crossScanStart(symbols, minutes, force, sma));
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Could not start the scan");
       } finally {
         setBusy(false);
       }
     },
-    [minutes, lists, armed]
+    [minutes, sma, lists, armed]
   );
 
   // Nothing is scanned until "Scan now" is pressed. Opening the page only looks at the last result the
@@ -131,7 +152,7 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
   const speedOf = useCallback((r: CrossScanRow) => (r.speed_pct_per_min == null ? null : Math.abs(r.speed_pct_per_min)), []);
 
   // The server holds one result, for the candle size it last scanned.
-  const scannedThisCandle = data?.minutes === minutes;
+  const scannedThisCandle = data?.minutes === minutes && (!sma.fast || (data?.sma_fast === sma.fast && data?.sma_slow === sma.slow));
   // Every filter but the stock search: what decides whether a stock is "in the list".
   const passes = useCallback(
     (r: CrossScanRow) => {
@@ -150,7 +171,7 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
     [shownRows, query, passes, ticks.only, ticks.ticked]
   );
   // When each stock first showed up in this list (these filters) in today's saved Cross scans.
-  const firstSeen = useFirstSeen(scannedThisCandle ? data?.as_of : null, data?.minutes, shownRows, passes, "cross");
+  const firstSeen = useFirstSeen(scannedThisCandle ? data?.as_of : null, data?.minutes, shownRows, passes, "cross", undefined, data ? { fast: data.sma_fast, slow: data.sma_slow } : undefined);
   const { sorted: rows, sort, onSort } = useSort<CrossScanRow, SortKey>(filtered, (r, k) => {
     switch (k) {
       case "symbol":
@@ -241,10 +262,11 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
             label="Candle"
             value={minutes}
             onChange={(v) => setMinutes(v as CrossScanMinutes)}
-            options={CANDLE_CHOICES.map((m) => ({ value: m, label: `${m} min` }))}
+            options={CANDLE_CHOICES.map((m) => ({ value: m, label: sizeLabel(m) }))}
             className="w-28"
           />
         )}
+        {!saved ? <SmaPick value={sma} onChange={pickSma} /> : null}
         <SelectFilter
           label="Direction"
           value={side}
@@ -285,7 +307,7 @@ export function CrossScan({ armed, arming, onArm, onArmMany, paused = false, onS
               ? "The scan could not read any stock, so there is nothing to show yet."
               : data?.as_of && scannedThisCandle
                 ? `No stock matches these filters. Widen "Crossing within", clear the stock or fast-mover filter, or press Scan now after the next candle closes.`
-                : `Nothing is scanned until you press Scan now. A scan reads about 200 stocks one at a time and takes a few minutes${scannedThisCandle || !data?.as_of ? "" : `; the last scan was for the ${data.minutes}-minute candle`}.`}
+                : `Nothing is scanned until you press Scan now. A scan reads about 200 stocks one at a time and takes a few minutes${scannedThisCandle || !data?.as_of ? "" : `; the last scan was for the ${data.minutes}-minute candle (SMA ${data.sma_fast}/${data.sma_slow})`}.`}
         </p>
       ) : (
         <div className="overflow-x-auto" ref={paged.anchor}>

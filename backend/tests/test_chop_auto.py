@@ -184,3 +184,14 @@ def test_one_to_four_minute_intervals_are_allowed():
 
     for m in (1, 2, 3, 4, 5):
         assert m in chop_auto.EVERY_CHOICES and m in active_stocks.EVERY_CHOICES
+
+
+def test_keeps_the_cards_candle_and_sma_periods(auto):
+    """30 minutes / 1 hour and the card's own SMAs are saved; a pair that cannot be scanned reads as the desk's."""
+    auto.update(minutes=60, sma_fast=20, sma_slow=50)
+    again = chop_auto.ChopAuto(path=auto.path)
+    assert (again.settings.minutes, again.settings.sma_fast, again.settings.sma_slow) == (60, 20, 50)
+    auto.update(sma_fast=50, sma_slow=20)
+    assert (auto.settings.sma_fast, auto.settings.sma_slow) == (0, 0)
+    auto.update(minutes=45)
+    assert auto.settings.minutes == 5

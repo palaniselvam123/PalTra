@@ -43,17 +43,21 @@ from typing import Awaitable, Callable
 
 import pandas as pd
 
-from candles import CANDLE_MINUTES
 from cross_scan import (
     CONCURRENCY,
     CALL_GAP_SEC,
     GIVE_UP_AFTER,
     MIN_RESCAN_SEC,
+    SCAN_MINUTES,
     WARMUP_DAYS,
     activity,
     cache_key,
     clean_symbols,
     closed_bars,
+    cut_window,
+    download_days,
+    window_days,
+    window_start,
 )
 from groww_client import IST, market_is_open
 from indicators import _session_vwap, derive_minute_volume, enrich, sma_gap_pct
@@ -321,8 +325,11 @@ def skip_minutes(skip_candles, minutes: int) -> int:
     return max(0, min(MAX_SKIP_CANDLES, n)) * int(minutes or 1)
 
 
-def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT, ha: bool = False, colour: bool = False, skip: int = 0) -> ChopRow | None:
+def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT, ha: bool = False, colour: bool = False, skip: int = 0, wide: pd.DataFrame | None = None) -> ChopRow | None:
     """One stock's chop/trend read. None when the tape isn't long enough yet. `ha`: read Heikin Ashi candles.
+
+    `wide`: a longer download of the same stock (`scan_frames`), read only for the other candle sizes of the row whose
+    slow SMA needs more days than `frame_1m` holds (30-minute and 1-hour candles), each cut to its own window.
     `colour`: read the real candles by colour (runs and flips, ha_trend.py) instead of the SMA cross; Heikin Ashi
     candles are always read by colour.
 
@@ -405,9 +412,15 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         kept, note = _moved_since_skip(enriched, today_start, skip_from, trend.get("trend"))
         notes = {**(trend.get("trend_notes") or {}), "skip": note} if note else trend.get("trend_notes")
         trend = {**trend, "trend": kept, "trend_skip_min": int(skip), **({"trend_notes": notes} if notes else {})}
+    own_days = window_days(minutes, sma_slow)
+
+    def tape_for(m: int) -> pd.DataFrame:
+        days = window_days(m, sma_slow)
+        return frame_1m if wide is None or days <= own_days else cut_window(wide, now, days)
+
     by_size = {m: (*_cross_read(hits, enriched, by_colour), trend["trend"]) if m == minutes
-               else _crosses_on(frame_1m, m, now, sma_fast, sma_slow, today, vwap, ha, by_colour, skip_from if skip else None)
-               for m in CANDLE_MINUTES}
+               else _crosses_on(tape_for(m), m, now, sma_fast, sma_slow, today, vwap, ha, by_colour, skip_from if skip else None)
+               for m in SCAN_MINUTES}
     return replace(
         base,
         **activity(frame_1m),
@@ -425,6 +438,14 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         gap_peak_pct_by_minutes={m: r[7] for m, r in by_size.items()},
         trend_by_minutes={m: r[8] for m, r in by_size.items()},
     )
+
+
+def scan_frames(frame_1m: pd.DataFrame, minutes: int, sma_slow: int, now: dt.datetime) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(the frame `analyze` reads, the whole download as its `wide`) for one stock of a pass.
+
+    A pass downloads `download_days`, which can be longer than its own candle needs so that a row's 30-minute and
+    1-hour reads have their SMAs; the scan's own read keeps its own window, so its numbers do not move with that."""
+    return cut_window(frame_1m, now, window_days(minutes, sma_slow)), frame_1m
 
 
 def _side(enriched: pd.DataFrame) -> str | None:
@@ -655,8 +676,8 @@ class ChopScanner:
         skip_candles = max(0, min(MAX_SKIP_CANDLES, int(skip_candles or 0)))
         if candles not in CANDLE_KINDS:
             raise ValueError("Candles must be NORMAL, COLOUR (real candles read by colour) or HA (Heikin Ashi)")
-        if minutes not in CANDLE_MINUTES:
-            raise ValueError(f"Candle size must be one of {', '.join(str(m) for m in CANDLE_MINUTES)} minutes")
+        if minutes not in SCAN_MINUTES:
+            raise ValueError(f"Candle size must be one of {', '.join(str(m) for m in SCAN_MINUTES)} minutes")
         names = clean_symbols(symbols)
         if not names:
             raise ValueError("No stocks to scan")
@@ -710,7 +731,7 @@ class ChopScanner:
         colour: bool = False,
         skip: int = 0,
     ) -> None:
-        start = (now - dt.timedelta(days=WARMUP_DAYS)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+        start = window_start(now, download_days(minutes, sma_slow, SCAN_MINUTES))
         end = now.replace(tzinfo=None)
         rows: list[ChopRow] = []
         errors: dict[str, int] = {}
@@ -730,8 +751,8 @@ class ChopScanner:
                     if job is not None:
                         row = await job(symbol, start, end)
                     else:
-                        frame = await fetch(symbol, start, end)
-                        row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min, ha=ha, colour=colour, skip=skip)
+                        frame, wide = scan_frames(await fetch(symbol, start, end), minutes, sma_slow, now)
+                        row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min, ha=ha, colour=colour, skip=skip, wide=wide)
                     ok += 1
                     if row is not None:
                         rows.append(row)

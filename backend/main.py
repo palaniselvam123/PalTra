@@ -76,6 +76,7 @@ import arm_log
 import handoff_log
 import chop_auto
 import chop_scan
+import cross_scan
 import high52
 import morning_scan
 import first_candles
@@ -4209,8 +4210,17 @@ def _scan_job(fn, sma_fast: int, sma_slow: int, minutes: int, extra: tuple = (),
 
 class CrossScanStart(BaseModel):
     symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
-    minutes: Literal[1, 2, 3, 5, 10, 15] = 5
+    minutes: Literal[1, 2, 3, 5, 10, 15, 30, 60] = 5
+    # The SMA periods to read (owner's request: 20 / 50 or his own numbers); 0 / 0 = the main desk's.
+    sma_fast: int = Field(default=0, ge=0, le=cross_scan.SMA_MAX)
+    sma_slow: int = Field(default=0, ge=0, le=cross_scan.SMA_MAX)
     force: bool = False
+
+
+def _scan_smas(fast: int = 0, slow: int = 0) -> tuple[int, int]:
+    """The SMA periods a Scalp scan reads: the ones asked for, else the main desk's. ValueError in plain words."""
+    cfg = engine.load_config()
+    return cross_scan.pick_smas(fast, slow, int(cfg.sma_fast), int(cfg.sma_slow))
 
 
 # Scalp page "Pause scans" (memory only: a restart resumes). Refuses new Cross / Trend quality
@@ -4279,20 +4289,20 @@ def _refuse_when_paused() -> None:
 async def cross_scan_start(body: CrossScanStart):
     """Start a cross scan (read-only: candles only, no order). Returns at once; poll GET /api/cross-scan.
 
-    Uses the main desk's SMA periods. The same candle (and the same stocks) is
+    Uses the SMA periods asked for, else the main desk's. The same candle (and the same stocks) is
     not scanned twice, and a rescan waits a minute.
     """
     _refuse_when_paused()
-    cfg = engine.load_config()
     try:
+        fast, slow = _scan_smas(body.sma_fast, body.sma_slow)
         return cross_scanner.start(
             body.symbols,
             lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end),
             minutes=body.minutes,
-            sma_fast=int(cfg.sma_fast),
-            sma_slow=int(cfg.sma_slow),
+            sma_fast=fast,
+            sma_slow=slow,
             force=body.force,
-            job=_scan_job(scan_worker.cross_job, int(cfg.sma_fast), int(cfg.sma_slow), body.minutes, cached=True),
+            job=_scan_job(scan_worker.cross_job, fast, slow, body.minutes, cached=True),
             meta={"stocks": len(body.symbols), "source": "manual"},
         )
     except ValueError as exc:
@@ -4306,7 +4316,10 @@ async def cross_scan_status():
 
 class ChopScanStart(BaseModel):
     symbols: list[str] = Field(default_factory=list, max_length=CROSS_SCAN_MAX)
-    minutes: Literal[1, 2, 3, 5, 10, 15] = 5
+    minutes: Literal[1, 2, 3, 5, 10, 15, 30, 60] = 5
+    # The SMA periods to read (owner's request: 20 / 50 or his own numbers); 0 / 0 = the main desk's.
+    sma_fast: int = Field(default=0, ge=0, le=cross_scan.SMA_MAX)
+    sma_slow: int = Field(default=0, ge=0, le=cross_scan.SMA_MAX)
     quiet_min: int = Field(default=chop_scan.QUIET_MIN_DEFAULT, ge=1, le=375)
     alert_on_quiet: bool = False
     # Quiet-runner alerts only for stocks priced inside this range (₹; 0 = no bound).
@@ -4350,21 +4363,23 @@ def _start_chop(
     source: str = "manual",
     candles: str = chop_scan.NORMAL,
     skip_candles: int = 0,
+    sma_fast: int = 0,
+    sma_slow: int = 0,
 ):
-    cfg = engine.load_config()
+    fast, slow = _scan_smas(sma_fast, sma_slow)
     return chop_scanner.start(
         symbols,
         lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end),
         minutes=minutes,
-        sma_fast=int(cfg.sma_fast),
-        sma_slow=int(cfg.sma_slow),
+        sma_fast=fast,
+        sma_slow=slow,
         quiet_min=quiet_min,
         alert_on_quiet=alert_on_quiet,
         alert_cb=_chop_alert if alert_on_quiet else None,
         force=force,
         price_min=price_min,
         price_max=price_max,
-        job=_scan_job(scan_worker.chop_job, int(cfg.sma_fast), int(cfg.sma_slow), minutes, extra=(quiet_min, chop_scan.candle_kind(candles), chop_scan.skip_minutes(skip_candles, minutes)), cached=True),
+        job=_scan_job(scan_worker.chop_job, fast, slow, minutes, extra=(quiet_min, chop_scan.candle_kind(candles), chop_scan.skip_minutes(skip_candles, minutes)), cached=True),
         candles=candles,
         skip_candles=skip_candles,
         meta={
@@ -4401,6 +4416,8 @@ async def chop_scan_start(body: ChopScanStart):
             force=body.force,
             candles=body.candles,
             skip_candles=body.skip_candles,
+            sma_fast=body.sma_fast,
+            sma_slow=body.sma_slow,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -4465,13 +4482,18 @@ async def _chop_auto_start(s: chop_auto.AutoSettings) -> None:
         source="auto",
         candles=s.candles,
         skip_candles=s.skip_candles,
+        sma_fast=s.sma_fast,
+        sma_slow=s.sma_slow,
     )
 
 
 class ChopAutoUpdate(BaseModel):
     on: bool | None = None
     every_min: Literal[1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60] | None = None
-    minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
+    minutes: Literal[1, 2, 3, 5, 10, 15, 30, 60] | None = None
+    # The card's SMA periods; 0 / 0 = the main desk's. Sent together.
+    sma_fast: int | None = Field(default=None, ge=0, le=cross_scan.SMA_MAX)
+    sma_slow: int | None = Field(default=None, ge=0, le=cross_scan.SMA_MAX)
     armed_only: bool | None = None
     quiet_min: int | None = Field(default=None, ge=1, le=375)
     alert_on_quiet: bool | None = None
@@ -4487,6 +4509,11 @@ async def chop_scan_auto(body: ChopAutoUpdate):
     """Turn the server's Trend quality re-scan on/off, set how often, and the choices it scans with."""
     if body.on and not server_role.scans_enabled():
         raise HTTPException(409, server_role.SCANS_OFF_TEXT)
+    if body.sma_fast is not None or body.sma_slow is not None:
+        try:
+            cross_scan.pick_smas(body.sma_fast, body.sma_slow, 9, 21)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
     chop_autos.update(**body.model_dump())
     return chop_autos.snapshot()
 

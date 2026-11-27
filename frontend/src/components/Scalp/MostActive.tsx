@@ -113,7 +113,7 @@ const TREND_PICKS: { value: TrendPick; label: string }[] = [
   { value: "TRENDING", label: "Trending" },
   { value: "NOT_CHOPPY", label: "Not choppy" },
 ];
-const TQ_SIZES: CrossScanMinutes[] = [1, 3, 5, 15];
+const TQ_SIZES: CrossScanMinutes[] = [1, 3, 5, 15, 30, 60];
 const TQ_MAX = 200;
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
@@ -817,7 +817,7 @@ export function MostActive({ watching, armed, arming, onArm, onWatched, paused =
           >
             {TQ_SIZES.map((m) => (
               <option key={m} value={m}>
-                {m}-min candles
+                {m === 60 ? "1-hour" : `${m}-min`} candles
               </option>
             ))}
           </select>

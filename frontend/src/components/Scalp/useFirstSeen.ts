@@ -15,7 +15,7 @@ const istDay = (iso: string) =>
 
 /**
  * When each stock first appeared in a scan card's list (Trend quality or Cross scan) with its current
- * filters: the earliest of today's saved scans (same candle size, up to the scan on
+ * filters: the earliest of today's saved scans (same candle size and SMA periods, up to the scan on
  * screen) in which the stock passes `passes`. A stock in the list now that no saved
  * scan had is dated to the scan on screen. Read-only: it only reads the scan history.
  */
@@ -26,6 +26,8 @@ export function useFirstSeen<R extends { symbol: string }>(
   passes: (r: R) => boolean,
   kind: "chop" | "cross" = "chop",
   candles?: "NORMAL" | "COLOUR" | "HA",
+  // The scan on screen's SMA periods: saved scans read on other averages are a different list.
+  sma?: { fast: number; slow: number },
 ): Map<string, string> {
   const [runs, setRuns] = useState<ScanRunDetail[]>([]);
 
@@ -40,7 +42,11 @@ export function useFirstSeen<R extends { symbol: string }>(
       try {
         const list = await smaApi.scanHistory(istDay(asOf), kind);
         const wanted = list.runs.filter(
-          (r) => r.minutes === minutes && Date.parse(r.as_of) <= until && (!candles || (r.meta?.candles ?? "NORMAL") === candles),
+          (r) =>
+            r.minutes === minutes &&
+            Date.parse(r.as_of) <= until &&
+            (!candles || (r.meta?.candles ?? "NORMAL") === candles) &&
+            (!sma?.fast || !r.meta?.sma_fast || (r.meta.sma_fast === sma.fast && r.meta.sma_slow === sma.slow)),
         );
         const out: ScanRunDetail[] = [];
         for (const r of wanted) {
@@ -60,7 +66,7 @@ export function useFirstSeen<R extends { symbol: string }>(
     return () => {
       live = false;
     };
-  }, [asOf, minutes, kind, candles]);
+  }, [asOf, minutes, kind, candles, sma?.fast, sma?.slow]);
 
   return useMemo(() => {
     const first = new Map<string, string>();

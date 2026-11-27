@@ -26,7 +26,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from candles import CANDLE_MINUTES
+from cross_scan import SCAN_MINUTES as CANDLE_MINUTES  # the scans' sizes: the bots' own plus 30 minutes and 1 hour
 from groww_client import IST, market_is_open
 
 log = logging.getLogger("sma.trend_rank")

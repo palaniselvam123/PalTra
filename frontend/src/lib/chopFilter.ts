@@ -5,7 +5,7 @@
 import type { ChopCandles, ChopScanRow, ChopScore } from "@/lib/smaApi";
 import { trendRead, type TrendDir, type TrendKind } from "@/lib/trendRank";
 
-export const CANDLE_CHOICES = [1, 2, 3, 5, 10, 15] as const;
+export const CANDLE_CHOICES = [1, 2, 3, 5, 10, 15, 30, 60] as const; // lib/scanSizes SCAN_SIZES
 
 // ---- Candle modes (chop_scan.CANDLE_KINDS) ----------------------------------------------------------------------
 // NORMAL reads the real candles by the SMA 9 / 21 cross; COLOUR reads the real candles by colour (runs and flips,
