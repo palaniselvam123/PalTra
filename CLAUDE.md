@@ -3202,7 +3202,9 @@ No credentials are needed. The desk starts on the simulated feed.
   - **second desk** (another Fly account, `fly.desk2.toml`, setup in `DESK2.md`): "Run workflow" with
     `target: desk2` (same `commit` / `market_hours_ok` rules) deploys only it (`deploy-desk2`), to the app
     named by the repo variable `DESK2_APP` (`scripts/fly_deploy.sh` passes `FLY_APP` as `-a`) with the
-    secret `FLY_DESK2_API_TOKEN`; its own volume, database, keys and secrets, boots PAPER
+    secret `FLY_DESK2_API_TOKEN`; its own volume, database, keys and secrets, boots PAPER; two dedicated performance CPUs and
+    4 GB like `fly.toml` (the shared CPUs tried first were throttled and froze it under backtests), so its Fly
+    account must be on Pay As You Go
   - **moving off the old Fly account** (owner's plan: close the account running `paltra`, `paltra-backtest`
     and `paltra-scanner`; `pritra` becomes the desk): Run workflow's default target is `desk2`; with the repo
     variables `DEPLOY_BACKTEST` / `DEPLOY_SCANNER` false a merge deploys nothing (the release gate's note says

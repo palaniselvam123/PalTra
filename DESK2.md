@@ -80,11 +80,12 @@ the Groww API key and log in.
 
 ## Size and cost
 
-`fly.desk2.toml` uses a shared-CPU machine (2 shared CPUs, 2 GB, always on): the new account is on
-Fly's Free plan, which refuses performance machines. A few dollars a month plus about US$0.45 a month
-for the 3 GB volume; a busy replay can slow its pages. After upgrading that account to Pay As You Go,
-change `[[vm]]` in `fly.desk2.toml` to `cpu_kind = 'performance'`, `memory_mb = 4096` (like `fly.toml`,
-about US$60-65 a month).
+`fly.desk2.toml` uses two dedicated performance CPUs and 4 GB, always on (like `fly.toml`, about
+US$60-65 a month plus the volume). The account must be on **Pay As You Go**: the Free plan refuses
+performance machines and the deploy fails. Shared CPUs were tried first and are not enough: Fly lets a
+shared CPU burst only briefly, then throttles it to a small share, and backtests then froze the desk for
+5-20 seconds at a time ("The server is not answering"). Every deploy applies `[[vm]]`, so a size changed
+with `fly scale` is undone by the next deploy unless this file says the same.
 
 ## Not set up for it
 
@@ -113,9 +114,8 @@ pritra then becomes the only desk. In this order:
    `DEPLOY_SCANNER` = `false`. A merge then deploys nothing; deploy with Run workflow → target `desk2`
    (the default). The health watcher already reads pritra (`HEALTH_URL` overrides it). The old secrets
    `FLY_API_TOKEN`, `FLY_BACKTEST_API_TOKEN`, `FLY_SCANNER_API_TOKEN` can be deleted.
-5. **pritra's size**: the Free plan runs it on a shared CPU, which can be throttled in busy market hours.
-   For LIVE trading, upgrade the new account to Pay As You Go and set `[[vm]]` in `fly.desk2.toml` to
-   `cpu_kind = 'performance'`, `memory_mb = 4096`.
+5. **pritra's size**: `fly.desk2.toml` asks for a performance machine (2 dedicated CPUs, 4 GB), so the new
+   account must be on Pay As You Go before the next desk2 deploy.
 6. Close the old account last.
 
 ## Copy the backtest server's runs too
