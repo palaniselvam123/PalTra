@@ -13,6 +13,7 @@ import {
   type StrategyLabChoice,
   type StrategyLabJob,
   type StrategyLabJudge,
+  type StrategyLabNumberValue,
   type StrategyLabRecommend,
   type StrategyLabResult,
   type StrategyLabRules,
@@ -22,6 +23,7 @@ import {
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { NewTag } from "@/components/ui/NewTag";
 import { GuideBar } from "./GuideBar";
+import { LabNumbers } from "./LabNumbers";
 
 /**
  * Strategy lab (backend strategy_lab.py): tick the entry checks, exits and stop and watch the P&L change at once.
@@ -70,6 +72,8 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
   // Every stock's P&L with the same rules but all stocks in (the Stocks tab shows it for unticked ones too).
   const [allStocks, setAllStocks] = useState<StrategyLabResult["per_stock"] | null>(null);
   const latest = useRef(0);
+  // A re-read from the Numbers panel keeps the ticked rules: the new run opens on them instead of the bot's own.
+  const keepChoice = useRef<StrategyLabChoice | null>(null);
 
   const rules: StrategyLabRules | null = view?.rules ?? null;
   // Rules this run was read without (older runs): greyed and left out of "What does each rule add?".
@@ -117,11 +121,14 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
       .then((v) => {
         if (!alive) return;
         setJob(v.job);
-        setChoice({ ...EMPTY, ...(v.job.choice ?? {}) });
+        const kept = keepChoice.current;
+        keepChoice.current = null;
+        setChoice(kept ?? { ...EMPTY, ...(v.job.choice ?? {}) });
         setResult(v.result);
         setAllStocks(v.result.per_stock);
         setRec(null);
         setRecFor(null);
+        if (kept) void evaluateRef.current(kept);
       })
       .catch((e: unknown) => alive && setNote({ ok: false, text: e instanceof Error ? e.message : "Could not open the run" }))
       .finally(() => alive && setEvaluating(false));
@@ -154,6 +161,8 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
     },
     [openId]
   );
+  const evaluateRef = useRef(evaluate);
+  evaluateRef.current = evaluate;
   const change = (next: StrategyLabChoice) => {
     setChoice(next);
     void evaluate(next);
@@ -181,6 +190,33 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
         ok: true,
         text: `Reading ${symbols.length} stock(s), ${range[0]} → ${range[range.length - 1]}, with Bot ${bot}'s numbers${minutes ? ` on ${minutes}-minute candles` : ""}. The first read of a day downloads its candles (a second or two a stock); days read before come from the cache.`,
       });
+    } catch (e: unknown) {
+      setNote({ ok: false, text: e instanceof Error ? e.message : "Could not start" });
+    } finally {
+      setBusy(false);
+    }
+  };
+  // The Numbers panel: the same stocks, days, bot and candle read again with the lab's numbers ({} = the bot's own).
+  const rereadWith = async (numbers: Record<string, StrategyLabNumberValue>) => {
+    if (!job) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      const n = Object.keys(numbers).length;
+      const v = await smaApi.strategyLabStart({
+        symbols: job.symbols,
+        date: job.first,
+        end_date: job.last,
+        bot: job.bot,
+        label: job.label || (n ? `lab numbers (${n})` : ""),
+        minutes: job.minutes || undefined,
+        numbers,
+      });
+      keepChoice.current = choice;
+      setView(v);
+      setOpenId(null);
+      lastDone.current = null;
+      setNote({ ok: true, text: n ? `Reading the same ${job.symbols.length} stock(s) and days again with ${n} lab number(s). Bot ${job.bot}'s Settings are not changed.` : `Reading the same stocks and days again with Bot ${job.bot}'s own numbers.` });
     } catch (e: unknown) {
       setNote({ ok: false, text: e instanceof Error ? e.message : "Could not start" });
     } finally {
@@ -506,6 +542,8 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
               </div>
             </div>
           </div>
+
+          {job && <LabNumbers job={job} rules={rules} choice={choice} busy={busy || Boolean(view?.running)} onRead={(n) => void rereadWith(n)} />}
 
           {/* Totals */}
           {result && (

@@ -149,6 +149,115 @@ TARGETS: dict[str, str] = {
     "day_level": "Day high / low target",
     "net": "Profit safety net",
 }
+def _n(field: str, label: str, rule: str, kind: str = "num", **extra) -> dict:
+    return {"field": field, "label": label, "rule": rule, "kind": kind, **extra}
+
+
+#: Every number behind the lab's rules (a BotConfig field each), grouped by the rule it belongs to ("entry:rsi",
+#: "stop:SMART", "general"). The Numbers panel shows them as the run read them and can change them for a new read.
+NUMBER_FIELDS: list[dict] = [
+    _n("sma_fast", "SMA fast", "general", "int"), _n("sma_slow", "SMA slow", "general", "int"),
+    _n("atr_period", "ATR period", "general", "int"),
+    _n("entry_cutoff_time", "No new entries after (HH:MM)", "general", "text"),
+    _n("square_off_time", "Square-off (HH:MM)", "general", "text"),
+    _n("max_trades_per_stock", "Max trades per stock a day (0 = no cap)", "general", "int"),
+    _n("volume_min_ratio", "Volume at least × average", "entry:volume"),
+    _n("density_min_pct", "Body at least % of the candle", "entry:density"),
+    _n("rsi_long_min", "Buy: RSI from", "entry:rsi"), _n("rsi_long_max", "Buy: RSI to", "entry:rsi"),
+    _n("rsi_short_min", "Sell: RSI from", "entry:rsi"), _n("rsi_short_max", "Sell: RSI to", "entry:rsi"),
+    _n("bb_period", "Bollinger period", "entry:bollinger", "int"), _n("bb_std", "Bollinger std devs", "entry:bollinger"),
+    _n("bb_min_width_pct", "Band width at least %", "entry:bollinger"),
+    _n("gap_long_min", "Buy: SMA gap from %", "entry:gap"), _n("gap_long_max", "Buy: SMA gap to %", "entry:gap"),
+    _n("gap_short_min", "Sell: SMA gap from %", "entry:gap"), _n("gap_short_max", "Sell: SMA gap to %", "entry:gap"),
+    _n("candle_dir_count", "Candles", "entry:candle_dir", "int"),
+    _n("candle_dir_rule", "Rule", "entry:candle_dir", "choice", choices=["CLOSES", "COLOUR", "BOTH"]),
+    _n("ema_fast", "EMA fast", "entry:ema", "int"), _n("ema_slow", "EMA slow", "entry:ema", "int"),
+    _n("macd_fast", "MACD fast", "entry:macd", "int"), _n("macd_slow", "MACD slow", "entry:macd", "int"),
+    _n("macd_signal", "MACD signal", "entry:macd", "int"),
+    _n("cvd_lookback", "Delta rising over candles", "entry:cvd", "int"),
+    _n("st_period", "Supertrend ATR period", "entry:supertrend", "int"), _n("st_mult", "Supertrend factor", "entry:supertrend"),
+    _n("level_line", "Line", "entry:level", "choice", choices=["BB_MIDDLE", "BB_UPPER", "PIVOT_P", "PIVOT_R1"]),
+    _n("adx_threshold", "ADX at least", "entry:adx"),
+    _n("fresh_rvol", "Volume at least × usual (0 = not checked)", "entry:fresh"),
+    _n("or_volume_ratio", "Opening volume at least × usual", "entry:or_volume"),
+    _n("or_spread_pct", "SMA spread at least %", "entry:or_spread"),
+    _n("flow_entry_pct", "Order's side did at least %", "entry:flow"),
+    _n("flow_entry_window", "Over the last minutes (0 = one candle)", "entry:flow", "int"),
+    _n("sc_minutes", "Smaller sizes (e.g. 1,3)", "entry:small_colour", "text"),
+    _n("sc_count", "Candles in a row", "entry:small_colour", "int"),
+    _n("sc_join", "Sizes that must agree", "entry:small_colour", "choice", choices=["ALL", "ANY", "AT_LEAST"]),
+    _n("counter_exit_count", "Candles against in a row", "exit:counter", "int"),
+    _n("counter_rule", "Against by", "exit:counter", "choice", choices=["COLOUR", "CLOSES", "BOTH"]),
+    _n("counter_need_fast", "Last close past the fast SMA", "exit:counter", "bool"),
+    _n("counter_min_body", "Each body at least × ATR (0 = any)", "exit:counter"),
+    _n("cvd_div_lookback", "Divergence over candles", "exit:cvd", "int"),
+    _n("slope_lookback", "Slope over candles", "exit:slope_turn", "int"),
+    _n("slope_turn_pct", "Turn: % per candle against", "exit:slope_turn"),
+    _n("slope_bend_pct", "Bend: drop % from the steepest", "exit:slope_bend"),
+    _n("vturn_move_pct", "V-turn: steep run % per candle", "exit:vturn"),
+    _n("vturn_turn_pct", "V-turn: turn-back % per candle", "exit:vturn"),
+    _n("vturn_within", "V-turn: within candles", "exit:vturn", "int"),
+    _n("decel_arm_atr", "Peak slope at least (ATR / candle)", "exit:decel"),
+    _n("decel_drop_pct", "Slope fell at least % from the peak", "exit:decel"),
+    _n("decel_candles", "Bending candles in a row", "exit:decel", "int"),
+    _n("exit_candle_minutes", "Exit candle minutes (0 = next size up)", "exit:exit_candle", "int"),
+    _n("flow_exit_pct", "Other side did at least %", "exit:flow_exit"),
+    _n("flow_exit_window", "Over the last minutes (0 = one candle)", "exit:flow_exit", "int"),
+    _n("atr_multiplier", "ATR stop × ATR", "stop:ATR"),
+    _n("tsl_mode", "Units", "stop:TSL", "choice", choices=["POINTS", "PERCENT", "ATR"]),
+    _n("tsl_sl_points", "Stop ₹", "stop:TSL"), _n("tsl_trail_points", "Trail step ₹", "stop:TSL"),
+    _n("tsl_target_points", "Target ₹ (0 = none)", "stop:TSL"),
+    _n("tsl_sl_pct", "Stop %", "stop:TSL"), _n("tsl_trail_pct", "Trail step %", "stop:TSL"),
+    _n("tsl_target_pct", "Target % (0 = none)", "stop:TSL"),
+    _n("tsl_sl_atr", "Stop × ATR", "stop:TSL"), _n("tsl_trail_atr", "Trail step × ATR", "stop:TSL"),
+    _n("tsl_target_atr", "Target × ATR (0 = none)", "stop:TSL"),
+    _n("vwap_stop_atr", "Buffer × ATR beyond VWAP", "stop:VWAP"),
+    _n("smart_pct", "Room = percentile of the dips", "stop:SMART"), _n("smart_days", "Sessions read", "stop:SMART", "int"),
+    _n("smart_min_pct", "Room at least %", "stop:SMART"), _n("smart_max_pct", "Room at most %", "stop:SMART"),
+    _n("smart_follow", "Tighten as the profit grows", "stop:SMART", "bool"),
+    _n("plan_be_r", "Breakeven at + R", "stop:PLAN"), _n("plan_trail_r", "Supertrend trail from + R", "stop:PLAN"),
+    _n("atr_target_mult", "Target × ATR (0 = 3)", "target:atr"),
+    _n("day_target_min_pct", "Level at least % beyond the entry", "target:day_level"),
+    _n("day_target_early_pct", "Close % before the level", "target:day_level"),
+    _n("day_target_skip_min", "Ignore today's highs of the first minutes", "target:day_level", "int"),
+    _n("target_net_start", "Start the net at", "target:net", "choice", choices=["PCT", "RS", "ATR"]),
+    _n("target_net_start_pct", "Start at % profit", "target:net"),
+    _n("target_net_start_rs", "Start at ₹ profit (whole trade)", "target:net"),
+    _n("target_net_start_atr", "Start at × ATR profit", "target:net"),
+    _n("target_net_keep", "Keep % of the best profit", "target:net"),
+    _n("target_net_at2", "Second step at × start distance (0 = none)", "target:net"),
+    _n("target_net_keep2", "Then keep %", "target:net"),
+]
+NUMBER_NAMES = frozenset(n["field"] for n in NUMBER_FIELDS)
+
+
+def numbers_of(cfg) -> dict:
+    """The value of every NUMBER_FIELDS field on `cfg` (None = not set: the rule's own default applies)."""
+    out: dict = {}
+    for spec in NUMBER_FIELDS:
+        value = getattr(cfg, spec["field"], None)
+        if isinstance(value, (dt.time,)):
+            value = value.strftime("%H:%M")
+        out[spec["field"]] = value
+    return out
+
+
+def apply_numbers(cfg, numbers: dict | None):
+    """A copy of `cfg` with the Numbers panel's values set (for every stock: they replace a stock's own value too)."""
+    numbers = {k: v for k, v in (numbers or {}).items() if k in NUMBER_NAMES}
+    if not numbers:
+        return cfg
+    import copy
+
+    if hasattr(cfg, "__table__"):
+        out = type(cfg)(**{col.name: getattr(cfg, col.name) for col in cfg.__table__.columns})
+    else:
+        out = copy.copy(cfg)
+    for key, value in numbers.items():
+        setattr(out, key, value)
+    return out
+
+
 #: The exit candle the lab reads when the bot has none set: the next size up from the bot's candle.
 EXIT_CANDLE_DEFAULTS = (5, 15, 30, 60)
 #: The ATR target multiple the lab reads when the bot has none set.
@@ -320,6 +429,8 @@ def lab_settings(cfg) -> dict:
         "smart": smart_stop.settings(cfg),
         "plan_be_r": stop_plan.be_r(cfg),
         "plan_trail_r": stop_plan.trail_r(cfg),
+        # The fields themselves (Numbers panel, and carried onto the bot by numbers_for_bot).
+        "fields": numbers_of(cfg),
     }
 
 
@@ -460,7 +571,8 @@ def numbers_for_bot(settings: dict | None, choice: dict) -> dict:
     s = settings or {}
     if not s:
         return {}
-    out: dict = {}
+    # Every number field as the run read it (net, day target, smart stop, flow… included), then the arithmetic above.
+    out: dict = {k: v for k, v in (s.get("fields") or {}).items() if v is not None}
 
     def put(field: str, key: str) -> None:
         if s.get(key) is not None:
@@ -1894,7 +2006,8 @@ class StrategyLab:
 
     # -- run
     def start(
-        self, symbols: list[str], first: dt.date, last: dt.date, bot: int, cfg_for, fetch, wait=None, label: str = "", minutes: int | None = None
+        self, symbols: list[str], first: dt.date, last: dt.date, bot: int, cfg_for, fetch, wait=None, label: str = "", minutes: int | None = None,
+        numbers: dict | None = None, fields: dict | None = None,
     ) -> dict:
         """`minutes` (1/2/3/5/10/15) reads every stock on that candle instead of the bot's own (None = the bot's)."""
         if self.running:
@@ -1917,6 +2030,9 @@ class StrategyLab:
             "label": label[:60],
             "bot": bot,
             "minutes": int(minutes) if minutes is not None else None,
+            # The Numbers panel's changes for this read (every stock) and the bot's numbers with them on.
+            "numbers": dict(numbers or {}),
+            "fields": dict(fields or {}),
             "symbols": names,
             "first": first.isoformat(),
             "last": last.isoformat(),
