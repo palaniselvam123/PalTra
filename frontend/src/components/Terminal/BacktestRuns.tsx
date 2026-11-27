@@ -715,6 +715,7 @@ export const SETTING_ROWS: [string, (s: Settings) => string][] = [
   ["MACD cross exit", (s) => (s.macd_exit ? `On (${s.macd_fast ?? 12}/${s.macd_slow ?? 26}/${s.macd_signal ?? 9})` : "Off")],
   ["MACD histogram growing entry", (s) => (s.use_macd_grow ? `On (${s.macd_grow_candles ?? 2} candles)` : "Off")],
   ["MACD histogram exit", (s) => (s.macd_shrink_exit ? `On (${s.macd_shrink_candles ?? 2} candles against)` : "Off")],
+  ["Three-SMA entry (gaps widening)", (s) => (s.stack_entry ? `On (third SMA ${s.stack_third ?? 50}, widening ${s.stack_widen ?? 2} candle(s), each gap at least ${s.stack_min_gap ?? 0.05}%${s.stack_only ? ", only this opens trades" : ""})` : "Off")],
   ["Candle-pattern check", (s) => (s.pc_entry ? `On (${String(s.pc_set ?? "STRONG").toUpperCase() === "ALL" ? "any" : "strong"} patterns, last ${s.pc_within ?? 1} candle(s), ${Number(s.pc_minutes ?? 0) || "bot's own"} min)` : "Off")],
   ["Candle-pattern exit", (s) => (s.pc_exit ? "On" : "Off")],
   ["Fast / medium SMA exit", (s) => (s.triple_exit && s.sma_medium ? `On (${s.sma_fast ?? 9} / ${s.sma_medium})` : "Off")],

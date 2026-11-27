@@ -72,6 +72,7 @@ import ema_filter
 import heikin_ashi
 import macd
 import pattern_check
+import stack_entry
 import triple_exit
 import cum_delta
 import reverse_exit
@@ -223,6 +224,7 @@ ENTRY_REASONS = (
     "MANUAL_REVERSE",
     "AUTO_REVIEW_REVERSE",
     "TREND_QUALITY",
+    "STACK_WIDEN",
 )
 
 
@@ -465,7 +467,7 @@ SNAPSHOT_FIELDS = (
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "breakout_min_profit_pct",
     "breakout_min_profit_rs", "chop_losses", "fade_unarm", "fade_unarm_rule", "fade_unarm_min",
-    "tq_entry", "tq_entry_score", "tq_entry_phase", "tq_only", "tq_exit", "tq_exit_score", "tq_exit_phase", "tq_all", "tq_skip_doji", "tq_doji_pct",
+    "tq_entry", "tq_entry_score", "tq_entry_phase", "tq_only", "tq_exit", "tq_exit_score", "tq_exit_phase", "tq_all", "tq_skip_doji", "tq_doji_pct", "stack_entry", "stack_widen", "stack_third", "stack_min_gap", "stack_only",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "colour_inside_minutes", "colour_inside_body", "colour_exit_on", "colour_exit_count", "colour_exit_body", "colour_exit_inside", "colour_force", "colour_pull", "colour_pull_candles", "colour_pull_market", "candle_minutes",
     "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks", "nth_dir_rule",
     "exit_candle_minutes",
@@ -1481,6 +1483,10 @@ class StrategyEngine:
         # closed candle each held stock was last reviewed on, the uncertain
         # stretch per stock ({trade_id, open, last_at}), and recent reviews.
         self._tapes: dict[str, pd.DataFrame] = {}
+        # Three-SMA stack entry (stack_entry.py): the last closed candle asked per stock, and the widening run
+        # (side, the closed candle at the entry) already traded. Memory only.
+        self._stack_tried: dict[str, int] = {}
+        self._stack_done: dict[str, tuple[str, int]] = {}
         # Daily pivot levels per (stock, trading day) (pivots.py); the earlier session never changes.
         self._pivot_cache: dict[tuple[str, dt.date], dict] = {}
         # Day high / low target per open trade (day_target.py): (symbol, trade id) -> (name, level, trigger) or None.
@@ -1833,6 +1839,8 @@ class StrategyEngine:
             self._always_held.clear()
             self._always_reverse.clear()
             self._always_tried.clear()
+            self._stack_tried.clear()
+            self._stack_done.clear()
             if self.status in ("DAY_COMPLETED", "HALTED"):
                 self.status = "STOPPED"
                 self.halt_reason = ""
@@ -1914,7 +1922,8 @@ class StrategyEngine:
             # A stock traded on 30-minute or 1-hour candles needs more days of 1-minute candles for its slow SMA:
             # say so to the quote client, which every bot shares (candles.note_need; read-only, no order).
             own = stock_overrides(cfg, symbol)
-            ask = (candle_minutes(cfg, own), own.get("sma_slow", cfg.sma_slow))
+            # The three-SMA entry's third line is longer than the slow SMA: enough candles for it too.
+            ask = (candle_minutes(cfg, own), max(int(own.get("sma_slow", cfg.sma_slow) or 21), stack_entry.longest(_cfg_for(cfg, symbol))))
             _, keep_bars = candles_mod.note_need(id(self), symbol, *ask) if self.asks_history else candles_mod.history_need(*ask)
             try:
                 ltp, frame, source = await self.broker.refresh(symbol)
@@ -2039,6 +2048,9 @@ class StrategyEngine:
                 await self._flow_trigger_pass(symbol, frame, cfg, now)
                 if self.status != "RUNNING":
                     break
+                await self._stack_entry_pass(symbol, frame, cfg, now)
+                if self.status != "RUNNING":
+                    break
                 # Always in a trade: between candles, a stock that just went flat is entered again at once.
                 await self._always_in_pass(symbol, frame, cfg, now)
                 if self.status != "RUNNING":
@@ -2094,6 +2106,9 @@ class StrategyEngine:
             if self.status != "RUNNING":
                 break
             await self._flow_trigger_pass(symbol, frame, cfg, now)
+            if self.status != "RUNNING":
+                break
+            await self._stack_entry_pass(symbol, frame, cfg, now)
             if self.status != "RUNNING":
                 break
             await self._always_in_pass(symbol, frame, cfg, now)
@@ -2550,6 +2565,48 @@ class StrategyEngine:
             text = f"{result} — always in ({want}: {why})"
         else:
             text = f"{symbol} always in: no {want} order yet — {result.split(' — ', 1)[-1]}"
+        self._signals[symbol] = text
+        self.last_signal = text
+
+    async def _stack_entry_pass(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> None:
+        """Three SMAs stacked with widening gaps (stack_entry.py): a flat armed stock is entered on the stack's side.
+
+        Asked once per closed candle; each widening run enters at most once, and one the checks refuse is asked again
+        on its next candle. Everything else goes through apply_signal (checks, stop, flip, caps, cut-off)."""
+        symbol_cfg = _cfg_for(cfg, symbol)
+        if not stack_entry.enabled(symbol_cfg) or self.status != "RUNNING" or flow_exit.only_mode(symbol_cfg):
+            return
+        if symbol in self.positions or uses_gap_mode(symbol_cfg) or per_candle(symbol_cfg) or symbol in self._pullback:
+            return
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or self._stack_tried.get(symbol) == closed_ts:
+            return
+        if not market_is_open(now) or now.time() < dt.time(9, 20) or self._past_square_off(now, symbol_cfg):
+            return
+        if not self._still_armed(symbol):
+            return
+        self._stack_tried[symbol] = int(closed_ts)
+        want, run, note = stack_entry.call(frame, symbol_cfg)
+        if want is None:
+            if stack_entry.only(symbol_cfg):
+                self._signals[symbol] = f"{symbol} waits — {note}"
+            return
+        done = self._stack_done.get(symbol)
+        if done is not None and done[0] == want and run is not None and run <= done[1]:
+            return  # this widening run was already traded (it began at or before the candle of that entry)
+        enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
+        self._focus = symbol
+        self.ltp = self._ltps.get(symbol, self.ltp)
+        sig = "BULLISH" if want == "LONG" else "BEARISH"
+        result = await self.apply_signal(sig, enriched, symbol_cfg, now, alert=False, why=stack_entry.ENTRY_REASON)
+        if result.startswith("blocked — order PENDING"):
+            self._stack_tried.pop(symbol, None)
+            return
+        if symbol in self.positions or symbol in self._pullback:
+            self._stack_done[symbol] = (want, int(closed_ts))
+            text = f"{result} — {note}"
+        else:
+            text = f"{symbol} three-SMA entry: no {want} order yet — {result.split(' — ', 1)[-1]} ({note})"
         self._signals[symbol] = text
         self.last_signal = text
 
@@ -3625,7 +3682,7 @@ class StrategyEngine:
                 return "closed on cross — trade cap locks the day"
             if (stock_cap := self._stock_cap_hit(cfg)) is not None:
                 return f"closed on {signal} — {stock_cap}"
-            if (trend_only := self._trend_only_hit(cfg, why)) is not None:
+            if (trend_only := self._trend_only_hit(cfg, why) or stack_entry.blocks(cfg, why)) is not None:
                 return f"closed on {signal} — {trend_only}"
             if (resting := self._reentry_wait_hit(cfg)) is not None:
                 return f"closed on {signal} — {resting}"
@@ -3648,7 +3705,7 @@ class StrategyEngine:
             return "entry blocked — trade cap"
         if (stock_cap := self._stock_cap_hit(cfg)) is not None:
             return f"{signal} ignored — {stock_cap}"
-        if (trend_only := self._trend_only_hit(cfg, why)) is not None:
+        if (trend_only := self._trend_only_hit(cfg, why) or stack_entry.blocks(cfg, why)) is not None:
             return f"{signal} ignored — {trend_only}"
         if (resting := self._reentry_wait_hit(cfg)) is not None:
             return f"{signal} ignored — {resting}"

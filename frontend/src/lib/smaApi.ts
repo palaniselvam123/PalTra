@@ -455,6 +455,12 @@ export type SmaConfig = {
   tq_entry_phase?: boolean;
   tq_skip_doji?: boolean;
   tq_doji_pct?: number;
+  /** Three SMAs stacked with widening gaps as an entry (stack_entry.py). */
+  stack_entry?: boolean;
+  stack_widen?: number;
+  stack_third?: number;
+  stack_min_gap?: number;
+  stack_only?: boolean;
   tq_only?: boolean;
   tq_exit?: boolean;
   tq_exit_score?: number;

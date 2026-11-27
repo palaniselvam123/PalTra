@@ -97,7 +97,9 @@ def warmup_days(settings: dict | None) -> int:
     days = WARMUP_DAYS
     for own in [{}, *(v for v in (stocks or {}).values() if isinstance(v, dict))]:
         merged = SimpleNamespace(**{**snap, **own})
-        need, _ = history_need(candle_minutes(merged), getattr(merged, "sma_slow", None) or 21)
+        import stack_entry
+
+        need, _ = history_need(candle_minutes(merged), max(int(getattr(merged, "sma_slow", None) or 21), stack_entry.longest(merged)))
         if need > 5:  # the usual five days are what WARMUP_DAYS already covers
             days = max(days, need)
     return days
