@@ -4335,6 +4335,8 @@ class ChopScanStart(BaseModel):
     # The SMA periods to read (owner's request: 20 / 50 or his own numbers); 0 / 0 = the main desk's.
     sma_fast: int = Field(default=0, ge=0, le=cross_scan.SMA_MAX)
     sma_slow: int = Field(default=0, ge=0, le=cross_scan.SMA_MAX)
+    # A third, longer SMA (0 = off): the rows then say whether the three lines are stacked and both gaps widening.
+    sma_third: int = Field(default=0, ge=0, le=cross_scan.SMA_MAX)
     quiet_min: int = Field(default=chop_scan.QUIET_MIN_DEFAULT, ge=1, le=375)
     alert_on_quiet: bool = False
     # Quiet-runner alerts only for stocks priced inside this range (₹; 0 = no bound).
@@ -4380,8 +4382,15 @@ def _start_chop(
     skip_candles: int = 0,
     sma_fast: int = 0,
     sma_slow: int = 0,
+    sma_third: int = 0,
 ):
     fast, slow = _scan_smas(sma_fast, sma_slow)
+    try:
+        third = chop_scan.pick_third(sma_third, slow)
+    except ValueError:
+        if source == "manual":
+            raise
+        third = 0  # a saved third SMA that no longer fits the desk's own periods: the automatic scan runs without it
     return chop_scanner.start(
         symbols,
         lambda symbol, start, end: fetch_frame(_scan_broker(), symbol, start, end),
@@ -4394,10 +4403,12 @@ def _start_chop(
         force=force,
         price_min=price_min,
         price_max=price_max,
-        job=_scan_job(scan_worker.chop_job, fast, slow, minutes, extra=(quiet_min, chop_scan.candle_kind(candles), chop_scan.skip_minutes(skip_candles, minutes)), cached=True),
+        job=_scan_job(scan_worker.chop_job, fast, slow, minutes, extra=(quiet_min, chop_scan.candle_kind(candles), chop_scan.skip_minutes(skip_candles, minutes), third), cached=True),
         candles=candles,
         skip_candles=skip_candles,
+        sma_third=third,
         meta={
+            "sma_third": third,
             "stocks": len(symbols),
             "source": source,
             "candles": candles,
@@ -4433,6 +4444,7 @@ async def chop_scan_start(body: ChopScanStart):
             skip_candles=body.skip_candles,
             sma_fast=body.sma_fast,
             sma_slow=body.sma_slow,
+            sma_third=body.sma_third,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -4499,6 +4511,7 @@ async def _chop_auto_start(s: chop_auto.AutoSettings) -> None:
         skip_candles=s.skip_candles,
         sma_fast=s.sma_fast,
         sma_slow=s.sma_slow,
+        sma_third=s.sma_third,
     )
 
 
@@ -4509,6 +4522,7 @@ class ChopAutoUpdate(BaseModel):
     # The card's SMA periods; 0 / 0 = the main desk's. Sent together.
     sma_fast: int | None = Field(default=None, ge=0, le=cross_scan.SMA_MAX)
     sma_slow: int | None = Field(default=None, ge=0, le=cross_scan.SMA_MAX)
+    sma_third: int | None = Field(default=None, ge=0, le=cross_scan.SMA_MAX)
     armed_only: bool | None = None
     quiet_min: int | None = Field(default=None, ge=1, le=375)
     alert_on_quiet: bool | None = None

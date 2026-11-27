@@ -53,6 +53,8 @@ class AutoSettings:
     # The card's SMA periods (owner's request: 20 / 50 or his own numbers); 0 / 0 = the main desk's.
     sma_fast: int = 0
     sma_slow: int = 0
+    # A third, longer SMA for the three-SMA read (stacked lines, gaps widening); 0 = off.
+    sma_third: int = 0
 
 
 SCAN_LISTS = ("armed", "fno", "nifty50", "nifty100", "niftybank")
@@ -98,6 +100,12 @@ def _clean(raw: dict) -> AutoSettings:
         fast, slow = 0, 0
     # Both or neither, the fast one shorter (cross_scan.pick_smas checks the same at a start).
     base.sma_fast, base.sma_slow = (fast, slow) if 2 <= fast < slow <= 200 else (0, 0)
+    try:
+        third = int(base.sma_third or 0)
+    except (TypeError, ValueError):
+        third = 0
+    # Longer than the slow SMA in use (the desk's 21 when the card uses the desk's own), at most 200.
+    base.sma_third = third if max(base.sma_slow or 0, 2) < third <= 200 else 0
     base.price_min = max(0.0, float(base.price_min))
     base.price_max = max(0.0, float(base.price_max))
     raw_lists = base.lists if isinstance(base.lists, (list, tuple)) else []
