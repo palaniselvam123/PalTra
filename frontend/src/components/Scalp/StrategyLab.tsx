@@ -35,13 +35,14 @@ const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
 const BOTS = [1, 2, 3, 4];
 const LAB_CANDLES = [1, 2, 3, 5, 10, 15];
 const TIMES = ["09:20", "09:30", "09:45", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30"];
-const EMPTY: StrategyLabChoice = { entries: [], exits: ["cross"], stop: "ATR", targets: [], entry_from: "09:20", entry_to: "15:30", qty: 0, symbols: [], margin_pct: 20 };
+const EMPTY: StrategyLabChoice = { entries: [], exits: ["cross"], stop: "ATR", targets: [], entry_from: "09:20", entry_to: "15:30", qty: 0, symbols: [], margin_pct: 20, source: "CROSS", stack_gap: 0.05 };
+const STACK_GAPS = [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5];
 /** Sent as the stock list when every stock is unticked: matches no stock, so nothing is traded. */
 const NO_STOCK = "-";
 
 const sameChoice = (a: StrategyLabChoice, b: StrategyLabChoice) =>
-  JSON.stringify([a.entries, a.exits, a.stop, a.targets, a.entry_from, a.entry_to, a.qty, a.symbols ?? [], a.margin_pct ?? 20]) ===
-  JSON.stringify([b.entries, b.exits, b.stop, b.targets, b.entry_from, b.entry_to, b.qty, b.symbols ?? [], b.margin_pct ?? 20]);
+  JSON.stringify([a.entries, a.exits, a.stop, a.targets, a.entry_from, a.entry_to, a.qty, a.symbols ?? [], a.margin_pct ?? 20, a.source ?? "CROSS", a.stack_gap ?? 0.05]) ===
+  JSON.stringify([b.entries, b.exits, b.stop, b.targets, b.entry_from, b.entry_to, b.qty, b.symbols ?? [], b.margin_pct ?? 20, b.source ?? "CROSS", b.stack_gap ?? 0.05]);
 
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
 
@@ -429,6 +430,15 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
               include them (the candles are cached, so it is quick).
             </p>
           ) : null}
+          <EntrySource
+            choice={choice}
+            gaps={rules.stack_gaps ?? STACK_GAPS}
+            lines={result?.stack_lines ?? null}
+            widen={result?.stack_widen ?? null}
+            stale={Boolean(result?.stack_missing)}
+            select={select}
+            onChange={change}
+          />
           <div className="grid gap-3 lg:grid-cols-[1fr_1fr_auto]">
             <RuleBox title="Checks before entering" hint="A trade is taken only when every ticked check agrees at the signal candle." kind="entry" missing={missingRules} rules={rules.entries} picked={choice.entries} onToggle={(n) => toggle("entries", n)} onAll={() => setAll("entries", rules.entries.map((r) => r.name))} onNone={() => setAll("entries", [])} />
             <RuleBox title="Exits" hint="The trade ends at the earliest ticked exit, the stop, a target or the square-off." kind="exit" missing={missingRules} rules={rules.exits} picked={choice.exits} onToggle={(n) => toggle("exits", n)} onAll={() => setAll("exits", rules.exits.map((r) => r.name))} onNone={() => setAll("exits", [])} />
@@ -771,6 +781,83 @@ const NEWER_RULES = new Set([
 ]);
 
 /** A rule's label, greyed with a note when the run was read before the lab knew it (no answer in its trades). */
+/** What opens the trades the lab tests: the SMA cross, or the bot's "Enter on three SMAs with widening gaps" with its
+ * "each gap at least" level (backend strategy_lab._stack_signals, the same candles as stack_entry.call). */
+function EntrySource({
+  choice,
+  gaps,
+  lines,
+  widen,
+  stale,
+  select,
+  onChange,
+}: {
+  choice: StrategyLabChoice;
+  gaps: number[];
+  lines: number[] | null;
+  widen: number | null;
+  stale: boolean;
+  select: string;
+  onChange: (c: StrategyLabChoice) => void;
+}) {
+  const source = choice.source ?? "CROSS";
+  const names = lines && lines.length === 3 ? `SMA ${[...lines].sort((a, b) => a - b).join(" / ")}` : "the three SMAs";
+  return (
+    <div className="flex flex-wrap items-end gap-3 rounded-lg border border-slate-800 bg-base/60 p-3 text-xs text-slate-300">
+      <div className="flex flex-col gap-1">
+        <span className="flex items-center gap-1 font-semibold text-slate-200">
+          Opens trades on <NewTag id="lab-stack-entry" />
+        </span>
+        <select
+          value={source}
+          onChange={(e) => onChange({ ...choice, source: e.target.value as "CROSS" | "STACK" })}
+          className={select}
+          aria-label="What opens trades"
+        >
+          <option value="CROSS">SMA cross</option>
+          <option value="STACK">3 SMAs stacked, gaps widening</option>
+        </select>
+      </div>
+      {source === "STACK" ? (
+        <div className="flex flex-col gap-1">
+          <span className="font-semibold text-slate-200">Each gap at least</span>
+          <select
+            value={String(choice.stack_gap ?? 0.05)}
+            onChange={(e) => onChange({ ...choice, stack_gap: Number(e.target.value) })}
+            className={select}
+            aria-label="Each gap at least, %"
+          >
+            {gaps.map((g) => (
+              <option key={g} value={String(g)}>
+                {g ? `${g}%` : "any gap"}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+      <p className="max-w-2xl flex-1 leading-relaxed text-slate-400">
+        {source === "STACK" ? (
+          <>
+            Buys when {names} are lined up shortest above middle above longest (sells the other way round) and both gaps
+            between them have widened {widen ?? 2} candle(s) in a row, with each gap at least the % picked. Each widening run
+            is entered once, at the first candle that meets the gap; no SMA cross is needed. Same candles as the bot&apos;s
+            &quot;Enter on three SMAs with widening gaps&quot;. The lines and candles in a row are the bot&apos;s own (Settings);
+            &quot;Backtest this in the replay&quot; turns that entry on with &quot;Only this opens trades&quot;.
+          </>
+        ) : (
+          <>Every SMA fast / slow cross on a closed candle opens a trade (the bot&apos;s usual entry).</>
+        )}
+      </p>
+      {source === "STACK" && stale ? (
+        <p className="basis-full rounded-md bg-amber-500/10 px-3 py-2 text-amber-200 ring-1 ring-inset ring-amber-400/30">
+          This run was read before the lab knew this entry, so it has no three-SMA trades. Press &quot;Read the days&quot;
+          again with the same stocks and days (the candles are cached, so it is quick).
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function RuleLabel({ id, label, missing }: { id: string; label: string; missing: Set<string> }) {
   return (
     <span className={missing.has(id) ? "text-slate-500" : undefined}>
