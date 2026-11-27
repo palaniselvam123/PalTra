@@ -1561,7 +1561,7 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   SMA); Trend quality keeps the choice in its auto re-scan settings, the Cross scan per browser (`scalp.cross.sma`). First
   seen compares only saved scans with the same SMA periods.
   **Three SMAs with widening gaps** (owner's request; display only, nothing in the strategy, an alert or auto-arm reads
-  it): `sma_third` (0 = off, longer than the slow SMA, at most 200; `chop_scan.pick_third`, 400 in plain words) on
+  it): `sma_third` (0 = off, any length 2-200 other than the scan's fast / slow ones; the three are put in order shortest to longest, so a bot on 9 / 50 picks 21 for 9 / 21 / 50; `chop_scan.pick_third`, 400 in plain words) on
   `POST /api/chop-scan/start`, `ChopAutoUpdate` and `chop_auto.AutoSettings` (an automatic pass drops a saved third that
   no longer fits the desk's periods). `analyze(..., third=)` adds `chop_scan.three_read` on the scan's own candles (from
   `wide` when the third SMA needs more days, `scan_download_days`): `stack3` BULLISH (fast > slow > third) / BEARISH /

@@ -427,15 +427,17 @@ function StackCondition({
         <NewTag id="arm-stack-widen" />
       </label>
       <p className="mt-1 leading-relaxed">
-        Up trend: SMA fast above SMA slow above SMA {third}. Down trend: the other way round. Read on the Trend quality scan&apos;s
-        candles; each pass reads SMA {third} by itself while this is on. The alert itself is not changed.
+        The three lines are the scan&apos;s fast and slow SMA plus this third one, put in order shortest to longest (for a bot on
+        SMA 9 / 50, pick 21 to read 9 / 21 / 50). Up trend: shortest above middle above longest. Down trend: the other way
+        round. Read on the Trend quality scan&apos;s candles; each pass reads SMA {third} by itself while this is on. The alert
+        itself is not changed.
       </p>
       {on ? (
         <div className="mt-2 flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1">
             Third SMA
             <select className={select} value={third} disabled={busy} onChange={(e) => void save({ arm_strong_third: Number(e.target.value) })}>
-              {[30, 50, 100, 200].map((n) => (
+              {[21, 30, 50, 100, 200].map((n) => (
                 <option key={n} value={n}>
                   SMA {n}
                 </option>
