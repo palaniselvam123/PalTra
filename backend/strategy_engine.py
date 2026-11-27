@@ -1215,6 +1215,7 @@ def _forming_row(bar) -> dict:
         "close": float(bar["close"]),
         "sma9": None,
         "sma21": None,
+        "smaMid": None,
         "atr14": None,
         "adx14": None,
         "vwap": None,
