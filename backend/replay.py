@@ -30,6 +30,7 @@ import pandas as pd
 from sqlalchemy import case, func
 
 import high52
+import index_check
 from candle_history import HistoryError, fetch_frame
 from database import session_factory
 from groww_client import IST, OrderAck, market_is_open
@@ -1332,6 +1333,8 @@ class ReplaySession:
     speed: int = 60
     symbols: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    # Nifty's candles when the run's settings read the market check (index_check.py); quoted, never traded.
+    index_frame: pd.DataFrame | None = None
     days: list[dt.date] = field(default_factory=list)
     day_index: int = 0
     run_id: int | None = None
@@ -1505,6 +1508,7 @@ class ReplaySession:
         first_day, last_day = self.day, self.end_day
         # Today, replayed during the session, ends at the last minute closed now (session_cut).
         self._loaded_at = dt.datetime.now(IST)
+        self.index_frame = None
         frames: dict[str, pd.DataFrame] = {}
         first = dt.datetime.combine(first_day - dt.timedelta(days=warmup_days(settings)), dt.time(9, 0))
         last = dt.datetime.combine(last_day, SESSION_END)
@@ -1549,6 +1553,17 @@ class ReplaySession:
             return
         self.symbols = list(frames)
         self.universe = list(frames)
+        # Nifty's candles for the market check (index_check.py): quoted next to the stocks, never traded. A failed
+        # download leaves the check refusing ("Nifty is not loaded yet"), as live.
+        if index_check.wanted(settings) and not self._stop:
+            try:
+                index_frame = await strategy_lab.load_tape(
+                    index_check.INDEX, first.date(), last_day, lambda s, a, b: fetch_frame(broker, s, a, b)
+                )
+                if not index_frame.empty:
+                    self.index_frame = index_frame[index_frame["ts"] < range_end].reset_index(drop=True)
+            except HistoryError:
+                pass
         # The 52-week levels for the stocks whose entry check reads them: one daily download per stock.
         for symbol in list(frames):
             if self._stop:
@@ -1635,7 +1650,8 @@ class ReplaySession:
             for name in frames:
                 moved = SimpleNamespace(**{**vars(settings_for(snap, name)), **fast_bot.bot5_overrides(fast_snap, name)})
                 bars[name] = max(bars[name], frame_bars(moved))
-        feed = ReplayFeed(frames, dt.datetime.combine(days[done], self.start if done == 0 else SESSION_OPEN, tzinfo=IST), bars)
+        quoted = frames if self.index_frame is None else {**frames, index_check.INDEX: self.index_frame}
+        feed = ReplayFeed(quoted, dt.datetime.combine(days[done], self.start if done == 0 else SESSION_OPEN, tzinfo=IST), bars)
         bot_paused = False
         saved = settings if resume is not None else None
         for index, day in enumerate(days):

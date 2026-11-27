@@ -180,6 +180,8 @@ def _ensure_bot_config_columns(engine) -> None:
             "macd_grow_candles": "INTEGER DEFAULT 2",
             "macd_shrink_exit": "BOOLEAN DEFAULT 0",
             "macd_shrink_candles": "INTEGER DEFAULT 2",
+            "use_index": "BOOLEAN DEFAULT 0",
+            "index_rule": "VARCHAR DEFAULT 'SMA'",
             "pc_entry": "BOOLEAN DEFAULT 0",
             "pc_exit": "BOOLEAN DEFAULT 0",
             "pc_minutes": "INTEGER DEFAULT 0",

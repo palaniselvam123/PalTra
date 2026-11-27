@@ -1113,6 +1113,29 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   form-fill only, nothing saved until Save): 5-minute candles with the SMA cross entry, the check at 1.5x, late entry
   15 minutes, and the trailing stop in ATR multiples 1.5 / 0.5 with no target. Other checks and exits already on stay on.
   The Strategy lab does not know this check. The stock research baseline keeps it off.
+- `backend/index_check.py` – **Nifty direction check** (`use_index`, off by default; `index_rule` `SMA` default | `DAY` |
+  `BOTH`; per bot and per stock, PAPER and LIVE, replays too; entries only; owner's request: stop buying stocks into a
+  falling market). The index is Nifty 50 (`INDEX` "NIFTY"), quotes only, never armed, held or ordered: while a watched
+  stock has the check on, `StrategyEngine.tick` reads its 1-minute candles through the bot's quote client into
+  `_index_tape` (a failed read keeps the last one); a replay loads them from the day cache (`index_check.wanted(settings)`
+  → `ReplaySession.index_frame`, quoted by the `ReplayFeed` next to the stocks, not part of `frames` / the picks). Read
+  in `apply_signal` next to the candle-pattern check (joins `entry_block`, so late entry can retry): `DAY` = Nifty above
+  today's first open for a buy / below for a sell (`day_move`), `SMA` = Nifty's SMA fast vs slow (the bot's periods) on
+  the last closed candle of `_exit_minutes` (`sma_side`), `BOTH` = both. An index has no volume, so no VWAP rule. Nifty
+  not loaded refuses ("Nifty is not loaded yet"). Direct orders never read it. Settings → 2. Checks before entering,
+  `StrategyConfigPanel.IndexCheckCard`, anchor `#sma-index-check` (always shown, whatever styles are ticked). The Strategy
+  lab does not know it; the stock research baseline keeps it off.
+  **vs Nifty and CPR on Trend quality** (display only): each pass reads Nifty once (`ChopScanner._run` →
+  `chop_scan.with_index`; a failed read leaves it empty): rows carry `index_move_pct` and `rs_pct` (the stock's day move
+  minus Nifty's), and from `chop_scan.day_levels` (`pivots.levels` on the download) `cpr_width_pct`, `cpr_high` /
+  `cpr_low`, `cpr_side`, `prev_high` / `prev_low`, `prev_side` (ABOVE / INSIDE / BELOW). The card's "vs Nifty" and "CPR"
+  columns (narrow ≤ `CPR_NARROW` 0.2 %, wide ≥ `CPR_WIDE` 0.5 %) and the "Market & levels" filters (stronger / weaker
+  than Nifty by at least, CPR width at most, price above / below the CPR or yesterday's high / low;
+  `chopFilter.chopPasses`).
+- **CPR and previous-day levels** (`pivots.levels` also gives `cpr_high` / `cpr_low` (BC = (H + L) / 2, TC = 2P − BC),
+  `cpr_width_pct` (% of P), `pdh` / `pdl` / `pdc`): the price level check's `level_line` takes `CPR` (buy above the CPR
+  top, sell below its bottom) and `PREV_DAY` (buy above yesterday's high, sell below its low), anchor `#sma-level`; the
+  chart's Pivot points also draw "CPR top / bottom" and "Yest. high / low".
 - `backend/level_check.py` – price level entry check (`use_level`, off by default, per bot and per stock, PAPER and LIVE,
   entries only): through `_entry_block` (check name `level`, chart ✕ "Level") the closed signal candle must close beyond
   `level_line` on the trade's side: `BB_MIDDLE` (default; buy above / sell below the Bollinger middle band, `bb_period` /

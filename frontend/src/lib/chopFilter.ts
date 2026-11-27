@@ -177,7 +177,31 @@ export type ChopFilter = {
   stack3?: Stack3Filter;
   /** Both SMA gaps widening for at least this many candles in a row; 0 = not checked. */
   minWiden?: number;
+  /** Against Nifty: ANY, STRONGER (day move above Nifty's), WEAKER; and by at least this many % points. */
+  vsIndex?: VsIndexFilter;
+  minVsIndex?: number;
+  /** CPR width at most this % (0 = any), and where the price sits against the CPR / yesterday's range. */
+  maxCpr?: number;
+  dayLevel?: DayLevelFilter;
 };
+
+export type VsIndexFilter = "ANY" | "STRONGER" | "WEAKER";
+export const VS_INDEX_OPTIONS: { value: VsIndexFilter; label: string }[] = [
+  { value: "ANY", label: "Any" },
+  { value: "STRONGER", label: "Stronger than Nifty" },
+  { value: "WEAKER", label: "Weaker than Nifty" },
+];
+export type DayLevelFilter = "ANY" | "ABOVE_CPR" | "BELOW_CPR" | "ABOVE_PDH" | "BELOW_PDL";
+export const DAY_LEVEL_OPTIONS: { value: DayLevelFilter; label: string }[] = [
+  { value: "ANY", label: "Any" },
+  { value: "ABOVE_CPR", label: "Above the CPR" },
+  { value: "BELOW_CPR", label: "Below the CPR" },
+  { value: "ABOVE_PDH", label: "Above yesterday's high" },
+  { value: "BELOW_PDL", label: "Below yesterday's low" },
+];
+/** A CPR this narrow (% of the pivot) often comes before a trending day; this wide, a sideways one. */
+export const CPR_NARROW = 0.2;
+export const CPR_WIDE = 0.5;
 
 export type Stack3Filter = "ANY" | "EITHER" | "UP" | "DOWN";
 export const STACK3_OPTIONS: { value: Stack3Filter; label: string }[] = [
@@ -246,6 +270,18 @@ export function chopPasses(r: ChopScanRow, f: ChopFilter): boolean {
   if (st === "UP" && r.stack3 !== "BULLISH") return false;
   if (st === "DOWN" && r.stack3 !== "BEARISH") return false;
   if ((f.minWiden ?? 0) > 0 && (r.widen_candles ?? 0) < (f.minWiden ?? 0)) return false;
+  const vs = f.vsIndex ?? "ANY";
+  if (vs !== "ANY") {
+    if (r.rs_pct == null) return false;
+    const by = vs === "STRONGER" ? r.rs_pct : -r.rs_pct;
+    if (by <= 0 || by < (f.minVsIndex ?? 0)) return false;
+  }
+  if ((f.maxCpr ?? 0) > 0 && (r.cpr_width_pct == null || r.cpr_width_pct > (f.maxCpr ?? 0))) return false;
+  const lv = f.dayLevel ?? "ANY";
+  if (lv === "ABOVE_CPR" && r.cpr_side !== "ABOVE") return false;
+  if (lv === "BELOW_CPR" && r.cpr_side !== "BELOW") return false;
+  if (lv === "ABOVE_PDH" && r.prev_side !== "ABOVE") return false;
+  if (lv === "BELOW_PDL" && r.prev_side !== "BELOW") return false;
   if (f.minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < f.minSpeed) return false;
   if (!inPriceRange(r.ltp, f.priceMin, f.priceMax)) return false;
   if (

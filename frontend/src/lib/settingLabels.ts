@@ -186,6 +186,8 @@ export const SETTING_LABELS: Record<string, string> = {
   use_fresh: "fresh trend entry check",
   fresh_rvol: "fresh trend: volume vs usual at least",
   level_line: "price level line",
+  use_index: "Nifty direction check",
+  index_rule: "Nifty check rule",
   use_high52: "52-week high entry check",
   high52_side: "52-week check side",
   high52_pct: "52-week check band (%)",
