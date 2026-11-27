@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+import candles
 import server_role
 from config import get_settings
 from groww_pressure import run_bot_call
@@ -395,6 +396,8 @@ class GrowwClient:
         self._quotes: dict[str, tuple[float, pd.DataFrame, float]] = {}
         self._candle_frames: dict[str, pd.DataFrame] = {}
         self._candle_at: dict[str, float] = {}
+        # Candles older than the five-day download, for stocks on 30-minute / 1-hour candles (_older_candles).
+        self._older: dict[str, tuple[tuple, pd.DataFrame]] = {}
         # When each stock's minute history was last asked for. A stock whose
         # download failed is asked again once a minute (see refresh()).
         self._history_tried: dict[str, float] = {}
@@ -678,7 +681,7 @@ class GrowwClient:
             return float(ltp), frame
         self._history_tried[symbol] = time.monotonic()
         end = dt.datetime.now(IST).replace(tzinfo=None)
-        start = end - dt.timedelta(days=5)
+        start = end - dt.timedelta(days=candles.BASE_HISTORY_DAYS)
         frame = pd.DataFrame()
         try:
             raw = sdk.get_historical_candle_data(
@@ -693,6 +696,15 @@ class GrowwClient:
             frame = _parse_candles(raw)
         except Exception:
             frame = pd.DataFrame()
+        # A stock a bot trades on 30-minute or 1-hour candles needs more days for its slow SMA (candles.need_of).
+        days, bars = candles.need_of(symbol)
+        if not frame.empty and days > candles.BASE_HISTORY_DAYS:
+            older = self._older_candles(sdk, symbol, start, days)
+            if older is not None and not older.empty:
+                frame = (
+                    pd.concat([older, frame]).drop_duplicates("ts", keep="last").sort_values("ts")
+                    .tail(bars).reset_index(drop=True)
+                )
         if frame.empty:
             # Keep the candles built from this stock's own prices so far rather
             # than starting again from one bar.
@@ -703,6 +715,38 @@ class GrowwClient:
             self._candle_at[symbol] = time.monotonic()
         self._quotes[symbol] = (float(ltp), frame, time.monotonic())
         return float(ltp), frame
+
+    def _older_candles(self, sdk, symbol: str, before: dt.datetime, days: int) -> pd.DataFrame | None:
+        """The stock's 1-minute candles from `days` calendar days ago up to `before` (where the usual five-day
+        download begins), read once per stock, day and length and kept in memory: closed days do not change, so
+        the minute-by-minute refresh still downloads only the last five days. None when Groww did not answer
+        (asked again at the next refresh). Read-only: candles, no order."""
+        key = (before.date(), int(days))
+        held = self._older.get(symbol)
+        if held is not None and held[0] == key:
+            return held[1]
+        first = (before - dt.timedelta(days=int(days) - candles.BASE_HISTORY_DAYS)).replace(hour=9, minute=0, second=0, microsecond=0)
+        parts, cursor = [], first
+        try:
+            while cursor < before:
+                stop = min(cursor + dt.timedelta(days=_OLDER_CHUNK_DAYS), before)
+                raw = sdk.get_historical_candle_data(
+                    trading_symbol=symbol,
+                    exchange="NSE",
+                    segment="CASH",
+                    start_time=cursor.strftime("%Y-%m-%d %H:%M:%S"),
+                    end_time=stop.strftime("%Y-%m-%d %H:%M:%S"),
+                    interval_in_minutes=1,
+                    timeout=_SDK_TIMEOUT_SEC,
+                )
+                parts.append(_parse_candles(raw, limit=None))
+                cursor = stop
+        except Exception:  # noqa: BLE001
+            return None
+        parts = [p for p in parts if not p.empty]
+        frame = pd.concat(parts).drop_duplicates("ts").sort_values("ts").reset_index(drop=True) if parts else pd.DataFrame()
+        self._older[symbol] = (key, frame)
+        return frame
 
     async def place_entry(self, symbol: str, side: str, qty: int, ltp: float) -> OrderAck:
         """side is BUY or SELL. PAPER fills at the candle close / LTP."""
@@ -1143,6 +1187,7 @@ def _one_bar(ltp: float, ohlc: dict | None = None) -> pd.DataFrame:
 # Five sessions of 1-minute bars is enough for SMA 21 and the day change.
 # A larger download, walked with iterrows on the request path, froze the site.
 _MAX_CANDLES = 2500
+_OLDER_CHUNK_DAYS = 7  # days per request for the older candles (candle_history.CHUNK_DAYS)
 _CANDLE_READ_CAP = 20000
 
 

@@ -369,12 +369,12 @@ export function StrategySummary({
             </div>
             {(c.entry_mode ?? "SMA") === "SMA" ? (
               <div className="sm:col-span-2">
-                {segmented<"1" | "2" | "3" | "5" | "10" | "15">(
+                {segmented<"1" | "2" | "3" | "5" | "10" | "15" | "30" | "60">(
                   "Candle",
-                  String(c.candle_minutes ?? 1) as "1" | "2" | "3" | "5" | "10" | "15",
-                  ["1", "2", "3", "5", "10", "15"],
-                  { "1": "1m", "2": "2m", "3": "3m", "5": "5m", "10": "10m", "15": "15m" },
-                  (v) => save({ candle_minutes: Number(v) as CandleMinutes }, `${v}-minute candles`)
+                  String(c.candle_minutes ?? 1) as "1" | "2" | "3" | "5" | "10" | "15" | "30" | "60",
+                  ["1", "2", "3", "5", "10", "15", "30", "60"],
+                  { "1": "1m", "2": "2m", "3": "3m", "5": "5m", "10": "10m", "15": "15m", "30": "30m", "60": "1h" },
+                  (v) => save({ candle_minutes: Number(v) as CandleMinutes }, v === "60" ? "1-hour candles" : `${v}-minute candles`)
                 )}
               </div>
             ) : null}

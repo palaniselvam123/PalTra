@@ -1003,7 +1003,7 @@ class ConfigUpdate(BaseModel):
     join_after_min: int | None = Field(default=None, ge=0, le=JOIN_AFTER_MAX)
     entry_mode: Literal["SMA", "PATTERN", "COLOUR", "NTH_CANDLE", "FLOW"] | None = None
     pattern_tf: Literal[1, 3, 5, 10, 15, 30, 60] | None = None
-    candle_minutes: Literal[1, 2, 3, 5, 10, 15] | None = None
+    candle_minutes: Literal[1, 2, 3, 5, 10, 15, 30, 60] | None = None  # candles.CANDLE_MINUTES
     exit_candle_minutes: Literal[0, 1, 2, 3, 5, 10, 15, 30, 60] | None = None
     # Watch smaller candles while in a trade (small_candles.py): CSV of sizes, "" = off.
     small_exit_minutes: str | None = Field(default=None, max_length=32)

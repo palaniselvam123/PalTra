@@ -694,7 +694,7 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   same once per closed 1-minute candle inside a longer bot candle, from Groww's 1-minute history (`_tapes`),
   so it also works after hours and in replays (`StrategyEngine._gap_fade_minute`; both share `_gap_fade_probe`).
 - `backend/candles.py` – candle interval (`candle_minutes`: 1 default, 2, 3, 5,
-  10, 15; per bot and per stock, PAPER and LIVE). `StrategyEngine.tick` groups
+  10, 15, 30, 60; per bot and per stock, PAPER and LIVE). `StrategyEngine.tick` groups
   each stock's 1-minute Groww tape into candles of that length from 09:15 IST
   (`resample`; open / high / low / close, Groww's running volume total of the
   last minute) before it is stored in `_frames`, so the SMAs, ATR stop, filters,
@@ -703,6 +703,18 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   Candle patterns keep the 1-minute tape (`pattern_tf`). The chart is told the
   size (`candle_minutes` in the chart payload) and only merges up from it. The
   stock research baseline keeps 1.
+  **30 minutes and 1 hour** (owner's request): a day has only 13 or 7 such candles, so the slow SMA needs more than the
+  five days of 1-minute candles every stock gets. `candles.history_need(minutes, sma_slow)` gives (calendar days, bars to
+  keep): 5 days / 2,500 bars up to 15 minutes (unchanged), more from `LONG_MINUTES` 30 (8 days for 30 min and 10 for
+  1 hour at SMA 21; at most `MAX_HISTORY_DAYS` 29 and `MAX_TAPE_BARS` 8,000, so a slow SMA over about 224 / 116 candles
+  never forms, `formed_candles`; Settings warns). **Live**: `StrategyEngine.tick` tells the shared quote client what each
+  stock is traded on (`candles.note_need`, per engine, memory; `asks_history`, off for replays) and keeps that many bars
+  of the tape; `GrowwClient._load_quote` reads `candles.need_of(symbol)` and, for a stock that asks for more than five
+  days, adds `_older_candles`: the days before the usual five-day download, read once per stock and day in 7-day requests
+  and kept in memory (`_older`), so the 55-second refresh still downloads only five days; a failed older read keeps the
+  usual candles and is asked again. **Replays**: `replay.warmup_days(settings)` loads that many days before the run's
+  first day (the bot's candle or any stock's own; `WARMUP_DAYS` 4 otherwise). Settings → Candle interval and the
+  terminal's Strategy card offer both. Candles only: no order path is touched.
 - `backend/candle_patterns.py` – candle-pattern entries (`entry_mode =
   "PATTERN"`, default `"SMA"`, per bot and per stock, PAPER and LIVE). Each
   time a candle of `pattern_tf` minutes (1/3/5/10/15, built from the 1-minute tape

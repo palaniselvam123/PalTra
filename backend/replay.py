@@ -82,6 +82,27 @@ FRAME_BARS = 500
 FRAME_EXTRA_CANDLES = 40
 
 
+def warmup_days(settings: dict | None) -> int:
+    """Calendar days of candles loaded before a run's first day: WARMUP_DAYS, or more when the bot (or one of its
+    stocks) trades 30-minute / 1-hour candles, whose slow SMA needs more sessions (candles.history_need)."""
+    from candles import candle_minutes, history_need
+
+    snap = settings or {}
+    stocks = snap.get("stock_settings")
+    if isinstance(stocks, str):
+        try:
+            stocks = json.loads(stocks or "{}")
+        except ValueError:
+            stocks = {}
+    days = WARMUP_DAYS
+    for own in [{}, *(v for v in (stocks or {}).values() if isinstance(v, dict))]:
+        merged = SimpleNamespace(**{**snap, **own})
+        need, _ = history_need(candle_minutes(merged), getattr(merged, "sma_slow", None) or 21)
+        if need > 5:  # the usual five days are what WARMUP_DAYS already covers
+            days = max(days, need)
+    return days
+
+
 def frame_bars(cfg) -> int:
     """1-minute bars handed to the engine per quote for a stock with these settings."""
     from candles import candle_minutes
@@ -289,6 +310,7 @@ class ReplayEngine(StrategyEngine):
     """The SMA bot on a replayed day: its own clock, books and broker."""
 
     records_ticks = False  # its prices are walked from minute candles
+    asks_history = False  # its candles are loaded for the run (warmup_days)
     # The all-bots day target / stop loss / square-off time (all_bots_guard.py), judged on this
     # replayed day's own P&L and clock, so a backtest shows what the rule would have done.
     day_guard = True
@@ -1484,7 +1506,7 @@ class ReplaySession:
         # Today, replayed during the session, ends at the last minute closed now (session_cut).
         self._loaded_at = dt.datetime.now(IST)
         frames: dict[str, pd.DataFrame] = {}
-        first = dt.datetime.combine(first_day - dt.timedelta(days=WARMUP_DAYS), dt.time(9, 0))
+        first = dt.datetime.combine(first_day - dt.timedelta(days=warmup_days(settings)), dt.time(9, 0))
         last = dt.datetime.combine(last_day, SESSION_END)
         range_start = int(dt.datetime.combine(first_day, dt.time(0, 0), tzinfo=IST).timestamp())
         range_end = int(dt.datetime.combine(last_day, dt.time(0, 0), tzinfo=IST).timestamp()) + 86_400
