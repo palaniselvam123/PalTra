@@ -173,7 +173,19 @@ export type ChopFilter = {
   minChecks?: number;
   /** Phase now: ANY, BULL, BEAR, STRONG (either), CHOP. */
   phase?: PhaseFilter;
+  /** Three SMAs stacked: ANY (not checked), EITHER, UP, DOWN. Needs a scan with a third SMA. */
+  stack3?: Stack3Filter;
+  /** Both SMA gaps widening for at least this many candles in a row; 0 = not checked. */
+  minWiden?: number;
 };
+
+export type Stack3Filter = "ANY" | "EITHER" | "UP" | "DOWN";
+export const STACK3_OPTIONS: { value: Stack3Filter; label: string }[] = [
+  { value: "ANY", label: "Any" },
+  { value: "EITHER", label: "Stacked (up or down)" },
+  { value: "UP", label: "Stacked up (fast > slow > third)" },
+  { value: "DOWN", label: "Stacked down (fast < slow < third)" },
+];
 
 export type PhaseFilter = "ANY" | "BULL" | "BEAR" | "STRONG" | "CHOP";
 export const PHASE_OPTIONS: { value: PhaseFilter; label: string }[] = [
@@ -229,6 +241,11 @@ export function chopPasses(r: ChopScanRow, f: ChopFilter): boolean {
   if (ph === "BEAR" && r.phase !== "BEAR") return false;
   if (ph === "STRONG" && r.phase !== "BULL" && r.phase !== "BEAR") return false;
   if (ph === "CHOP" && (r.phase !== "CHOP" || r.phase_early)) return false;
+  const st = f.stack3 ?? "ANY";
+  if (st === "EITHER" && !r.stack3) return false;
+  if (st === "UP" && r.stack3 !== "BULLISH") return false;
+  if (st === "DOWN" && r.stack3 !== "BEARISH") return false;
+  if ((f.minWiden ?? 0) > 0 && (r.widen_candles ?? 0) < (f.minWiden ?? 0)) return false;
   if (f.minSpeed > 0 && Math.abs(r.speed_pct_per_min ?? 0) < f.minSpeed) return false;
   if (!inPriceRange(r.ltp, f.priceMin, f.priceMax)) return false;
   if (

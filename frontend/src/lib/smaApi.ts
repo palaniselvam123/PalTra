@@ -686,6 +686,14 @@ export type ChopScanRow = {
   trend_notes?: Partial<Record<ChopTrendCheck | "skip", string>>;
   /** Minutes after 09:15 left out of the trend read (0 = none). */
   trend_skip_min?: number;
+  /** Three SMAs (only when the scan had a third SMA): the third period, whether fast / slow / third are stacked one
+   * way, the two signed gaps in %, candles stacked, and candles in a row both gaps have widened (0 = not now). */
+  sma_third?: number;
+  stack3?: "BULLISH" | "BEARISH" | null;
+  gap_fast_slow_pct?: number | null;
+  gap_slow_third_pct?: number | null;
+  stack3_candles?: number;
+  widen_candles?: number;
   /** Morning volume since 09:15 against the usual for the same minutes (x), and the earlier sessions used. */
   rvol?: number | null;
   trend_days?: number;
@@ -801,6 +809,8 @@ export type ChopScan = {
   minutes: CrossScanMinutes;
   sma_fast: number;
   sma_slow: number;
+  /** The third, longer SMA the scan read for the three-SMA columns (0 / missing = none). */
+  sma_third?: number;
   quiet_min: number;
   /** The candles the scan read: NORMAL (real, SMA cross), COLOUR (real, by colour) or HA (Heikin Ashi); older servers leave it out. */
   candles?: ChopCandles;
@@ -1591,6 +1601,8 @@ export type ChopAuto = {
   /** The card's SMA periods; 0 / 0 = the main desk's own. */
   sma_fast?: number;
   sma_slow?: number;
+  /** A third, longer SMA for the three-SMA read (0 = off). */
+  sma_third?: number;
   on: boolean;
   every_min: number;
   minutes: CrossScanMinutes;
@@ -1609,7 +1621,7 @@ export type ChopAuto = {
 };
 
 export type ChopAutoUpdate = Partial<
-  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max" | "lists" | "candles" | "skip_candles" | "sma_fast" | "sma_slow">
+  Pick<ChopAuto, "on" | "every_min" | "minutes" | "armed_only" | "quiet_min" | "alert_on_quiet" | "price_min" | "price_max" | "lists" | "candles" | "skip_candles" | "sma_fast" | "sma_slow" | "sma_third">
 >;
 
 /** One 1-minute review of an uncertain SMA position. Only EXIT ever closes the trade. */
@@ -3451,7 +3463,7 @@ export const smaApi = {
     symbols: string[],
     minutes: CrossScanMinutes = 5,
     force = false,
-    opts: { quiet_min?: number; alert_on_quiet?: boolean; price_min?: number; price_max?: number; candles?: ChopCandles; skip_candles?: number; sma_fast?: number; sma_slow?: number } = {}
+    opts: { quiet_min?: number; alert_on_quiet?: boolean; price_min?: number; price_max?: number; candles?: ChopCandles; skip_candles?: number; sma_fast?: number; sma_slow?: number; sma_third?: number } = {}
   ) =>
     request<ChopScan>(
       "/api/chop-scan/start",
@@ -3470,6 +3482,8 @@ export const smaApi = {
           // The SMA periods to read; 0 / 0 = the main desk's own.
           sma_fast: opts.sma_fast ?? 0,
           sma_slow: opts.sma_slow ?? 0,
+          // A third, longer SMA (0 = none): the rows then carry the three-SMA read.
+          sma_third: opts.sma_third ?? 0,
         }),
       },
       20000,

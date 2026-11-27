@@ -19,7 +19,7 @@ import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { ageText, rankTrends, trendRead, type RankedTrend, type TrendRead } from "@/lib/trendRank";
-import { CANDLE_KIND_OPTIONS, SCORE_OPTIONS, TREND_DIRS, TREND_KINDS, asCandleKind, candleWords, chopPasses, colourRead, crossRulesFor, modeWords, trendKindsFor, inPriceRange, isCrossRule, isStrong, type CrossRule, type ScoreFilter } from "@/lib/chopFilter";
+import { CANDLE_KIND_OPTIONS, SCORE_OPTIONS, TREND_DIRS, TREND_KINDS, asCandleKind, candleWords, STACK3_OPTIONS, chopPasses, colourRead, crossRulesFor, modeWords, trendKindsFor, inPriceRange, isCrossRule, isStrong, type CrossRule, type ScoreFilter, type Stack3Filter } from "@/lib/chopFilter";
 import { GuideBar } from "./GuideBar";
 import { NewTag } from "@/components/ui/NewTag";
 import { api, type ActiveStock } from "@/lib/api";
@@ -55,9 +55,11 @@ type Props = {
   savedTitle?: string;
 };
 
-type SortKey = "symbol" | "ltp" | "score" | "first" | "rank" | "age" | "gap" | "trend" | "phase" | "dayMove" | "buyers" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
+const fmtGap = (v: number | null | undefined) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`);
+
+type SortKey = "symbol" | "ltp" | "score" | "first" | "rank" | "age" | "gap" | "three" | "trend" | "phase" | "dayMove" | "buyers" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
 type Col = SortKey | "sizes" | "arm";
-const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "rank", "age", "gap", "trend", "phase", "dayMove", "buyers", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
+const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "rank", "age", "gap", "three", "trend", "phase", "dayMove", "buyers", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
 
 const SCORE_LABEL: Record<ChopScore, string> = { TRENDING: "Trending", MIXED: "Mixed", CHOPPY: "Choppy" };
 const SCORE_CLASS: Record<ChopScore, string> = {
@@ -149,6 +151,13 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   // Today's first N candles left out of the trend read (owner's request: big opening candles made a sideways stock
   // read as a trend). 0 = none.
   const [skipFirst, setSkipFirst] = useState(0);
+  // A third, longer SMA (owner's request: 9 / 21 / 50 with the gaps widening). 0 = off. Not for the colour reads.
+  const [third, setThird] = useState(0);
+  const [thirdTyped, setThirdTyped] = useState(false);
+  const slowInUse = scanSma.slow || 21;
+  const scanThird = colourRead(candles) || third <= slowInUse || third > 200 ? 0 : third;
+  const [stack3, setStack3] = useState<Stack3Filter>("ANY");
+  const [minWiden, setMinWiden] = useState(0);
   const [score, setScore] = useState<ScoreFilter>("ALL");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -274,6 +283,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             skip_candles: skipFirst,
             sma_fast: scanSma.fast,
             sma_slow: scanSma.slow,
+            sma_third: scanThird,
           })
         );
       } catch (e: unknown) {
@@ -282,7 +292,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         setBusy(false);
       }
     },
-    [minutes, candles, skipFirst, scanSma.fast, scanSma.slow, armed, lists, quietMin, alertOnQuiet, priceMin, priceMax]
+    [minutes, candles, skipFirst, scanSma.fast, scanSma.slow, scanThird, armed, lists, quietMin, alertOnQuiet, priceMin, priceMax]
   );
 
   // The server re-scans by itself (no browser needed). Tell it the card's choices, so its scans match.
@@ -296,6 +306,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
           skip_candles: skipFirst,
           sma_fast: sma.fast,
           sma_slow: sma.slow,
+          sma_third: scanThird,
           armed_only: armedOnly,
           lists,
           quiet_min: quietMin,
@@ -309,7 +320,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         });
     }, 800);
     return () => clearTimeout(id);
-  }, [synced, saved, minutes, candles, skipFirst, sma.fast, sma.slow, armedOnly, lists, quietMin, alertOnQuiet, priceMin, priceMax]);
+  }, [synced, saved, minutes, candles, skipFirst, sma.fast, sma.slow, scanThird, armedOnly, lists, quietMin, alertOnQuiet, priceMin, priceMax]);
 
   const changeAuto = (change: ChopAutoUpdate) => {
     setError(null);
@@ -379,6 +390,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
           setCandles(asCandleKind(d.auto.candles));
           setSkipFirst(Number(d.auto.skip_candles ?? 0) || 0);
           setSma(cleanSma(d.auto.sma_fast, d.auto.sma_slow));
+          setThird(Number(d.auto.sma_third ?? 0) || 0);
         }
       })
       .catch(() => {
@@ -406,6 +418,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
     data?.minutes === minutes &&
     (data?.candles ?? "NORMAL") === candles &&
     (!scanSma.fast || (data?.sma_fast === scanSma.fast && data?.sma_slow === scanSma.slow));
+  // The rows on screen carry the three-SMA read (the scan had a third SMA).
+  const thirdRead = Number(data?.sma_third ?? data?.rows?.find((r) => r.sma_third)?.sma_third ?? 0) || 0;
   // The rows on screen were read by colour (Heikin Ashi, or the real candles' colours): the trend comes from the
   // candles (ha_trend), not the SMAs. The filters follow the Candles menu, the columns the rows on screen.
   const haRead = colourRead(asCandleKind(data?.candles));
@@ -414,8 +428,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   // Every filter but the stock search: what decides whether a stock is "in the list".
   const passes = useCallback(
     (r: ChopScanRow) =>
-      chopPasses(r, { score, minSpeed, priceMin, priceMax, crossCount, noCrossOn, trendOn, trendDir, trendKind, maxAge, minGap, hideFading }),
-    [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind, maxAge, minGap, hideFading]
+      chopPasses(r, { score, minSpeed, priceMin, priceMax, crossCount, noCrossOn, trendOn, trendDir, trendKind, maxAge, minGap, hideFading, stack3: thirdRead ? stack3 : "ANY", minWiden: thirdRead ? minWiden : 0 }),
+    [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind, maxAge, minGap, hideFading, stack3, minWiden, thirdRead]
   );
   const shownRows = useMemo(() => (scannedThisCandle ? (data?.rows ?? []) : []), [data?.rows, scannedThisCandle]);
   const ticks = useTicks();
@@ -477,6 +491,9 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         return r.phase == null || r.phase_early ? null : (r.phase === "CHOP" ? 0 : 1000) + (r.phase_candles ?? 0);
       case "dayMove":
         return r.day_move_pct ?? null;
+      case "three":
+        // Widening longest first, then stacked longest; not stacked last.
+        return r.stack3 ? (r.widen_candles ?? 0) * 1000 + (r.stack3_candles ?? 0) : null;
       case "buyers":
         return buyers.by.get(r.symbol)?.buy_share ?? null;
       case "crosses":
@@ -563,6 +580,53 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             />
           )}
           {!saved && !colourRead(candles) ? <SmaPick value={sma} onChange={setSma} /> : null}
+          {!saved && !colourRead(candles) ? (
+            <div>
+              <SelectFilter
+                label="Third SMA (longer)"
+                value={thirdTyped ? "custom" : String(third)}
+                onChange={(v) => {
+                  if (v === "custom") {
+                    setThirdTyped(true);
+                    if (!third) setThird(50);
+                    return;
+                  }
+                  setThirdTyped(false);
+                  setThird(Number(v) || 0);
+                }}
+                options={[
+                  { value: "0", label: "Off (two SMAs)" },
+                  ...[50, 100, 200].filter((n) => n > slowInUse).map((n) => ({ value: String(n), label: `SMA ${n}` })),
+                  { value: "custom", label: "Custom number…" },
+                ]}
+                title="Add a third, longer moving average to the scan (for example 9 / 21 / 50). Each stock then shows whether the three lines are stacked one way (fast above slow above third, or the mirror) and for how many candles both gaps have been widening. The other columns do not change."
+                className="w-40"
+              />
+              {thirdTyped ? (
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  aria-label="Third SMA period"
+                  min={slowInUse + 1}
+                  max={200}
+                  step={1}
+                  value={third || ""}
+                  onChange={(e) => setThird(Math.max(0, Math.round(Number(e.target.value) || 0)))}
+                  className="mt-1 min-h-9 w-20 rounded-md border border-slate-700 bg-surface2 px-2 text-sm tabular-nums text-slate-100"
+                />
+              ) : null}
+              {third > 0 && !scanThird ? (
+                <p role="alert" className="mt-1 text-xs text-amber-400">
+                  Must be longer than the slow SMA ({slowInUse}) and at most 200.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {!saved && !colourRead(candles) ? (
+            <span className="self-end pb-2" title="New: a third SMA (9 / 21 / 50): see which stocks have the three lines stacked with both gaps widening">
+              <NewTag id="tq-three-sma" />
+            </span>
+          ) : null}
           {!saved ? (
             <span className="self-end pb-2" title="New: 30-minute and 1-hour candles, and the scan's own moving averages (9 / 21, 20 / 50, 50 / 200 or your own two numbers)">
               <NewTag id="scan-sizes-sma" />
@@ -737,6 +801,28 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             </>
           )}
         </FilterGroup>
+        {thirdRead ? (
+          <FilterGroup title="Three SMAs">
+            <SelectFilter
+              label={`SMA ${data?.sma_fast} / ${data?.sma_slow} / ${thirdRead}`}
+              value={stack3}
+              onChange={(v) => setStack3(v as Stack3Filter)}
+              options={STACK3_OPTIONS}
+              title="Keep only stocks whose three moving averages are lined up one way on the last closed candle"
+              className="w-64"
+            />
+            <NumberFilter
+              label="Both gaps widening for at least (0 = any)"
+              value={minWiden}
+              onChange={(v) => setMinWiden(Math.min(30, Math.max(0, Math.round(v))))}
+              min={0}
+              max={10}
+              step={1}
+              suffix=" candles"
+              className="w-56"
+            />
+          </FilterGroup>
+        ) : null}
         {!saved && trendAlert && (
           <FilterGroup title="Trend rank alert">
             <FilterField label="Alert">
@@ -932,6 +1018,17 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                       num
                       title={haRead ? "The colour run's move %, on the Trend on sizes (averaged) or on this scan's candle. ⚠ fading = on a size the run has given back more than half its widest move" : "|SMA fast − slow| / slow %, on the Trend on sizes (averaged) or on this scan's candle. ⚠ fading = on a size the gap is under half its widest in this trend"}
                       drag={cols.dragProps("gap")}
+                    />
+                  ),
+                  three: (
+                    <SortTh
+                      label="3 SMAs"
+                      k="three"
+                      sort={sort}
+                      onSort={onSort}
+                      text
+                      title={thirdRead ? `SMA ${data?.sma_fast} / ${data?.sma_slow} / ${thirdRead}: stacked up or down, the two gaps in %, and for how many candles in a row both gaps have widened` : "Pick a Third SMA and scan to fill this column"}
+                      drag={cols.dragProps("three")}
                     />
                   ),
                   trend: (
@@ -1140,6 +1237,38 @@ function Row({
               </span>
             ) : (
               <span className="text-slate-600">—</span>
+            )}
+          </td>
+        ),
+        three: (
+          <td className="py-1.5 text-xs">
+            {!r.sma_third ? (
+              <span className="text-slate-600" title="This scan had no third SMA">—</span>
+            ) : r.gap_slow_third_pct == null ? (
+              <span className="text-slate-500" title={`SMA ${r.sma_third} needs more candles than this stock has`}>not formed</span>
+            ) : (
+              <span
+                className="inline-flex flex-wrap items-center gap-1.5"
+                title={`Fast vs slow ${fmtGap(r.gap_fast_slow_pct)} · slow vs SMA ${r.sma_third} ${fmtGap(r.gap_slow_third_pct)}${r.stack3 ? ` · stacked for ${r.stack3_candles ?? 0} candle(s)` : " · lines not lined up one way"}`}
+              >
+                {r.stack3 ? (
+                  <span className={clsx("rounded px-1.5 py-0.5 font-semibold", r.stack3 === "BULLISH" ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss")}>
+                    {r.stack3 === "BULLISH" ? "Stacked ↑" : "Stacked ↓"}
+                  </span>
+                ) : (
+                  <span className="text-slate-500">Mixed</span>
+                )}
+                <span className="tabular-nums text-slate-400">
+                  {fmtGap(r.gap_fast_slow_pct)} · {fmtGap(r.gap_slow_third_pct)}
+                </span>
+                {r.stack3 ? (
+                  (r.widen_candles ?? 0) > 0 ? (
+                    <span className="text-slate-200">widening {r.widen_candles}</span>
+                  ) : (
+                    <span className="text-amber-300">not widening</span>
+                  )
+                ) : null}
+              </span>
             )}
           </td>
         ),

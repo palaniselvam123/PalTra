@@ -1520,6 +1520,15 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   `lib/scanSizes.ts`: Bot 1's own, 9 / 21, 20 / 50, 50 / 200, Custom numbers…; hidden for the colour reads, which use no
   SMA); Trend quality keeps the choice in its auto re-scan settings, the Cross scan per browser (`scalp.cross.sma`). First
   seen compares only saved scans with the same SMA periods.
+  **Three SMAs with widening gaps** (owner's request; display only, nothing in the strategy, an alert or auto-arm reads
+  it): `sma_third` (0 = off, longer than the slow SMA, at most 200; `chop_scan.pick_third`, 400 in plain words) on
+  `POST /api/chop-scan/start`, `ChopAutoUpdate` and `chop_auto.AutoSettings` (an automatic pass drops a saved third that
+  no longer fits the desk's periods). `analyze(..., third=)` adds `chop_scan.three_read` on the scan's own candles (from
+  `wide` when the third SMA needs more days, `scan_download_days`): `stack3` BULLISH (fast > slow > third) / BEARISH /
+  None, `gap_fast_slow_pct`, `gap_slow_third_pct`, `stack3_candles` and `widen_candles` (closed candles in a row on which
+  both gaps were wider than the candle before, up to `WIDEN_MAX` 30). Not on the colour reads. The card's "Third SMA
+  (longer)" menu (Off / 50 / 100 / 200 / custom), the "3 SMAs" column and the "Three SMAs" filter group (stacked up / down,
+  widening for at least N candles; `chopFilter.chopPasses` `stack3` / `minWiden`). The 7 strong-trend checks are unchanged.
   **Skip today's first candles** (`skip_candles` 0-12, `MAX_SKIP_CANDLES`, on `POST /api/chop-scan/start`, `ChopAutoUpdate`
   and `chop_auto.AutoSettings`; the card's "Skip today's first candles" menu; owner's case: big opening candles made a stock
   that went sideways after them read as a strong trend at 10:00): `analyze(..., skip=)` (minutes, `skip_minutes`) counts

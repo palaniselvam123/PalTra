@@ -148,7 +148,7 @@ def cross_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, past=
     return scan_one(symbol, frame, sma_fast, sma_slow, minutes, now), keep
 
 
-def chop_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, quiet_min, ha=False, skip=0, past=None):
+def chop_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, quiet_min, ha=False, skip=0, third=0, past=None):
     """(row, earlier days to keep); see `run_cached`. `ha`: the candle kind (NORMAL / COLOUR / HA, or True / False).
     `skip`: minutes after 09:15 left out of today's trend read (chop_scan.analyze)."""
     from chop_scan import analyze, read_flags, scan_frames
@@ -156,7 +156,7 @@ def chop_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now, quiet_
     wide, keep = _frame_with_past(token, symbol, start, end, past)
     frame, wide = scan_frames(wide, minutes, sma_slow, now)
     on_ha, by_colour = read_flags(ha)
-    return analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=quiet_min, ha=on_ha, colour=by_colour, skip=skip, wide=wide), keep
+    return analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=quiet_min, ha=on_ha, colour=by_colour, skip=skip, wide=wide, third=third), keep
 
 
 def morning_job(token, symbol, start, end, sma_fast, sma_slow, minutes, now):

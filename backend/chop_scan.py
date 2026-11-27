@@ -54,6 +54,7 @@ from cross_scan import (
     cache_key,
     clean_symbols,
     closed_bars,
+    SMA_MAX,
     cut_window,
     download_days,
     window_days,
@@ -218,6 +219,16 @@ class ChopRow:
     run_candles_by_minutes: dict = field(default_factory=dict)
     gap_pct_by_minutes: dict = field(default_factory=dict)
     gap_peak_pct_by_minutes: dict = field(default_factory=dict)
+    # Three SMAs (`three_read`, only when the scan was given a third, longer SMA): `stack3` BULLISH (fast above slow
+    # above third) / BEARISH (the mirror) / None (not lined up, or the third SMA not formed), the signed gaps in %
+    # (fast vs slow, slow vs third), for how many closed candles the lines have been stacked, and for how many candles
+    # in a row BOTH gaps have widened (0 = not widening now).
+    sma_third: int = 0
+    stack3: str | None = None
+    gap_fast_slow_pct: float | None = None
+    gap_slow_third_pct: float | None = None
+    stack3_candles: int = 0
+    widen_candles: int = 0
     # When a scan first read this stock as a quiet runner today, and when its Telegram went (IST).
     first_quiet_at: str | None = None
     alerted_at: str | None = None
@@ -314,6 +325,67 @@ def ha_bars(bars: pd.DataFrame) -> pd.DataFrame:
 
 
 MAX_SKIP_CANDLES = 12
+WIDEN_MAX = 30  # candles the three-SMA read looks back for the stack's age and the widening run
+
+
+def pick_third(third, slow: int) -> int:
+    """The scan's third (longest) SMA: 0 = off, else longer than the slow SMA and at most SMA_MAX.
+    ValueError in plain words."""
+    try:
+        third = int(third or 0)
+    except (TypeError, ValueError):
+        raise ValueError("The third SMA must be a whole number.") from None
+    if not third:
+        return 0
+    if third <= int(slow) or third > SMA_MAX:
+        raise ValueError(f"The third SMA must be longer than the slow SMA ({int(slow)}) and at most {SMA_MAX}.")
+    return third
+
+
+def three_read(bars: pd.DataFrame, fast: int, slow: int, third: int) -> dict:
+    """Three SMAs on closed candles: are they stacked one way, and are both gaps widening?
+
+    `stack3` BULLISH = SMA fast > SMA slow > SMA third on the last closed candle, BEARISH the mirror, None otherwise
+    (or the third SMA is not formed yet). The gaps are signed %: (fast - slow) / slow and (slow - third) / third.
+    `stack3_candles` = closed candles in a row the lines have been stacked that way; `widen_candles` = closed candles in
+    a row, ending at the last one, on which BOTH gaps were wider than on the candle before while stacked (0 = one of
+    them is flat or narrowing now). Both are counted up to WIDEN_MAX. Never raises on short data."""
+    out = {"sma_third": int(third or 0), "stack3": None, "gap_fast_slow_pct": None, "gap_slow_third_pct": None,
+           "stack3_candles": 0, "widen_candles": 0}
+    if not third or bars is None or len(bars) < int(third) or "close" not in bars:
+        return out
+    close = pd.to_numeric(bars["close"], errors="coerce")
+    f = close.rolling(int(fast)).mean()
+    m = close.rolling(int(slow)).mean()
+    t = close.rolling(int(third)).mean()
+    g1 = ((f - m) / m * 100.0).where(m != 0).iloc[-(WIDEN_MAX + 1):].tolist()
+    g2 = ((m - t) / t * 100.0).where(t != 0).iloc[-(WIDEN_MAX + 1):].tolist()
+    a, b = g1[-1], g2[-1]
+    if pd.isna(a) or pd.isna(b):
+        return out
+    out["gap_fast_slow_pct"], out["gap_slow_third_pct"] = round(float(a), 4), round(float(b), 4)
+    if not ((a > 0 and b > 0) or (a < 0 and b < 0)):
+        return out
+    sign = 1 if a > 0 else -1
+    out["stack3"] = "BULLISH" if sign > 0 else "BEARISH"
+
+    def stacked(i: int) -> bool:
+        return not pd.isna(g1[i]) and not pd.isna(g2[i]) and g1[i] * sign > 0 and g2[i] * sign > 0
+
+    n = 0
+    for i in range(len(g1) - 1, -1, -1):
+        if not stacked(i):
+            break
+        n += 1
+    out["stack3_candles"] = n
+    w = 0
+    for i in range(len(g1) - 1, 0, -1):
+        if not (stacked(i) and not pd.isna(g1[i - 1]) and not pd.isna(g2[i - 1])
+                and abs(g1[i]) > abs(g1[i - 1]) and abs(g2[i]) > abs(g2[i - 1])):
+            break
+        w += 1
+    out["widen_candles"] = w
+    return out
 
 
 def skip_minutes(skip_candles, minutes: int) -> int:
@@ -325,7 +397,7 @@ def skip_minutes(skip_candles, minutes: int) -> int:
     return max(0, min(MAX_SKIP_CANDLES, n)) * int(minutes or 1)
 
 
-def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT, ha: bool = False, colour: bool = False, skip: int = 0, wide: pd.DataFrame | None = None) -> ChopRow | None:
+def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, now: dt.datetime, symbol: str = "", quiet_min: int = QUIET_MIN_DEFAULT, ha: bool = False, colour: bool = False, skip: int = 0, wide: pd.DataFrame | None = None, third: int = 0) -> ChopRow | None:
     """One stock's chop/trend read. None when the tape isn't long enough yet. `ha`: read Heikin Ashi candles.
 
     `wide`: a longer download of the same stock (`scan_frames`), read only for the other candle sizes of the row whose
@@ -337,7 +409,11 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
     big candles, then went sideways): today's candles that began before 09:15 + skip are left out of the trend read.
     Crosses / colour flips, phases, the strong-trend checks (their candles; morning mode reads today's candles after the
     skip), the fresh-trend read and the VWAP start after them; the SMAs are still worked out on every candle, so they
-    carry some of the opening move for a while. The day move, last price and activity stay real."""
+    carry some of the opening move for a while. The day move, last price and activity stay real.
+
+    `third` (0 = off): a third, longer SMA (owner's request: 9 / 21 / 50 with the gaps widening). The row then carries
+    `three_read` on the scan's candles (from `wide` when the third SMA needs more days than `frame_1m` holds). The
+    other reads are unchanged, and a colour read (no SMAs) leaves it out."""
     if frame_1m is None or getattr(frame_1m, "empty", True):
         return None
     bars = closed_bars(frame_1m, minutes, now)
@@ -421,8 +497,17 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
     by_size = {m: (*_cross_read(hits, enriched, by_colour), trend["trend"]) if m == minutes
                else _crosses_on(tape_for(m), m, now, sma_fast, sma_slow, today, vwap, ha, by_colour, skip_from if skip else None)
                for m in SCAN_MINUTES}
+    three: dict = {}
+    if third and not by_colour:
+        need = window_days(minutes, third)
+        if wide is not None and need > own_days:
+            bars3 = closed_bars(cut_window(wide, now, need), minutes, now)
+        else:
+            bars3 = bars
+        three = three_read(bars3, sma_fast, sma_slow, third)
     return replace(
         base,
+        **three,
         **activity(frame_1m),
         **trend,
         **fresh,
@@ -438,6 +523,12 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
         gap_peak_pct_by_minutes={m: r[7] for m, r in by_size.items()},
         trend_by_minutes={m: r[8] for m, r in by_size.items()},
     )
+
+
+def scan_download_days(minutes: int, sma_slow: int, third: int = 0) -> int:
+    """Days a Trend quality pass downloads: the usual ones, or more when a third SMA needs them on the scan's candle."""
+    days = download_days(minutes, sma_slow, SCAN_MINUTES)
+    return max(days, window_days(minutes, third)) if third else days
 
 
 def scan_frames(frame_1m: pd.DataFrame, minutes: int, sma_slow: int, now: dt.datetime) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -601,6 +692,7 @@ class Status:
     minutes: int = 5
     sma_fast: int = 9
     sma_slow: int = 21
+    sma_third: int = 0  # a third, longer SMA for the three-SMA read (0 = off)
     quiet_min: int = QUIET_MIN_DEFAULT
     candles: str = NORMAL  # NORMAL | COLOUR (real candles read by colour) | HA (Heikin Ashi)
     skip_candles: int = 0  # today's first N candles of the scan's size left out of the trend read
@@ -645,6 +737,7 @@ class ChopScanner:
             "finished_at": s.finished_at,
             "sma_fast": s.sma_fast,
             "sma_slow": s.sma_slow,
+            "sma_third": s.sma_third,
             "quiet_min": s.quiet_min,
             "candles": s.candles,
             "skip_candles": s.skip_candles,
@@ -672,7 +765,9 @@ class ChopScanner:
         price_max: float = 0.0,
         candles: str = NORMAL,
         skip_candles: int = 0,
+        sma_third: int = 0,
     ) -> dict:
+        sma_third = pick_third(sma_third, sma_slow)
         skip_candles = max(0, min(MAX_SKIP_CANDLES, int(skip_candles or 0)))
         if candles not in CANDLE_KINDS:
             raise ValueError("Candles must be NORMAL, COLOUR (real candles read by colour) or HA (Heikin Ashi)")
@@ -682,7 +777,7 @@ class ChopScanner:
         if not names:
             raise ValueError("No stocks to scan")
         now = now or dt.datetime.now(IST)
-        key = (cache_key(now, minutes), minutes, sma_fast, sma_slow, tuple(names), candles, skip_candles)
+        key = (cache_key(now, minutes), minutes, sma_fast, sma_slow, tuple(names), candles, skip_candles, sma_third)
         if self.status.running:
             return self.snapshot()
         fresh = self._key == key and self.status.as_of is not None
@@ -702,12 +797,13 @@ class ChopScanner:
         self.status.quiet_min = max(1, int(quiet_min or QUIET_MIN_DEFAULT))
         self.status.candles = candles
         self.status.skip_candles = skip_candles
+        self.status.sma_third = sma_third
         self._task = asyncio.get_running_loop().create_task(
             self._run(
                 names, fetch, key, minutes, sma_fast, sma_slow, now,
                 alert_on_quiet=alert_on_quiet, alert_cb=alert_cb, job=job,
                 price_min=price_min, price_max=price_max, ha=candles == HEIKIN_ASHI, colour=candles == COLOUR,
-                skip=skip_minutes(skip_candles, minutes),
+                skip=skip_minutes(skip_candles, minutes), third=sma_third,
             )
         )
         return self.snapshot()
@@ -730,8 +826,9 @@ class ChopScanner:
         ha: bool = False,
         colour: bool = False,
         skip: int = 0,
+        third: int = 0,
     ) -> None:
-        start = window_start(now, download_days(minutes, sma_slow, SCAN_MINUTES))
+        start = window_start(now, scan_download_days(minutes, sma_slow, third))
         end = now.replace(tzinfo=None)
         rows: list[ChopRow] = []
         errors: dict[str, int] = {}
@@ -752,7 +849,7 @@ class ChopScanner:
                         row = await job(symbol, start, end)
                     else:
                         frame, wide = scan_frames(await fetch(symbol, start, end), minutes, sma_slow, now)
-                        row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min, ha=ha, colour=colour, skip=skip, wide=wide)
+                        row = analyze(frame, sma_fast, sma_slow, minutes, now, symbol=symbol, quiet_min=self.status.quiet_min, ha=ha, colour=colour, skip=skip, wide=wide, third=third)
                     ok += 1
                     if row is not None:
                         rows.append(row)
