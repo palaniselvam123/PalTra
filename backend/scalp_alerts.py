@@ -91,6 +91,12 @@ class Settings:
     # Auto-arm only stocks priced inside this range (₹, 0 = no bound), live and in the auto-arm replay.
     arm_price_min: float = 0.0
     arm_price_max: float = 0.0
+    # Trend quality auto-arm only (owner's request): the three SMAs (fast / slow / arm_strong_third) must be stacked the
+    # trend's way, and with arm_strong_widen N > 0 both gaps widening for at least N closed candles (chop_scan.three_read
+    # on the scan's row; the auto-arm replay reads the same from the candles). Off / 0 by default.
+    arm_strong_stack: bool = False
+    arm_strong_widen: int = 0
+    arm_strong_third: int = 50
     # Auto-arm a LIVE bot too (owner's request, to test with a small qty): off by default; turning it on needs
     # confirm_live (PUT /api/scalp-alerts, 409 without). On a LIVE bot at most arm_live_max_day stocks a day per source.
     arm_live: bool = False
@@ -149,7 +155,44 @@ def clean(raw: dict) -> Settings:
         s.arm_live_max_day = max(1, min(10, int(raw.get("arm_live_max_day", s.arm_live_max_day) or s.arm_live_max_day)))
     except (TypeError, ValueError):
         pass
+    s.arm_strong_stack = bool(raw.get("arm_strong_stack", s.arm_strong_stack))
+    try:
+        s.arm_strong_widen = max(0, min(STACK_WIDEN_MAX, int(raw.get("arm_strong_widen", s.arm_strong_widen) or 0)))
+        third = int(raw.get("arm_strong_third", s.arm_strong_third) or s.arm_strong_third)
+        s.arm_strong_third = third if 3 <= third <= 200 else s.arm_strong_third
+    except (TypeError, ValueError):
+        pass
     return s
+
+
+#: The most widening candles a condition can ask for (chop_scan.WIDEN_MAX counts no further).
+STACK_WIDEN_MAX = 30
+
+
+def stack_needed(s: Settings) -> bool:
+    """The Trend quality auto-arm asks for the three-SMA stack (or widening gaps)."""
+    return bool(getattr(s, "arm_strong_stack", False) or int(getattr(s, "arm_strong_widen", 0) or 0) > 0)
+
+
+def stack_refusal(row: dict, side: str, stack: bool, widen: int) -> str | None:
+    """Why a strong-trend row fails the three-SMA condition, else None. `side` UP / DOWN (the trend's way).
+    Widening N > 0 needs the stack too. A row with no three-SMA read (the scan had no third SMA, or it is not formed)
+    never passes a set condition."""
+    widen = int(widen or 0)
+    if not stack and widen <= 0:
+        return None
+    if not row.get("sma_third"):
+        return "the Trend quality scan had no third SMA"
+    want = "BULLISH" if side == "UP" else "BEARISH"
+    got = row.get("stack3")
+    if got != want:
+        if row.get("gap_slow_third_pct") is None:
+            return f"SMA {row.get('sma_third')} not formed yet"
+        return "the three SMAs are not stacked " + ("up" if side == "UP" else "down")
+    have = int(row.get("widen_candles") or 0)
+    if widen > 0 and have < widen:
+        return f"gaps widening {have} candle(s), need {widen}"
+    return None
 
 
 def _bot(raw, default: int) -> int:
@@ -269,6 +312,9 @@ def strong_picks(rows: list[dict], s: Settings, now: dt.datetime, alerting: bool
         out.append({
             "symbol": r.get("symbol"), "side": side, "price": _num(r.get("ltp")), "passed": len(passed),
             "of": len(checks), "missed": missed, "minutes": r.get("minutes"), "move_pct": _num(r.get("day_move_pct")),
+            # The three-SMA read the auto-arm's stack condition judges (auto_arm.candidates).
+            "sma_third": r.get("sma_third"), "stack3": r.get("stack3"), "widen_candles": r.get("widen_candles"),
+            "gap_slow_third_pct": r.get("gap_slow_third_pct"),
         })
     out.sort(key=lambda p: (-p["passed"], -abs(p["move_pct"] or 0.0)))
     return out[:MAX_NAMES] if alerting else out

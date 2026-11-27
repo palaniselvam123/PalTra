@@ -3055,6 +3055,11 @@ class AutoArmStart(BaseModel):
     #: None = the Scalp alerts' own thresholds (scalp_alerts.json), as the live auto-arm reads them.
     min_checks: int | None = Field(default=None, ge=5, le=7)
     side: Literal["BOTH", "UP", "DOWN"] | None = None
+    #: Trend quality picks need the three SMAs stacked the trend's way / both gaps widening N candles, with this third
+    #: SMA; None = the auto-arm's own (arm_strong_stack / arm_strong_widen / arm_strong_third).
+    stack: bool | None = None
+    widen: int | None = Field(default=None, ge=0, le=scalp_alerts.STACK_WIDEN_MAX)
+    third: int | None = Field(default=None, ge=3, le=200)
     pct: float | None = Field(default=None, ge=50, le=99)
     pressure_side: Literal["BOTH", "BUY", "SELL"] | None = None
     min_value_cr: float | None = Field(default=None, ge=0, le=100000)
@@ -3134,6 +3139,9 @@ async def replay_auto_arm(body: AutoArmStart):
         sma_fast=int(scan_cfg.sma_fast), sma_slow=int(scan_cfg.sma_slow), candles=body.candles,
         skip_candles=body.skip_candles,
         min_checks=body.min_checks or alerts.strong_min_checks, side=body.side or alerts.strong_side,
+        stack=alerts.arm_strong_stack if body.stack is None else body.stack,
+        widen=alerts.arm_strong_widen if body.widen is None else body.widen,
+        third=body.third or alerts.arm_strong_third,
         pct=body.pct or alerts.pressure_pct, pressure_side=body.pressure_side or alerts.pressure_side,
         min_value_cr=alerts.pressure_min_value_cr if body.min_value_cr is None else body.min_value_cr,
         min_rvol=alerts.pressure_min_rvol if body.min_rvol is None else body.min_rvol,
@@ -3145,6 +3153,8 @@ async def replay_auto_arm(body: AutoArmStart):
         force_strong=alerts.arm_strong_force if body.force_strong is None else body.force_strong,
         force_pressure=alerts.arm_pressure_force if body.force_pressure is None else body.force_pressure,
     )
+    if (rule.stack or rule.widen) and rule.third <= rule.sma_slow:
+        raise HTTPException(400, f"The third SMA must be longer than the slow SMA ({rule.sma_slow}).")
     names = list(body.universe)
     notes: list[str] = []
     if body.source in ("ACTIVE", "BOTH"):
@@ -4403,6 +4413,11 @@ def _start_chop(
     sma_third: int = 0,
 ):
     fast, slow = _scan_smas(sma_fast, sma_slow)
+    if not sma_third and candles != getattr(chop_scan, "COLOUR", "COLOUR"):
+        # The Trend quality auto-arm asks for the three-SMA stack: read it on every pass, so its condition can pass.
+        alerts = scalp_alerts.load()
+        if alerts.arm_strong_on and scalp_alerts.stack_needed(alerts) and alerts.arm_strong_third > slow:
+            sma_third = alerts.arm_strong_third
     try:
         third = chop_scan.pick_third(sma_third, slow)
     except ValueError:
@@ -4629,6 +4644,10 @@ class ScalpAlertUpdate(BaseModel):
     # Auto-arm price range (₹, 0 = no bound).
     arm_price_min: float | None = Field(default=None, ge=0, le=1_000_000)
     arm_price_max: float | None = Field(default=None, ge=0, le=1_000_000)
+    # Trend quality auto-arm: the three SMAs stacked the trend's way / both gaps widening N candles (third SMA).
+    arm_strong_stack: bool | None = None
+    arm_strong_widen: int | None = Field(default=None, ge=0, le=scalp_alerts.STACK_WIDEN_MAX)
+    arm_strong_third: int | None = Field(default=None, ge=3, le=200)
     # Auto-arm a LIVE bot too (real Groww orders on its next signal); turning it on needs confirm_live.
     arm_live: bool | None = None
     arm_live_max_day: int | None = Field(default=None, ge=1, le=10)
@@ -4666,6 +4685,11 @@ async def scalp_alerts_put(body: ScalpAlertUpdate):
             "With \"Also arm a LIVE bot\" on, \"Force order when armed\" places a real Groww order the moment a stock "
             "is auto-armed. Confirm it on the page (confirm_live) to turn it on.",
         )
+    third = raw.get("arm_strong_third")
+    if third is not None:
+        slow = int(engine.load_config().sma_slow) if engine is not None else 21
+        if third <= slow:
+            raise HTTPException(400, f"The third SMA must be longer than the slow SMA ({slow}).")
     await asyncio.to_thread(scalp_alerts.save, raw)
     return await asyncio.to_thread(scalp_alerts.view)
 

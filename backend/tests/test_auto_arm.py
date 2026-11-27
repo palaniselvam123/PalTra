@@ -521,3 +521,64 @@ def test_replay_forces_only_the_picked_sources_switched_on():
 
     back = scalp_picks.rule_from_dict(auto_arm.AutoArmRule(force_pressure=True).as_dict(), 9, 21)
     assert back.force_pressure is True and back.force_strong is False
+
+
+def _stacked(symbol, stack3="BULLISH", widen=3, third=50, trend="STRONG_BULLISH"):
+    return {**_strong(symbol, trend=trend), "sma_third": third, "stack3": stack3, "widen_candles": widen,
+            "gap_slow_third_pct": 0.2 if stack3 else -0.1}
+
+
+def test_live_auto_arm_can_need_the_three_smas_stacked_and_widening():
+    rows = [_stacked("UP3", widen=3), _stacked("UP1", widen=1), _stacked("MIXED", stack3=None),
+            _stacked("WRONG", stack3="BEARISH"), _strong("NOTHIRD")]
+    s = scalp_alerts.clean({})
+    assert {p["symbol"] for p in auto_arm.candidates("strong", rows, s, NOW)} == {"UP3", "UP1", "MIXED", "WRONG", "NOTHIRD"}
+    s = scalp_alerts.clean({"arm_strong_stack": True})
+    assert {p["symbol"] for p in auto_arm.candidates("strong", rows, s, NOW)} == {"UP3", "UP1"}
+    s = scalp_alerts.clean({"arm_strong_widen": 2})
+    assert {p["symbol"] for p in auto_arm.candidates("strong", rows, s, NOW)} == {"UP3"}
+    # A strong bearish trend needs the lines stacked down.
+    down = [_stacked("DN", stack3="BEARISH", trend="STRONG_BEARISH")]
+    assert [p["symbol"] for p in auto_arm.candidates("strong", down, s, NOW)] == ["DN"]
+    assert scalp_alerts.stack_refusal(_strong("X"), "UP", True, 0) == "the Trend quality scan had no third SMA"
+    assert "need 2" in scalp_alerts.stack_refusal(_stacked("Y", widen=1), "UP", False, 2)
+    # The alert's own picks are unchanged (the condition is the auto-arm's).
+    assert len(scalp_alerts.strong_picks(rows, s, NOW, alerting=False)) == 5
+    saved = scalp_alerts.clean({"arm_strong_widen": 99, "arm_strong_third": 1000})
+    assert saved.arm_strong_widen == scalp_alerts.STACK_WIDEN_MAX and saved.arm_strong_third == 50
+
+
+def test_replay_reads_the_same_three_sma_stack_as_the_scan():
+    import chop_scan
+
+    days = _weekdays(dt.date(2026, 10, 19), 12)
+    tape = _tape(days)
+    keys = ("stack3", "widen_candles", "stack3_candles", "gap_fast_slow_pct", "gap_slow_third_pct")
+    for day in days[9:]:
+        for at in (dt.time(10, 30), dt.time(13, 0)):
+            for minutes in (5, 15):
+                now = dt.datetime.combine(day, at, tzinfo=IST)
+                before = tape[tape["ts"] < int(now.timestamp())].reset_index(drop=True)
+                own = chop_scan.cut_window(before, now, chop_scan.window_days(minutes, 21))
+                row = chop_scan.analyze(own, 9, 21, minutes, now, third=50, wide=before).as_dict()
+                read = auto_arm.strong_read(tape, day, at, minutes, 9, 21, third=50)
+                assert {k: read.get(k) for k in keys} == {k: row.get(k) for k in keys}, (day, at, minutes)
+
+
+def test_replay_rule_skips_picks_without_the_stack():
+    days = _weekdays(dt.date(2026, 10, 19), 12)
+    day = days[-1]
+    frames = {"S": _tape(days)}
+    base = dict(source="TREND", first=dt.time(10, 0), last=dt.time(14, 0), every_min=30, minutes=5, min_checks=5)
+    plain = auto_arm.picks_for_day(frames, day, auto_arm.AutoArmRule(**base))
+    strict = auto_arm.picks_for_day(frames, day, auto_arm.AutoArmRule(**base, stack=True, widen=30, third=50))
+    assert len(strict) <= len(plain)
+    for p in strict:
+        hh, mm = map(int, p["at"].split(":"))
+        read = auto_arm.strong_read(frames["S"], day, dt.time(hh, mm), 5, 9, 21, third=50)
+        assert read["widen_candles"] >= 30 and "stacked" in p["why"]
+    rule = auto_arm.AutoArmRule(**base, stack=True, widen=2, third=60)
+    import scalp_picks
+
+    back = scalp_picks.rule_from_dict(rule.as_dict(), 9, 21)
+    assert (back.stack, back.widen, back.third) == (True, 2, 60)

@@ -105,6 +105,7 @@ export function ScalpAlertsCard() {
               force={Boolean(view.arm_strong_force)}
               onForce={(on) => setForce("arm_strong_force", on)}
             />
+            {view.arm_strong_on ? <StackCondition view={view} busy={busy} select={select} save={save} /> : null}
             <LastCheck row={view.last?.strong} scan="Trend quality" />
           </div>
           <div className={clsx(box, view.pressure_on ? "border-emerald-400/40 bg-emerald-400/[0.04]" : "border-slate-800")}>
@@ -396,6 +397,68 @@ function PriceBox({ value, label, disabled, onSave }: { value: number; label: st
 }
 
 /** "Also arm a LIVE bot" (backend auto_arm.py `arm_live`): off by default; turning it on asks for LIVE typed and sends confirm_live. */
+/** Trend quality auto-arm: also need the three SMAs stacked the trend's way and both gaps widening (backend
+ * scalp_alerts.stack_refusal, auto_arm.candidates; the auto-arm replay reads the same from the candles). */
+function StackCondition({
+  view,
+  busy,
+  select,
+  save,
+}: {
+  view: ScalpAlerts;
+  busy: boolean;
+  select: string;
+  save: (patch: Partial<ScalpAlerts>) => Promise<void>;
+}) {
+  const third = view.arm_strong_third ?? 50;
+  const widen = view.arm_strong_widen ?? 0;
+  const on = Boolean(view.arm_strong_stack) || widen > 0;
+  return (
+    <div id="scalp-arm-stack" className="mt-2 rounded-md border border-slate-800 p-2 text-xs text-slate-400">
+      <label className="flex items-center gap-2 font-semibold text-slate-200">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={busy}
+          onChange={(e) => void save(e.target.checked ? { arm_strong_stack: true } : { arm_strong_stack: false, arm_strong_widen: 0 })}
+          className="accent-[#10B981]"
+        />
+        Arm only when the three SMAs are stacked the trend&apos;s way
+        <NewTag id="arm-stack-widen" />
+      </label>
+      <p className="mt-1 leading-relaxed">
+        Up trend: SMA fast above SMA slow above SMA {third}. Down trend: the other way round. Read on the Trend quality scan&apos;s
+        candles; each pass reads SMA {third} by itself while this is on. The alert itself is not changed.
+      </p>
+      {on ? (
+        <div className="mt-2 flex flex-wrap items-end gap-3">
+          <label className="flex flex-col gap-1">
+            Third SMA
+            <select className={select} value={third} disabled={busy} onChange={(e) => void save({ arm_strong_third: Number(e.target.value) })}>
+              {[30, 50, 100, 200].map((n) => (
+                <option key={n} value={n}>
+                  SMA {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            Both gaps widening for at least
+            <select className={select} value={widen} disabled={busy} onChange={(e) => void save({ arm_strong_stack: true, arm_strong_widen: Number(e.target.value) })}>
+              <option value={0}>Not checked (stacked is enough)</option>
+              {[1, 2, 3, 4, 5, 6, 8, 10].map((n) => (
+                <option key={n} value={n}>
+                  {n} candle{n === 1 ? "" : "s"}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function LiveArmRow({
   on,
   max,
