@@ -8,6 +8,8 @@ must close beyond the chosen line on the trade's side (`level_line`):
 * `BB_UPPER` – a buy above the upper band, a sell below the lower band (a breakout entry).
 * `PIVOT_P` – a buy above the day's pivot P, a sell below it (pivots.py, from the previous session).
 * `PIVOT_R1` – a buy above R1, a sell below S1.
+* `CPR` – a buy above the top of the Central Pivot Range, a sell below its bottom (pivots.py: BC / TC).
+* `PREV_DAY` – a buy above the previous session's high, a sell below its low.
 
 A line that cannot be worked out yet (too few candles, no previous session) refuses the entry, like the other checks.
 """
@@ -20,7 +22,7 @@ import pandas as pd
 import pivots
 from indicators import BB_PERIOD, BB_STD, bollinger
 
-LINES = ("BB_MIDDLE", "BB_UPPER", "PIVOT_P", "PIVOT_R1")
+LINES = ("BB_MIDDLE", "BB_UPPER", "PIVOT_P", "PIVOT_R1", "CPR", "PREV_DAY")
 DEFAULT_LINE = "BB_MIDDLE"
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 
@@ -52,6 +54,10 @@ def level(closed: pd.DataFrame, direction: str, cfg) -> tuple[float, str] | None
         return None
     if line == "PIVOT_P":
         return float(lv["p"]), "the pivot P"
+    if line == "CPR":
+        return (float(lv["cpr_high"]), "the CPR top") if direction == "LONG" else (float(lv["cpr_low"]), "the CPR bottom")
+    if line == "PREV_DAY":
+        return (float(lv["pdh"]), "yesterday's high") if direction == "LONG" else (float(lv["pdl"]), "yesterday's low")
     return (float(lv["r1"]), "R1") if direction == "LONG" else (float(lv["s1"]), "S1")
 
 

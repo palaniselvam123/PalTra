@@ -272,7 +272,10 @@ export type SmaConfig = {
   /** Fresh trend entry check (fresh_entry.py): a new cross, beyond VWAP, the gap widening, volume fresh_rvol x usual. */
   use_fresh?: boolean;
   fresh_rvol?: number;
-  level_line?: "BB_MIDDLE" | "BB_UPPER" | "PIVOT_P" | "PIVOT_R1";
+  level_line?: "BB_MIDDLE" | "BB_UPPER" | "PIVOT_P" | "PIVOT_R1" | "CPR" | "PREV_DAY";
+  /** Nifty direction check (index_check.py): entries only while Nifty goes the trade's way. */
+  use_index?: boolean;
+  index_rule?: "SMA" | "DAY" | "BOTH";
   /** 52-week high check (high52.py): a buy only on a close at the 52-week high (a sell at the low), from Groww daily candles. */
   use_high52?: boolean;
   high52_side?: "LONG" | "SHORT" | "BOTH";
@@ -688,6 +691,18 @@ export type ChopScanRow = {
   trend_skip_min?: number;
   /** Three SMAs (only when the scan had a third SMA): the third period, whether fast / slow / third are stacked one
    * way, the two signed gaps in %, candles stacked, and candles in a row both gaps have widened (0 = not now). */
+  /** Nifty's move today in % and this stock's day move minus it (positive = stronger than Nifty); null when unread. */
+  index_move_pct?: number | null;
+  rs_pct?: number | null;
+  /** Central Pivot Range from the previous session: width in % of the pivot, where the price sits, the two lines. */
+  cpr_width_pct?: number | null;
+  cpr_side?: "ABOVE" | "INSIDE" | "BELOW" | null;
+  cpr_high?: number | null;
+  cpr_low?: number | null;
+  /** Yesterday's high / low and whether the price is beyond them. */
+  prev_high?: number | null;
+  prev_low?: number | null;
+  prev_side?: "ABOVE" | "INSIDE" | "BELOW" | null;
   sma_third?: number;
   stack3?: "BULLISH" | "BEARISH" | null;
   gap_fast_slow_pct?: number | null;
@@ -2216,7 +2231,7 @@ export type ChartPayload = {
   /** Minutes per candle the server sends (the bot's candle interval); 1 when absent. */
   candle_minutes?: number;
   /** Classic daily pivots from the previous session (pivots.py); null until that day is loaded. */
-  pivots?: { day: string; p: number; r1: number; r2: number; s1: number; s2: number } | null;
+  pivots?: { day: string; p: number; r1: number; r2: number; s1: number; s2: number; cpr_high?: number; cpr_low?: number; cpr_width_pct?: number; pdh?: number; pdl?: number; pdc?: number } | null;
   pivot_target?: "OFF" | "R1" | "R2";
   candles: Candle[];
   markers: {

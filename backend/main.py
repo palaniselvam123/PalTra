@@ -96,6 +96,7 @@ import counter_candles
 import ema_filter
 import heikin_ashi
 import macd
+import index_check
 import pattern_check
 import cum_delta
 import reverse_exit
@@ -852,7 +853,10 @@ class ConfigUpdate(BaseModel):
     use_level: bool | None = None
     use_fresh: bool | None = None
     fresh_rvol: float | None = Field(default=None, ge=0, le=fresh_entry.MAX_RVOL)
-    level_line: str | None = Field(default=None, pattern="^(BB_MIDDLE|BB_UPPER|PIVOT_P|PIVOT_R1)$")
+    level_line: str | None = Field(default=None, pattern="^(BB_MIDDLE|BB_UPPER|PIVOT_P|PIVOT_R1|CPR|PREV_DAY)$")
+    # Nifty direction check (index_check.py): a buy only while Nifty is up, a sell only while it is down.
+    use_index: bool | None = None
+    index_rule: Literal["SMA", "DAY", "BOTH"] | None = None
     use_high52: bool | None = None
     high52_side: str | None = Field(default=None, pattern="^(LONG|SHORT|BOTH)$")
     high52_pct: float | None = Field(default=None, ge=0, le=high52.MAX_PCT)
@@ -2052,6 +2056,8 @@ def _gap_dict(row) -> dict:
         "high52_side": high52.side_of(row),
         "high52_pct": high52.pct_of(row),
         "level_line": level_check.line_of(row),
+        "use_index": index_check.on(row),
+        "index_rule": index_check.rule(row),
         "st_exit": supertrend.exit_on(row),
         "st_period": supertrend.settings(row)[0],
         "st_mult": supertrend.settings(row)[1],

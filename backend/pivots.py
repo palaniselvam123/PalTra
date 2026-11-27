@@ -50,8 +50,18 @@ def levels(frame: pd.DataFrame | None, day: dt.date) -> dict | None:
         return None
     p = (high + low + close) / 3
     span = high - low
+    # Central Pivot Range: BC = (high + low) / 2, TC = 2P - BC (either can be the upper one). A narrow range (the two
+    # lines close together, in % of P) often comes before a trending day, a wide one before a sideways day.
+    bc = (high + low) / 2
+    tc = 2 * p - bc
     return {
         "day": prev.isoformat(),
+        "cpr_high": round(max(tc, bc), 2),
+        "cpr_low": round(min(tc, bc), 2),
+        "cpr_width_pct": round(abs(tc - bc) / p * 100, 4),
+        "pdh": round(high, 2),
+        "pdl": round(low, 2),
+        "pdc": round(close, 2),
         "p": round(p, 2),
         "r1": round(2 * p - low, 2),
         "s1": round(2 * p - high, 2),

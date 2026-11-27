@@ -19,7 +19,7 @@ import type { OnScanStatus } from "@/components/Scalp/scanStatus";
 import { GrowwLink } from "@/components/ui/growwLink";
 import { TickBar, TickCell, TickHead, useTicks } from "@/components/Scalp/TickArm";
 import { ageText, rankTrends, trendRead, type RankedTrend, type TrendRead } from "@/lib/trendRank";
-import { CANDLE_KIND_OPTIONS, SCORE_OPTIONS, TREND_DIRS, TREND_KINDS, asCandleKind, candleWords, STACK3_OPTIONS, chopPasses, colourRead, crossRulesFor, modeWords, trendKindsFor, inPriceRange, isCrossRule, isStrong, type CrossRule, type ScoreFilter, type Stack3Filter } from "@/lib/chopFilter";
+import { CANDLE_KIND_OPTIONS, SCORE_OPTIONS, TREND_DIRS, TREND_KINDS, asCandleKind, candleWords, CPR_NARROW, CPR_WIDE, DAY_LEVEL_OPTIONS, STACK3_OPTIONS, VS_INDEX_OPTIONS, chopPasses, colourRead, crossRulesFor, modeWords, trendKindsFor, inPriceRange, isCrossRule, isStrong, type CrossRule, type DayLevelFilter, type ScoreFilter, type Stack3Filter, type VsIndexFilter } from "@/lib/chopFilter";
 import { GuideBar } from "./GuideBar";
 import { NewTag } from "@/components/ui/NewTag";
 import { api, type ActiveStock } from "@/lib/api";
@@ -57,9 +57,9 @@ type Props = {
 
 const fmtGap = (v: number | null | undefined) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`);
 
-type SortKey = "symbol" | "ltp" | "score" | "first" | "rank" | "age" | "gap" | "three" | "trend" | "phase" | "dayMove" | "buyers" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
+type SortKey = "symbol" | "ltp" | "score" | "first" | "rank" | "age" | "gap" | "three" | "vsIndex" | "cpr" | "trend" | "phase" | "dayMove" | "buyers" | "crosses" | "since" | "avgGap" | "avgMove" | "speed" | "volume";
 type Col = SortKey | "sizes" | "arm";
-const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "rank", "age", "gap", "three", "trend", "phase", "dayMove", "buyers", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
+const COLUMNS: readonly Col[] = ["symbol", "ltp", "score", "first", "rank", "age", "gap", "three", "trend", "phase", "dayMove", "vsIndex", "cpr", "buyers", "sizes", "crosses", "since", "avgGap", "avgMove", "speed", "volume", "arm"];
 
 const SCORE_LABEL: Record<ChopScore, string> = { TRENDING: "Trending", MIXED: "Mixed", CHOPPY: "Choppy" };
 const SCORE_CLASS: Record<ChopScore, string> = {
@@ -158,6 +158,11 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   const scanThird = colourRead(candles) || third <= slowInUse || third > 200 ? 0 : third;
   const [stack3, setStack3] = useState<Stack3Filter>("ANY");
   const [minWiden, setMinWiden] = useState(0);
+  // Against the market and the day's levels (the vs Nifty and CPR columns).
+  const [vsIndex, setVsIndex] = useState<VsIndexFilter>("ANY");
+  const [minVsIndex, setMinVsIndex] = useState(0);
+  const [maxCpr, setMaxCpr] = useState(0);
+  const [dayLevel, setDayLevel] = useState<DayLevelFilter>("ANY");
   const [score, setScore] = useState<ScoreFilter>("ALL");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
@@ -428,8 +433,8 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   // Every filter but the stock search: what decides whether a stock is "in the list".
   const passes = useCallback(
     (r: ChopScanRow) =>
-      chopPasses(r, { score, minSpeed, priceMin, priceMax, crossCount, noCrossOn, trendOn, trendDir, trendKind, maxAge, minGap, hideFading, stack3: thirdRead ? stack3 : "ANY", minWiden: thirdRead ? minWiden : 0 }),
-    [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind, maxAge, minGap, hideFading, stack3, minWiden, thirdRead]
+      chopPasses(r, { score, minSpeed, priceMin, priceMax, crossCount, noCrossOn, trendOn, trendDir, trendKind, maxAge, minGap, hideFading, stack3: thirdRead ? stack3 : "ANY", minWiden: thirdRead ? minWiden : 0, vsIndex, minVsIndex, maxCpr, dayLevel }),
+    [score, minSpeed, noCrossOn, crossCount, priceMin, priceMax, trendOn, trendDir, trendKind, maxAge, minGap, hideFading, stack3, minWiden, thirdRead, vsIndex, minVsIndex, maxCpr, dayLevel]
   );
   const shownRows = useMemo(() => (scannedThisCandle ? (data?.rows ?? []) : []), [data?.rows, scannedThisCandle]);
   const ticks = useTicks();
@@ -491,6 +496,10 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         return r.phase == null || r.phase_early ? null : (r.phase === "CHOP" ? 0 : 1000) + (r.phase_candles ?? 0);
       case "dayMove":
         return r.day_move_pct ?? null;
+      case "vsIndex":
+        return r.rs_pct ?? null;
+      case "cpr":
+        return r.cpr_width_pct ?? null;
       case "three":
         // Widening longest first, then stacked longest; not stacked last.
         return r.stack3 ? (r.widen_candles ?? 0) * 1000 + (r.stack3_candles ?? 0) : null;
@@ -801,6 +810,49 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
             </>
           )}
         </FilterGroup>
+        <FilterGroup title="Market & levels">
+          <SelectFilter
+            label="Against Nifty today"
+            value={vsIndex}
+            onChange={(v) => setVsIndex(v as VsIndexFilter)}
+            options={VS_INDEX_OPTIONS}
+            title="The stock's move today minus Nifty's. Stronger than Nifty suits buys, weaker suits sells. Needs a scan that could read Nifty"
+            className="w-48"
+          />
+          {vsIndex !== "ANY" ? (
+            <NumberFilter
+              label="By at least"
+              value={minVsIndex}
+              onChange={(v) => setMinVsIndex(Math.min(10, Math.max(0, Math.round(v * 10) / 10)))}
+              min={0}
+              max={3}
+              step={0.1}
+              suffix="%"
+              className="w-32"
+            />
+          ) : null}
+          <NumberFilter
+            label="CPR width at most (0 = any)"
+            value={maxCpr}
+            onChange={(v) => setMaxCpr(Math.min(5, Math.max(0, Math.round(v * 100) / 100)))}
+            min={0}
+            max={1}
+            step={0.05}
+            suffix="%"
+            className="w-44"
+          />
+          <SelectFilter
+            label="Price is"
+            value={dayLevel}
+            onChange={(v) => setDayLevel(v as DayLevelFilter)}
+            options={DAY_LEVEL_OPTIONS}
+            title="Where the last price sits against the Central Pivot Range or yesterday's high / low"
+            className="w-52"
+          />
+          <span className="self-end pb-2">
+            <NewTag id="tq-vs-nifty-cpr" />
+          </span>
+        </FilterGroup>
         {thirdRead ? (
           <FilterGroup title="Three SMAs">
             <SelectFilter
@@ -1020,6 +1072,28 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                       drag={cols.dragProps("gap")}
                     />
                   ),
+                  vsIndex: (
+                    <SortTh
+                      label="vs Nifty"
+                      k="vsIndex"
+                      sort={sort}
+                      onSort={onSort}
+                      num
+                      title="The stock's move today minus Nifty's move today, in % points. Above 0 = stronger than the market, below 0 = weaker"
+                      drag={cols.dragProps("vsIndex")}
+                    />
+                  ),
+                  cpr: (
+                    <SortTh
+                      label="CPR"
+                      k="cpr"
+                      sort={sort}
+                      onSort={onSort}
+                      text
+                      title={`Central Pivot Range from yesterday's high, low and close: its width in % of the pivot (${CPR_NARROW}% or less = narrow, a trending day is more likely; ${CPR_WIDE}% or more = wide, sideways), where the price is against it, and whether it is beyond yesterday's high or low`}
+                      drag={cols.dragProps("cpr")}
+                    />
+                  ),
                   three: (
                     <SortTh
                       label="3 SMAs"
@@ -1237,6 +1311,40 @@ function Row({
               </span>
             ) : (
               <span className="text-slate-600">—</span>
+            )}
+          </td>
+        ),
+        vsIndex: (
+          <td className="py-1.5 text-right tabular-nums text-xs">
+            {r.rs_pct == null ? (
+              <span className="text-slate-600" title="Nifty could not be read in this scan">—</span>
+            ) : (
+              <span className={r.rs_pct >= 0 ? "text-profit" : "text-loss"} title={`Stock ${fmtGap(r.day_move_pct)} · Nifty ${fmtGap(r.index_move_pct)}`}>
+                {fmtGap(r.rs_pct)}
+              </span>
+            )}
+          </td>
+        ),
+        cpr: (
+          <td className="py-1.5 text-xs">
+            {r.cpr_width_pct == null ? (
+              <span className="text-slate-600" title="Needs the previous session's candles">—</span>
+            ) : (
+              <span
+                className="inline-flex flex-wrap items-center gap-1.5"
+                title={`CPR ${r.cpr_low} to ${r.cpr_high} · yesterday's low ${r.prev_low}, high ${r.prev_high}`}
+              >
+                <span className="tabular-nums text-slate-200">{r.cpr_width_pct.toFixed(2)}%</span>
+                {r.cpr_width_pct <= CPR_NARROW ? (
+                  <span className="rounded bg-profit/15 px-1.5 py-0.5 font-semibold text-profit">narrow</span>
+                ) : r.cpr_width_pct >= CPR_WIDE ? (
+                  <span className="rounded bg-amber-500/15 px-1.5 py-0.5 font-semibold text-amber-300">wide</span>
+                ) : null}
+                <span className="text-slate-400">
+                  {r.cpr_side === "ABOVE" ? "price above" : r.cpr_side === "BELOW" ? "price below" : "price inside"}
+                  {r.prev_side === "ABOVE" ? " · over yest. high" : r.prev_side === "BELOW" ? " · under yest. low" : ""}
+                </span>
+              </span>
             )}
           </td>
         ),
