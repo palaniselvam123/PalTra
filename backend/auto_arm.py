@@ -354,7 +354,7 @@ def strong_read(frame: pd.DataFrame, day: dt.date, at: dt.time, minutes: int, fa
         enriched = enrich(bars.drop(columns=["volume"], errors="ignore"), fast, slow)
         view = _skip_view(enriched, today_start, skip_from)
         read = trend_strength.read(view, vwap, now=now, tape=part)
-    if third and int(third) > int(slow) and isinstance(read, dict):
+    if third and int(third) not in (int(fast), int(slow)) and isinstance(read, dict):
         read = {**read, **_three_at(frame, day, now, cut, minutes, fast, slow, int(third), ha, bars)}
     if skip_from is None or not isinstance(read, dict):
         return read
@@ -368,7 +368,7 @@ def _three_at(frame: pd.DataFrame, day: dt.date, now: dt.datetime, cut: int, min
     """The Trend quality card's three-SMA read at `now`, on enough days for the third SMA (chop_scan.analyze)."""
     from chop_scan import WARMUP_DAYS, closed_bars, cut_window, ha_bars, three_read, window_days
 
-    need = window_days(minutes, third)
+    need = window_days(minutes, max(third, slow))
     if need > WARMUP_DAYS:
         before = frame[frame["ts"].astype("int64") < cut]
         bars = closed_bars(cut_window(before, now, need), minutes, now)
@@ -420,7 +420,8 @@ def strong_why(read: dict, side: str, rule: AutoArmRule) -> str:
     if rule.skip_candles:
         text += f", first {rule.skip_candles} candle(s) skipped"
     if read.get("stack3") and (getattr(rule, "stack", False) or getattr(rule, "widen", 0)):
-        text += (f"; SMA {rule.sma_fast} / {rule.sma_slow} / {read.get('sma_third')} stacked "
+        lines = " / ".join(str(n) for n in sorted({rule.sma_fast, rule.sma_slow, int(read.get("sma_third") or 0)} - {0}))
+        text += (f"; SMA {lines} stacked "
                  f"{'up' if read['stack3'] == 'BULLISH' else 'down'}, gaps widening {read.get('widen_candles') or 0} candle(s)")
     missed = [k for k, ok in checks.items() if not ok]
     if missed:

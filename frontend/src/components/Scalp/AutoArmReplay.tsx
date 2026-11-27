@@ -499,7 +499,7 @@ function RulesBox({
               <label className="flex flex-col gap-1">
                 Third SMA
                 <select value={th.third} onChange={(e) => set("third", Number(e.target.value))} className={select}>
-                  {[30, 50, 100, 200].map((n) => (
+                  {[21, 30, 50, 100, 200].map((n) => (
                     <option key={n} value={n}>
                       SMA {n}
                     </option>

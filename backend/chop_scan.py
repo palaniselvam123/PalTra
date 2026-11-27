@@ -55,6 +55,7 @@ from cross_scan import (
     clean_symbols,
     closed_bars,
     SMA_MAX,
+    SMA_MIN,
     cut_window,
     download_days,
     window_days,
@@ -374,8 +375,9 @@ def with_index(rows: list, index_move: float | None) -> None:
             row.rs_pct = round(float(row.day_move_pct) - float(index_move), 4)
 
 
-def pick_third(third, slow: int) -> int:
-    """The scan's third (longest) SMA: 0 = off, else longer than the slow SMA and at most SMA_MAX.
+def pick_third(third, slow: int, fast: int = 0) -> int:
+    """The scan's third SMA: 0 = off, else any length from SMA_MIN to SMA_MAX other than the fast and slow ones (the
+    three are put in order shortest to longest, three_read; owner's case: a bot on SMA 9 / 50 with 21 in between).
     ValueError in plain words."""
     try:
         third = int(third or 0)
@@ -383,23 +385,29 @@ def pick_third(third, slow: int) -> int:
         raise ValueError("The third SMA must be a whole number.") from None
     if not third:
         return 0
-    if third <= int(slow) or third > SMA_MAX:
-        raise ValueError(f"The third SMA must be longer than the slow SMA ({int(slow)}) and at most {SMA_MAX}.")
+    taken = {int(slow)} | ({int(fast)} if fast else set())
+    if third in taken or not SMA_MIN <= third <= SMA_MAX:
+        names = " and ".join(f"SMA {n}" for n in sorted(taken))
+        raise ValueError(f"The third SMA must be a different length from {names}, between {SMA_MIN} and {SMA_MAX}.")
     return third
 
 
 def three_read(bars: pd.DataFrame, fast: int, slow: int, third: int) -> dict:
     """Three SMAs on closed candles: are they stacked one way, and are both gaps widening?
 
-    `stack3` BULLISH = SMA fast > SMA slow > SMA third on the last closed candle, BEARISH the mirror, None otherwise
-    (or the third SMA is not formed yet). The gaps are signed %: (fast - slow) / slow and (slow - third) / third.
+    The three lengths are put in order first (shortest, middle, longest), so the third may sit between the other two.
+    `stack3` BULLISH = shortest > middle > longest on the last closed candle, BEARISH the mirror, None otherwise
+    (or the longest is not formed yet). The gaps are signed %: (shortest - middle) / middle and (middle - longest) /
+    longest.
     `stack3_candles` = closed candles in a row the lines have been stacked that way; `widen_candles` = closed candles in
     a row, ending at the last one, on which BOTH gaps were wider than on the candle before while stacked (0 = one of
     them is flat or narrowing now). Both are counted up to WIDEN_MAX. Never raises on short data."""
     out = {"sma_third": int(third or 0), "stack3": None, "gap_fast_slow_pct": None, "gap_slow_third_pct": None,
            "stack3_candles": 0, "widen_candles": 0}
-    if not third or bars is None or len(bars) < int(third) or "close" not in bars:
+    lengths = sorted({int(fast or 0), int(slow or 0), int(third or 0)} - {0})
+    if not third or len(lengths) < 3 or bars is None or len(bars) < lengths[-1] or "close" not in bars:
         return out
+    fast, slow, third = lengths
     close = pd.to_numeric(bars["close"], errors="coerce")
     f = close.rolling(int(fast)).mean()
     m = close.rolling(int(slow)).mean()
@@ -545,7 +553,7 @@ def analyze(frame_1m: pd.DataFrame, sma_fast: int, sma_slow: int, minutes: int, 
                for m in SCAN_MINUTES}
     three: dict = {}
     if third and not by_colour:
-        need = window_days(minutes, third)
+        need = window_days(minutes, max(third, sma_slow))
         if wide is not None and need > own_days:
             bars3 = closed_bars(cut_window(wide, now, need), minutes, now)
         else:
@@ -814,7 +822,7 @@ class ChopScanner:
         skip_candles: int = 0,
         sma_third: int = 0,
     ) -> dict:
-        sma_third = pick_third(sma_third, sma_slow)
+        sma_third = pick_third(sma_third, sma_slow, sma_fast)
         skip_candles = max(0, min(MAX_SKIP_CANDLES, int(skip_candles or 0)))
         if candles not in CANDLE_KINDS:
             raise ValueError("Candles must be NORMAL, COLOUR (real candles read by colour) or HA (Heikin Ashi)")

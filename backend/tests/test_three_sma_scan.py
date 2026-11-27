@@ -44,9 +44,13 @@ def test_mixed_lines_unformed_third_and_off():
 
 def test_pick_third_bounds():
     assert chop_scan.pick_third(0, 21) == 0 and chop_scan.pick_third(50, 21) == 50
-    for bad in (21, 10, 500):
+    # A third between the two (a bot on SMA 9 / 50 with 21 in the middle) is fine; the same length is not.
+    assert chop_scan.pick_third(21, 50, 9) == 21 and chop_scan.pick_third(10, 21) == 10
+    for bad in (21, 1, 500):
         with pytest.raises(ValueError):
             chop_scan.pick_third(bad, 21)
+    with pytest.raises(ValueError, match="SMA 9 and SMA 50"):
+        chop_scan.pick_third(9, 50, 9)
     assert chop_scan.scan_download_days(60, 21, 50) >= chop_scan.window_days(60, 50)
     assert chop_scan.scan_download_days(5, 21, 0) == chop_scan.download_days(5, 21, chop_scan.SCAN_MINUTES)
 
@@ -89,5 +93,18 @@ def test_the_start_route_takes_and_checks_the_third_sma(tmp_path, monkeypatch):
         assert bad.status_code == 400 and "third SMA" in bad.json()["detail"]
         saved = client.put("/api/chop-scan/auto", json={"sma_third": 50}).json()
         assert saved["sma_third"] == 50
-        assert client.put("/api/chop-scan/auto", json={"sma_fast": 20, "sma_slow": 50, "sma_third": 30}).json()["sma_third"] == 0
+        # The same length as one of the scan's own SMAs is dropped; one in between is kept (put in order).
+        assert client.put("/api/chop-scan/auto", json={"sma_fast": 20, "sma_slow": 50, "sma_third": 50}).json()["sma_third"] == 0
+        assert client.put("/api/chop-scan/auto", json={"sma_fast": 20, "sma_slow": 50, "sma_third": 30}).json()["sma_third"] == 30
     database.reset_engine()
+
+
+def test_three_read_puts_the_lengths_in_order():
+    """SMA 9 / 50 with a third of 21 reads the same as 9 / 21 / 50 (owner's bot: Fast 9, Medium 21, Slow 50)."""
+    closes = [100.0 + i * 0.3 + (i % 4) * 0.05 for i in range(120)]
+    a = chop_scan.three_read(_bars(closes), 9, 50, 21)
+    b = chop_scan.three_read(_bars(closes), 9, 21, 50)
+    keys = ("stack3", "gap_fast_slow_pct", "gap_slow_third_pct", "stack3_candles", "widen_candles")
+    assert a["stack3"] == "BULLISH" and {k: a[k] for k in keys} == {k: b[k] for k in keys}
+    assert a["sma_third"] == 21
+    assert chop_scan.three_read(_bars(closes), 9, 21, 21)["stack3"] is None

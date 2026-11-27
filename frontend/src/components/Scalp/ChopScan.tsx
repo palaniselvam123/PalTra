@@ -155,7 +155,10 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
   const [third, setThird] = useState(0);
   const [thirdTyped, setThirdTyped] = useState(false);
   const slowInUse = scanSma.slow || 21;
-  const scanThird = colourRead(candles) || third <= slowInUse || third > 200 ? 0 : third;
+  const fastInUse = scanSma.fast || 9;
+  // Any length 2-200 other than the two SMAs in use: the three are put in order shortest to longest (backend
+  // chop_scan.three_read), so 21 with a 9 / 50 pair reads 9 / 21 / 50.
+  const scanThird = colourRead(candles) || third < 2 || third > 200 || third === slowInUse || third === fastInUse ? 0 : third;
   const [stack3, setStack3] = useState<Stack3Filter>("ANY");
   const [minWiden, setMinWiden] = useState(0);
   // Against the market and the day's levels (the vs Nifty and CPR columns).
@@ -592,7 +595,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
           {!saved && !colourRead(candles) ? (
             <div>
               <SelectFilter
-                label="Third SMA (longer)"
+                label="Third SMA"
                 value={thirdTyped ? "custom" : String(third)}
                 onChange={(v) => {
                   if (v === "custom") {
@@ -605,10 +608,12 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                 }}
                 options={[
                   { value: "0", label: "Off (two SMAs)" },
-                  ...[50, 100, 200].filter((n) => n > slowInUse).map((n) => ({ value: String(n), label: `SMA ${n}` })),
+                  ...[21, 50, 100, 200]
+                    .filter((n) => n !== slowInUse && n !== fastInUse)
+                    .map((n) => ({ value: String(n), label: `SMA ${n}` })),
                   { value: "custom", label: "Custom number…" },
                 ]}
-                title="Add a third, longer moving average to the scan (for example 9 / 21 / 50). Each stock then shows whether the three lines are stacked one way (fast above slow above third, or the mirror) and for how many candles both gaps have been widening. The other columns do not change."
+                title="Add a third moving average to the scan (for example 9 / 21 / 50). It can be longer than the slow one or sit between the two: the three are put in order, shortest to longest. Each stock then shows whether the three lines are stacked one way (shortest above middle above longest, or the mirror) and for how many candles both gaps have been widening. The other columns do not change."
                 className="w-40"
               />
               {thirdTyped ? (
@@ -616,7 +621,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                   type="number"
                   inputMode="numeric"
                   aria-label="Third SMA period"
-                  min={slowInUse + 1}
+                  min={2}
                   max={200}
                   step={1}
                   value={third || ""}
@@ -626,7 +631,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
               ) : null}
               {third > 0 && !scanThird ? (
                 <p role="alert" className="mt-1 text-xs text-amber-400">
-                  Must be longer than the slow SMA ({slowInUse}) and at most 200.
+                  Must be 2 to 200 and not SMA {fastInUse} or SMA {slowInUse} (the two already in use).
                 </p>
               ) : null}
             </div>
@@ -856,7 +861,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
         {thirdRead ? (
           <FilterGroup title="Three SMAs">
             <SelectFilter
-              label={`SMA ${data?.sma_fast} / ${data?.sma_slow} / ${thirdRead}`}
+              label={`SMA ${threeLines(data?.sma_fast, data?.sma_slow, thirdRead)}`}
               value={stack3}
               onChange={(v) => setStack3(v as Stack3Filter)}
               options={STACK3_OPTIONS}
@@ -1112,7 +1117,7 @@ export function ChopScan({ armed, arming, onArm, onArmMany, paused = false, onSt
                       sort={sort}
                       onSort={onSort}
                       text
-                      title={thirdRead ? `SMA ${data?.sma_fast} / ${data?.sma_slow} / ${thirdRead}: stacked up or down, the two gaps in %, and for how many candles in a row both gaps have widened` : "Pick a Third SMA and scan to fill this column"}
+                      title={thirdRead ? `SMA ${threeLines(data?.sma_fast, data?.sma_slow, thirdRead)}: stacked up or down, the two gaps in %, and for how many candles in a row both gaps have widened` : "Pick a Third SMA and scan to fill this column"}
                       drag={cols.dragProps("three")}
                     />
                   ),
@@ -1368,7 +1373,7 @@ function Row({
             ) : (
               <span
                 className="inline-flex flex-wrap items-center gap-1.5"
-                title={`Fast vs slow ${fmtGap(r.gap_fast_slow_pct)} · slow vs SMA ${r.sma_third} ${fmtGap(r.gap_slow_third_pct)}${r.stack3 ? ` · stacked for ${r.stack3_candles ?? 0} candle(s)` : " · lines not lined up one way"}`}
+                title={`Shortest vs middle ${fmtGap(r.gap_fast_slow_pct)} · middle vs longest ${fmtGap(r.gap_slow_third_pct)}${r.stack3 ? ` · stacked for ${r.stack3_candles ?? 0} candle(s)` : " · lines not lined up one way"}`}
               >
                 {r.stack3 ? (
                   <span className={clsx("rounded px-1.5 py-0.5 font-semibold", r.stack3 === "BULLISH" ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss")}>
@@ -1700,4 +1705,9 @@ function AutoLine({ auto, paused }: { auto: ChopAuto; paused: boolean }) {
       {auto.error ? <span className="text-loss"> · last try: {auto.error}</span> : null}
     </p>
   );
+}
+
+/** The scan's three SMA lengths in the order they are read, shortest first ("9 / 21 / 50"). */
+function threeLines(fast: number | null | undefined, slow: number | null | undefined, third: number): string {
+  return [...new Set([Number(fast) || 0, Number(slow) || 0, third].filter((n) => n > 0))].sort((a, b) => a - b).join(" / ");
 }

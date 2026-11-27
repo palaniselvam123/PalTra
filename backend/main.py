@@ -3153,8 +3153,10 @@ async def replay_auto_arm(body: AutoArmStart):
         force_strong=alerts.arm_strong_force if body.force_strong is None else body.force_strong,
         force_pressure=alerts.arm_pressure_force if body.force_pressure is None else body.force_pressure,
     )
-    if (rule.stack or rule.widen) and rule.third <= rule.sma_slow:
-        raise HTTPException(400, f"The third SMA must be longer than the slow SMA ({rule.sma_slow}).")
+    if (rule.stack or rule.widen) and rule.third in (rule.sma_fast, rule.sma_slow):
+        raise HTTPException(
+            400, f"The third SMA must be a different length from SMA {rule.sma_fast} and SMA {rule.sma_slow}."
+        )
     names = list(body.universe)
     notes: list[str] = []
     if body.source in ("ACTIVE", "BOTH"):
@@ -4416,10 +4418,10 @@ def _start_chop(
     if not sma_third and candles != getattr(chop_scan, "COLOUR", "COLOUR"):
         # The Trend quality auto-arm asks for the three-SMA stack: read it on every pass, so its condition can pass.
         alerts = scalp_alerts.load()
-        if alerts.arm_strong_on and scalp_alerts.stack_needed(alerts) and alerts.arm_strong_third > slow:
+        if alerts.arm_strong_on and scalp_alerts.stack_needed(alerts) and alerts.arm_strong_third not in (fast, slow):
             sma_third = alerts.arm_strong_third
     try:
-        third = chop_scan.pick_third(sma_third, slow)
+        third = chop_scan.pick_third(sma_third, slow, fast)
     except ValueError:
         if source == "manual":
             raise
@@ -4687,9 +4689,10 @@ async def scalp_alerts_put(body: ScalpAlertUpdate):
         )
     third = raw.get("arm_strong_third")
     if third is not None:
-        slow = int(engine.load_config().sma_slow) if engine is not None else 21
-        if third <= slow:
-            raise HTTPException(400, f"The third SMA must be longer than the slow SMA ({slow}).")
+        cfg = engine.load_config() if engine is not None else None
+        fast, slow = (int(cfg.sma_fast), int(cfg.sma_slow)) if cfg is not None else (9, 21)
+        if third in (fast, slow):
+            raise HTTPException(400, f"The third SMA must be a different length from SMA {fast} and SMA {slow}.")
     await asyncio.to_thread(scalp_alerts.save, raw)
     return await asyncio.to_thread(scalp_alerts.view)
 
