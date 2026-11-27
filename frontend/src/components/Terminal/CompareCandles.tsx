@@ -14,6 +14,9 @@ import { heikinAshi, shown, useChartStyle } from "@/lib/chartStyle";
 import { runName } from "@/lib/liveBook";
 import { smaApi, type Candle, type CmpTrade } from "@/lib/smaApi";
 
+/** The medium SMA's colour, as on the strategy chart (StrategyChart MID_LINE_COLOR). */
+const MID_LINE_COLOR = "#F59E0B";
+
 export const CANDLE_SIZES = [1, 3, 5, 15] as const;
 
 const LOOK = {
@@ -87,6 +90,8 @@ export function CompareCandles({
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const smaFastRef = useRef<ISeriesApi<"Line"> | null>(null);
   const smaSlowRef = useRef<ISeriesApi<"Line"> | null>(null);
+  // The third (medium) SMA of a three-line bot (the history's smaMid), amber like the strategy chart.
+  const smaMidRef = useRef<ISeriesApi<"Line"> | null>(null);
   const vwapRef = useRef<ISeriesApi<"Line"> | null>(null);
   // The candles the view was last fitted to: a new stock, day or size fits again; a style change keeps the zoom.
   const fittedRef = useRef<Candle[] | null>(null);
@@ -158,6 +163,7 @@ export function CompareCandles({
     candleRef.current = chart.addCandlestickSeries({});
     smaFastRef.current = chart.addLineSeries({ priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     smaSlowRef.current = chart.addLineSeries({ priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    smaMidRef.current = chart.addLineSeries({ priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     vwapRef.current = chart.addLineSeries({ priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     chart.subscribeCrosshairMove((p) => setHover(p.time == null ? null : Number(p.time)));
     chartRef.current = chart;
@@ -193,6 +199,8 @@ export function CompareCandles({
     };
     line(smaFastRef.current, shown(style.sma9, true), style.sma9, (c) => c.sma9);
     line(smaSlowRef.current, shown(style.sma21, true), style.sma21, (c) => c.sma21);
+    // Drawn with the slow line's switch, thickness and pattern, in amber (StrategyChart's MID_LINE_COLOR).
+    line(smaMidRef.current, shown(style.sma21, true) && candles.some((c) => c.smaMid != null), { ...style.sma21, color: MID_LINE_COLOR }, (c) => c.smaMid);
     line(vwapRef.current, shown(style.vwap, false), style.vwap, (c) => c.vwap);
     const times = new Set(candles.map((c) => c.time));
     const marks: SeriesMarker<Time>[] = markers
@@ -264,6 +272,9 @@ export function CompareCandles({
             {bar ? (
               <span className="font-mono text-slate-300">
                 {clockOf(bar.time)} O {bar.open.toFixed(2)} H {bar.high.toFixed(2)} L {bar.low.toFixed(2)} C {bar.close.toFixed(2)}
+                {bar.sma9 != null ? ` · SMA fast ${bar.sma9.toFixed(2)}` : ""}
+                {bar.smaMid != null ? ` · middle ${bar.smaMid.toFixed(2)}` : ""}
+                {bar.sma21 != null ? ` · slow ${bar.sma21.toFixed(2)}` : ""}
               </span>
             ) : null}
             {hovered.map((m) => (
@@ -286,7 +297,8 @@ export function CompareCandles({
         ) : (
           <span>
             ▲ buy / ▼ sell entry, labelled with the run · ● exit with its P&amp;L · one colour per run · hover a candle for the details ·
-            the SMA / VWAP lines and Heikin Ashi follow your chart&apos;s Indicators settings
+            the SMA / VWAP lines and Heikin Ashi follow your chart&apos;s Indicators settings (a three-line bot&apos;s middle SMA is
+            amber)
             {offChart ? ` · ${offChart} mark(s) fall outside the candles loaded` : ""}
           </span>
         )}
