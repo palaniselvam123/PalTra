@@ -37,6 +37,20 @@ type Basis = "gross" | "net";
 const colorOf = (i: number) => `var(--s${(i % 8) + 1})`;
 const OPEN_MIN = 9 * 60 + 15;
 const CLOSE_MIN = 15 * 60 + 30;
+/** The scatter plots' entry time range: every quarter hour of the session, and quick picks. */
+const RANGE_TIMES = Array.from({ length: (CLOSE_MIN - OPEN_MIN) / 15 + 1 }, (_, i) => OPEN_MIN + i * 15);
+/** Profit bubbles' radius range in px (loss triangles stay small). */
+const MIN_BUBBLE = 3;
+const MAX_BUBBLE = 14;
+/** Owner's choice: the morning in short slices, where most entries are. */
+const QUICK_RANGES: [string, number, number][] = [
+  ["All day", OPEN_MIN, CLOSE_MIN],
+  ["09:15-09:30", OPEN_MIN, 9 * 60 + 30],
+  ["09:30-09:45", 9 * 60 + 30, 9 * 60 + 45],
+  ["09:45-10:00", 9 * 60 + 45, 10 * 60],
+  ["10:00-11:00", 10 * 60, 11 * 60],
+  ["11:00-12:00", 11 * 60, 12 * 60],
+];
 
 const mins = (hhmm: string) => Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
 const clock = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(Math.round(m % 60)).padStart(2, "0")}`;
@@ -1040,6 +1054,7 @@ function Scatter({
   // At most 2,500 dots are drawn (evenly thinned); the reading under the chart uses them all.
   const step = Math.ceil(shown.length / 2500);
   const drawn = step <= 1 ? shown : shown.filter((_, i) => i % step === 0);
+  const bestWin = Math.max(1, ...shown.map((d) => d.y));
   const sx = shown.map((d) => d.x).sort((a, b) => a - b);
   const mid = sx[Math.floor(sx.length / 2)] ?? 0;
   const low = shown.filter((d) => d.x <= mid);
@@ -1141,19 +1156,32 @@ function Scatter({
           <text x={(pad.l + w - pad.r) / 2} y={h - 3} textAnchor="middle" fontSize="10.5" fill={C.axis}>
             {xLabel}
           </text>
-          {drawn.map((d) => (
-            <circle
-              key={d.t.id}
-              cx={X(d.x)}
-              cy={Y(d.y)}
-              r={hover?.t.id === d.t.id ? 6 : full ? 4.5 : 3.5}
-              fill={d.color}
-              fillOpacity={0.6}
-              stroke={d.color}
-              strokeWidth={1}
-              onMouseEnter={() => !drag && setHover(d)}
-            />
-          ))}
+          {drawn.map((d) => {
+            const on = hover?.t.id === d.t.id;
+            const enter = () => !drag && setHover(d);
+            if (d.y > 0) {
+              // A profit is a bubble: its area grows with the profit (the biggest profit on view gets MAX_BUBBLE).
+              const r = (MIN_BUBBLE + (MAX_BUBBLE - MIN_BUBBLE) * Math.sqrt(d.y / bestWin)) * (full ? 1.25 : 1) + (on ? 2 : 0);
+              return (
+                <circle key={d.t.id} cx={X(d.x)} cy={Y(d.y)} r={r} fill={d.color} fillOpacity={0.35} stroke={d.color} strokeWidth={on ? 2 : 1} onMouseEnter={enter} />
+              );
+            }
+            // A loss (or nothing) is a small triangle pointing down.
+            const k = (full ? 4.5 : 3.5) + (on ? 2 : 0);
+            const cx = X(d.x);
+            const cy = Y(d.y);
+            return (
+              <polygon
+                key={d.t.id}
+                points={`${cx - k},${cy - k * 0.8} ${cx + k},${cy - k * 0.8} ${cx},${cy + k}`}
+                fill={d.color}
+                fillOpacity={0.75}
+                stroke={d.color}
+                strokeWidth={on ? 2 : 1}
+                onMouseEnter={enter}
+              />
+            );
+          })}
           {drag ? (
             <rect
               x={Math.min(drag.sx, drag.ex)}
@@ -1199,7 +1227,21 @@ function Scatter({
 function Scatters({ detail, runs }: { detail: Detail; runs: Run[] }) {
   const place = useMemo(() => new Map(runs.map((r, i) => [r.id, i])), [runs]);
   const [only, setOnly] = useState<number | null>(null);
-  const trades = useMemo(() => (only == null ? detail.trades : detail.trades.filter((t) => t.run_id === only)), [detail.trades, only]);
+  // Entry time range (owner's request): only trades entered from `from` up to `to` (both minutes of the day).
+  const [from, setFrom] = useState(OPEN_MIN);
+  const [to, setTo] = useState(CLOSE_MIN);
+  const trades = useMemo(
+    () =>
+      detail.trades.filter((t) => {
+        if (only != null && t.run_id !== only) return false;
+        const m = mins(t.entry_at);
+        return m >= from && (to >= CLOSE_MIN ? m <= to : m < to);
+      }),
+    [detail.trades, only, from, to],
+  );
+  const ranged = from > OPEN_MIN || to < CLOSE_MIN;
+  const won = trades.filter((t) => t.pnl > 0).length;
+  const total = trades.reduce((a, t) => a + t.pnl, 0);
   const dot = (t: CmpTrade, x: number): Dot => ({ x, y: t.pnl, color: colorOf(place.get(t.run_id) ?? 0), t });
   const byHold = useMemo(() => trades.map((t) => dot(t, t.hold_min)), [trades]); // eslint-disable-line react-hooks/exhaustive-deps
   const byTime = useMemo(() => trades.map((t) => dot(t, mins(t.entry_at))), [trades]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1214,7 +1256,7 @@ function Scatters({ detail, runs }: { detail: Detail; runs: Run[] }) {
     <Card
       accent="rose"
       title="Every trade as a dot"
-      hint="One dot per trade, in its run's colour; above the zero line it made money. Hover a dot for the trade. The line under each chart splits the trades in two halves and says which half did better."
+      hint="One mark per trade, in its run's colour: a bubble for a profit (the bigger the profit, the bigger the bubble) and a small triangle for a loss. Hover a dot for the trade. The line under each chart splits the trades in two halves and says which half did better. Entry time keeps only the trades entered in that range, in all four charts."
       right={
         <div role="group" aria-label="Runs shown" className="cmp-noprint inline-flex flex-wrap overflow-hidden rounded-md border border-white/10 text-xs">
           <button type="button" aria-pressed={only == null} onClick={() => setOnly(null)} className={clsx("min-h-8 px-2.5", only == null ? "bg-white/10 font-semibold text-slate-100" : "text-slate-400 hover:bg-white/5")}>
@@ -1228,6 +1270,39 @@ function Scatters({ detail, runs }: { detail: Detail; runs: Run[] }) {
         </div>
       }
     >
+      <div className="cmp-noprint mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-300">
+        <span className="inline-flex items-center gap-1.5 font-semibold text-slate-200">
+          Entry time <NewTag id="term-compare-entry-range" />
+        </span>
+        <label className="inline-flex items-center gap-1">
+          from
+          <select value={from} onChange={(e) => setFrom(Math.min(Number(e.target.value), to - 15))} className="min-h-8 rounded-md border border-white/10 bg-surface px-1.5 text-xs text-slate-200">
+            {RANGE_TIMES.filter((m) => m < CLOSE_MIN).map((m) => (
+              <option key={m} value={m}>{clock(m)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="inline-flex items-center gap-1">
+          to
+          <select value={to} onChange={(e) => setTo(Math.max(Number(e.target.value), from + 15))} className="min-h-8 rounded-md border border-white/10 bg-surface px-1.5 text-xs text-slate-200">
+            {RANGE_TIMES.filter((m) => m > OPEN_MIN).map((m) => (
+              <option key={m} value={m}>{m >= CLOSE_MIN ? "15:30 (close)" : clock(m)}</option>
+            ))}
+          </select>
+        </label>
+        <div role="group" aria-label="Quick entry time ranges" className="inline-flex flex-wrap overflow-hidden rounded-md border border-white/10">
+          {QUICK_RANGES.map(([label, a, b]) => (
+            <button key={label} type="button" aria-pressed={from === a && to === b} onClick={() => { setFrom(a); setTo(b); }} className={clsx("min-h-8 px-2", from === a && to === b ? "bg-white/10 font-semibold text-slate-100" : "text-slate-400 hover:bg-white/5")}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <span className="text-slate-400">
+          {trades.length} trade{trades.length === 1 ? "" : "s"}
+          {ranged ? ` entered ${clock(from)}-${to >= CLOSE_MIN ? "close" : clock(to)}` : ""} · won {won} · <span className={clsx("font-mono", pnlTone(total))}>{money(total)}</span>
+        </span>
+      </div>
+      {ranged ? <p className="mb-2 hidden text-xs text-slate-400 print:block">Trades entered {clock(from)}-{clock(to)} only.</p> : null}
       <div className="grid gap-3 lg:grid-cols-2">
         <Scatter
           title="Time in the trade vs result"
@@ -1241,7 +1316,7 @@ function Scatters({ detail, runs }: { detail: Detail; runs: Run[] }) {
           xLabel="time of the entry"
           dots={byTime}
           xFmt={clock}
-          xDomain={[OPEN_MIN, CLOSE_MIN]}
+          xDomain={[from, to]}
           split={[`Entered by ${clock(midOf(byTime))}`, "Entered later"]}
         />
         <Scatter
