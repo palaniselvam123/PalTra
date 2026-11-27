@@ -455,6 +455,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     macd_grow_candles: Math.min(5, Math.max(1, Math.round(Number(form.macd_grow_candles ?? 2)) || 2)),
     macd_shrink_exit: Boolean(form.macd_shrink_exit),
     macd_shrink_candles: Math.min(5, Math.max(1, Math.round(Number(form.macd_shrink_candles ?? 2)) || 2)),
+    pc_entry: Boolean(form.pc_entry),
+    pc_exit: Boolean(form.pc_exit),
+    pc_minutes: PATTERN_CHECK_SIZES.includes(Number(form.pc_minutes ?? 0)) ? Number(form.pc_minutes ?? 0) : 0,
+    pc_set: String(form.pc_set ?? "STRONG").toUpperCase() === "ALL" ? "ALL" : "STRONG",
+    pc_within: Math.min(5, Math.max(1, Math.round(Number(form.pc_within ?? 1)) || 1)),
     use_cvd: Boolean(form.use_cvd),
     cvd_lookback: Math.min(50, Math.max(1, Math.round(Number(form.cvd_lookback ?? 5)) || 5)),
     cvd_div_exit: Boolean(form.cvd_div_exit),
@@ -2184,6 +2189,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             Buy only while the cumulative delta is rising, sell only while it is falling
           </label>
           </Only>
+          <Only s="ind colour">
+          <PatternCheckCard form={form} set={set} isOwn={isOwn} />
+          </Only>
           <Only s="colour">
           <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
             <input
@@ -2708,6 +2716,19 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               <Field label="Look-back (candles)" value={String(form.cvd_div_lookback ?? 10)} onChange={(v) => set("cvd_div_lookback", v)} own={isOwn("cvd_div_lookback")} />
             </div>
           )}
+          </Only>
+          <Only s="ind colour">
+          <label id="sma-pattern-exit" className="mt-2 flex scroll-mt-24 items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={Boolean(form.pc_exit)}
+              onChange={(e) => set("pc_exit", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("pc_exit") && <OwnTag />}
+            Close on a candle pattern against the trade ({patternSizeWords(form)}, {patternSetWords(form)} patterns; set in step 2)
+            <NewTag id="pattern-check" />
+          </label>
           </Only>
           <ExitJoinCard form={form} set={set} isOwn={isOwn} />
           <Only s="turn">
@@ -4102,6 +4123,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   check("use_candle_dir", f.use_candle_dir, `Last ${n(f.candle_dir_count, 2)} candles must move the trade's way`);
   check("use_ema", f.use_ema, `EMA ${n(f.ema_fast, 9)} must be on the trade's side of EMA ${n(f.ema_slow, 200)}`);
   check("use_macd", f.use_macd, `MACD ${n(f.macd_fast, 12)}/${n(f.macd_slow, 26)}/${n(f.macd_signal, 9)} must be on the trade's side of its signal line`);
+  check("pc_entry", f.pc_entry, `A ${patternSetWords(f)} candle pattern of the trade's side on the last ${n(f.pc_within, 1) > 1 ? `${n(f.pc_within, 1)} ` : ""}closed ${patternSizeWords(f)}`);
   check("use_macd_grow", f.use_macd_grow, `MACD histogram must have grown the trade's way ${n(f.macd_grow_candles, 2)} candle(s) in a row`);
   check("use_cvd", f.use_cvd, `Cumulative delta must have moved the trade's way over the last ${n(f.cvd_lookback, 5)} candles`);
   check("use_supertrend", f.use_supertrend, "Supertrend must point the trade's way");
@@ -4169,6 +4191,7 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (n(f.counter_exit_count, 0) > 0 && f.counter_reenter) add({ group: "enter", key: "counter_reenter", text: `Re-enter after a counter-candle exit when a candle breaks the exit candle (up to ${n(f.counter_reenter_max, 3)} per SMA run)`, off: { counter_reenter: false } });
   if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
   if (f.macd_exit) add({ group: "exit", key: "macd_exit", text: `Close when MACD ${n(f.macd_fast, 12)}/${n(f.macd_slow, 26)}/${n(f.macd_signal, 9)} crosses its signal line against the trade`, off: { macd_exit: false } });
+  if (f.pc_exit) add({ group: "exit", key: "pc_exit", text: `Close on a ${patternSetWords(f)} candle pattern against the trade (${patternSizeWords(f)})`, off: { pc_exit: false } });
   if (f.macd_shrink_exit) add({ group: "exit", key: "macd_shrink_exit", text: `Close when the MACD histogram moves against the trade ${n(f.macd_shrink_candles, 2)} candle(s) in a row`, off: { macd_shrink_exit: false } });
   if (f.cvd_div_exit) add({ group: "exit", key: "cvd_div_exit", text: `Close when price makes a new high / low over ${n(f.cvd_div_lookback, 10)} candles without the cumulative delta`, off: { cvd_div_exit: false } });
   if (f.reverse_on_exit)
@@ -6796,4 +6819,96 @@ function TrendTrade({
 function gapNum(v: unknown, fallback: number): number {
   const n = Number(v ?? fallback);
   return Number.isFinite(n) ? Math.min(10, Math.max(-10, n)) : fallback;
+}
+
+
+/** Pattern candle sizes for the candle-pattern check and exit (pattern_check.SIZES; 0 = the bot's exit candle). */
+const PATTERN_CHECK_SIZES = [0, 1, 3, 5, 10, 15, 30, 60];
+
+function patternSizeWords(f: SmaConfig): string {
+  const m = Number(f.pc_minutes ?? 0);
+  if (!m) return "the bot's own candles";
+  return m === 60 ? "1-hour candles" : `${m}-minute candles`;
+}
+
+function patternSetWords(f: SmaConfig): string {
+  return String(f.pc_set ?? "STRONG").toUpperCase() === "ALL" ? "any" : "strong";
+}
+
+/** Candle patterns as an extra entry check (and the numbers the pattern exit in step 3 shares), pattern_check.py. */
+function PatternCheckCard({
+  form,
+  set,
+  isOwn,
+}: {
+  form: SmaConfig;
+  set: (key: keyof SmaConfig, value: string | boolean | number) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const box = "min-h-9 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100";
+  return (
+    <div id="sma-pattern-check" className="mt-4 scroll-mt-24 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset ring-white/10">
+      <div className="flex items-center gap-1">
+        Candle patterns (check here; the exit is in step 3) <NewTag id="pattern-check" />
+        <InfoTip label="About the candle-pattern check">
+          The patterns of the &quot;Candle pattern&quot; entry, used as support for whatever opens the trade. With the check on,
+          a buy goes only when one of the last closed pattern candles is a bullish pattern (bullish engulfing, piercing line,
+          morning star, three white soldiers, bullish marubozu; with &quot;any&quot; also hammer, inverted hammer, bullish
+          harami, tweezer bottom, dragonfly doji), a sell only on a bearish one. Otherwise the signal is skipped like the other
+          checks, and late entry can take it when a pattern shows a candle later. The exit in step 3 closes a trade on a
+          pattern against it, on a candle closed after the entry. Your stop, targets and other exits keep working.
+        </InfoTip>
+      </div>
+      <label className="mt-2 flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={Boolean(form.pc_entry)}
+          onChange={(e) => set("pc_entry", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        {isOwn("pc_entry") && <OwnTag />}
+        Enter only after a candle pattern of the trade&apos;s side
+      </label>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1">
+          Pattern candles
+          <select
+            value={String(PATTERN_CHECK_SIZES.includes(Number(form.pc_minutes ?? 0)) ? Number(form.pc_minutes ?? 0) : 0)}
+            onChange={(e) => set("pc_minutes", Number(e.target.value))}
+            className={box}
+          >
+            {PATTERN_CHECK_SIZES.map((m) => (
+              <option key={m} value={m}>
+                {m === 0 ? "The bot's own candle" : m === 60 ? "1 hour" : `${m} min`}
+              </option>
+            ))}
+          </select>
+          {isOwn("pc_minutes") && <OwnTag />}
+        </label>
+        <label className="flex items-center gap-1">
+          Patterns
+          <select
+            value={String(form.pc_set ?? "STRONG").toUpperCase() === "ALL" ? "ALL" : "STRONG"}
+            onChange={(e) => set("pc_set", e.target.value)}
+            className={box}
+          >
+            <option value="STRONG">Strong only</option>
+            <option value="ALL">Strong and weaker ones</option>
+          </select>
+          {isOwn("pc_set") && <OwnTag />}
+        </label>
+        <label className="flex items-center gap-1">
+          Pattern on the last
+          <select value={String(form.pc_within ?? 1)} onChange={(e) => set("pc_within", Number(e.target.value))} className={box}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <option key={n} value={n}>
+                {n === 1 ? "closed candle" : `${n} closed candles`}
+              </option>
+            ))}
+          </select>
+          {isOwn("pc_within") && <OwnTag />}
+        </label>
+      </div>
+    </div>
+  );
 }

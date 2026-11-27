@@ -96,6 +96,7 @@ import counter_candles
 import ema_filter
 import heikin_ashi
 import macd
+import pattern_check
 import cum_delta
 import reverse_exit
 import supertrend
@@ -766,6 +767,12 @@ class ConfigUpdate(BaseModel):
     macd_grow_candles: int | None = Field(default=None, ge=1, le=macd.MAX_RUN)
     macd_shrink_exit: bool | None = None
     macd_shrink_candles: int | None = Field(default=None, ge=1, le=macd.MAX_RUN)
+    # Candle patterns as an entry check and an exit (pattern_check.py).
+    pc_entry: bool | None = None
+    pc_exit: bool | None = None
+    pc_minutes: Literal[0, 1, 3, 5, 10, 15, 30, 60] | None = None
+    pc_set: Literal["STRONG", "ALL"] | None = None
+    pc_within: int | None = Field(default=None, ge=1, le=pattern_check.WITHIN_MAX)
     use_cvd: bool | None = None
     cvd_lookback: int | None = Field(default=None, ge=1, le=cum_delta.MAX_LOOKBACK)
     cvd_div_exit: bool | None = None
@@ -2016,6 +2023,11 @@ def _gap_dict(row) -> dict:
         "macd_grow_candles": macd.grow_candles(row),
         "macd_shrink_exit": macd.shrink_on(row),
         "macd_shrink_candles": macd.shrink_candles(row),
+        "pc_entry": pattern_check.entry_on(row),
+        "pc_exit": pattern_check.exit_on(row),
+        "pc_minutes": int(getattr(row, "pc_minutes", 0) or 0),
+        "pc_set": pattern_check.pattern_set(row),
+        "pc_within": pattern_check.within(row),
         "use_cvd": cum_delta.entry_on(row),
         "cvd_lookback": cum_delta.lookback(row),
         "cvd_div_exit": cum_delta.exit_on(row),

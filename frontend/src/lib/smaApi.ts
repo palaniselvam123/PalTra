@@ -238,6 +238,12 @@ export type SmaConfig = {
   macd_grow_candles?: number;
   macd_shrink_exit?: boolean;
   macd_shrink_candles?: number;
+  /** Candle patterns as an entry check and an exit (pattern_check.py); pc_minutes 0 = the bot's exit candle. */
+  pc_entry?: boolean;
+  pc_exit?: boolean;
+  pc_minutes?: number;
+  pc_set?: "STRONG" | "ALL";
+  pc_within?: number;
   /** Cumulative delta (cum_delta.py): entry only while it moves the trade's way; exit on a price / delta divergence. */
   use_cvd?: boolean;
   cvd_lookback?: number;
@@ -1918,6 +1924,12 @@ export type ChartFilters = {
   macd_grow_candles?: number;
   macd_shrink_exit?: boolean;
   macd_shrink_candles?: number;
+  /** Candle patterns as an entry check and an exit (pattern_check.py); pc_minutes 0 = the bot's exit candle. */
+  pc_entry?: boolean;
+  pc_exit?: boolean;
+  pc_minutes?: number;
+  pc_set?: "STRONG" | "ALL";
+  pc_within?: number;
   /** Draw the Supertrend line (its check or exit on) and its settings. */
   st_line?: boolean;
   st_period?: number;
