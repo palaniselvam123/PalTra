@@ -1431,6 +1431,23 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   (SMAs the other way = 0) (`exit_call`). **Which stocks** (`tq_all`, off): the source chip "Auto-arm: Trend quality" (the
   auto-arm backtest's Trend quality picks carry it via `replay.pick_sources`), or every armed stock. Counts as an exit for
   `strategyChecks.noExitOn`. Normal candles (not Heikin Ashi). **Skip a doji** (`tq_skip_doji`, off; `tq_doji_pct` 10, 1-90; per bot and per stock, PAPER and LIVE, replays too; owner's GLENMARK case: bought at 10:25 on a doji 1.6 rupees above SMA 9): `entry_call` waits while the newest closed candle the score read (`stock_regime.read`'s `last_bar`, real candles) has a body under that % of its high-low range (`doji_note`); asked again next candle. Entries only. The stock research baseline keeps it off.
+- `backend/stack_entry.py` – **Enter on three SMAs with widening gaps** (owner's request: the Trend quality card's
+  "3 SMAs" read as a bot strategy; `stack_entry` off by default, `stack_widen` 1-10 (2), `stack_third` 50 (longer than
+  the slow SMA, at most 200), `stack_min_gap` 0.05 % (0-5, 0 = any), `stack_only` off; per bot and per stock, PAPER and
+  LIVE, replays too; Settings → 1. When to enter, `StrategyConfigPanel.StackEntry`, anchor `#sma-stack-entry`). The
+  three lines are SMA fast / slow / `stack_third`, or the bot's own fast / medium / slow when `sma_medium` is set
+  (`periods`). `StrategyEngine._stack_entry_pass` (armed loop, after `_flow_trigger_pass`, before the always-in pass),
+  once per closed candle of the bot's candles (`_stack_tried`), for a flat stock: `stack_entry.call` (on
+  `chop_scan.three_read` of the closed candles) gives LONG when fast > slow > third, SHORT for the mirror, once both
+  gaps have widened `stack_widen` candles in a row and each is at least `stack_min_gap` %; the order goes through
+  `apply_signal(..., why="STACK_WIDEN")`, so every entry check, the stop, flip, cut-off, caps, wait after an exit and
+  one LIVE bot per stock apply. Each widening run enters once (`_stack_done`: side and the closed candle at the entry; a
+  run that began at or before it is the same run), a refused run is asked again on its next candle, and one that has
+  widened `RUN_CAP` (30) candles or more is too old to join. `stack_only`: `stack_entry.blocks` in `_apply_locked` (next
+  to `_trend_only_hit`) refuses the bot's own signals on the stock (a cross still closes, it does not reverse; Force,
+  news, hand-offs pass). Not in gap mode or the per-candle / executed-volume-only modes. The tape keeps enough candles
+  for the third line (`stack_entry.longest` in `tick`'s history need and `replay.warmup_days`). Exits are the bot's own.
+  The Strategy lab does not know it; the stock research baseline keeps it off.
 - `backend/trend_log.py` – **Trend readings of a backtest** (display only; owner's request: the auto-arm backtest works the
   Trend quality reading out by itself and kept none of it, so 10:45's score 86 could not be set against the trade at 12:00):
   `StrategyEngine._record_trend` (after `_trend_entry_pass` in the armed loop and `_watch_trend_exit` in the held loop),

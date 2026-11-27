@@ -98,6 +98,7 @@ import heikin_ashi
 import macd
 import index_check
 import pattern_check
+import stack_entry as stack_entry_mod
 import cum_delta
 import reverse_exit
 import supertrend
@@ -1007,6 +1008,12 @@ class ConfigUpdate(BaseModel):
     tq_all: bool | None = None
     tq_skip_doji: bool | None = None
     tq_doji_pct: int | None = Field(default=None, ge=1, le=90)
+    # Three SMAs stacked with widening gaps as an entry (stack_entry.py).
+    stack_entry: bool | None = None
+    stack_widen: int | None = Field(default=None, ge=1, le=stack_entry_mod.WIDEN_MAX)
+    stack_third: int | None = Field(default=None, ge=3, le=stack_entry_mod.THIRD_MAX)
+    stack_min_gap: float | None = Field(default=None, ge=0, le=5)
+    stack_only: bool | None = None
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -2190,6 +2197,11 @@ def _gap_dict(row) -> dict:
         "tq_all": trend_trade.every_stock(row),
         "tq_skip_doji": trend_trade.skip_doji(row),
         "tq_doji_pct": trend_trade.doji_pct(row),
+        "stack_entry": stack_entry_mod.enabled(row),
+        "stack_widen": stack_entry_mod.widen_need(row),
+        "stack_third": int(getattr(row, "stack_third", None) or stack_entry_mod.THIRD_DEFAULT),
+        "stack_min_gap": stack_entry_mod.min_gap(row),
+        "stack_only": bool(getattr(row, "stack_only", False)),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),

@@ -25,6 +25,7 @@ const ENTRY_SHORT: Record<string, string> = {
   MANUAL_REVERSE: "Reversed by hand",
   AUTO_REVIEW_REVERSE: "Reversed on review",
   TREND_QUALITY: "Trend quality",
+  STACK_WIDEN: "3 SMAs widening",
 };
 
 const ENTRY_LONG: Record<string, string> = {
@@ -53,6 +54,7 @@ const ENTRY_LONG: Record<string, string> = {
   MANUAL_REVERSE: "Reverse button: the open trade was closed and this side opened at once",
   AUTO_REVIEW_REVERSE: "1-minute review, default answer Exit and reverse: the uncertain trade was closed and this side opened at once",
   TREND_QUALITY: "Trend quality entry: the trend score (and the phase) on the bot's candles agreed with this side, no SMA cross needed",
+  STACK_WIDEN: "Three-SMA entry: the three moving averages were stacked this way and both gaps had widened for the set number of candles",
 };
 
 /** How a waiting limit was filled (the part after ":"). */

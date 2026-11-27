@@ -714,6 +714,13 @@ class BotConfig(Base):
     tq_all: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     tq_skip_doji: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     tq_doji_pct: Mapped[int | None] = mapped_column(Integer, nullable=True, default=10)
+    # Three SMAs stacked with widening gaps as an entry (stack_entry.py): candles in a row both gaps must have
+    # widened, the third (longest) SMA, the smallest gap in %, and "only this opens trades".
+    stack_entry: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    stack_widen: Mapped[int | None] = mapped_column(Integer, nullable=True, default=2)
+    stack_third: Mapped[int | None] = mapped_column(Integer, nullable=True, default=50)
+    stack_min_gap: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.05)
+    stack_only: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

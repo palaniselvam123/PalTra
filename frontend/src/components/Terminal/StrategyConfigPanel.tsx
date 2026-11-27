@@ -611,6 +611,11 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     tq_entry_phase: form.tq_entry_phase !== false,
     tq_skip_doji: Boolean(form.tq_skip_doji),
     tq_doji_pct: Math.min(90, Math.max(1, Math.round(Number(form.tq_doji_pct ?? 10)) || 10)),
+    stack_entry: Boolean(form.stack_entry),
+    stack_widen: Math.min(10, Math.max(1, Math.round(Number(form.stack_widen ?? 2)) || 2)),
+    stack_third: Math.min(200, Math.max(3, Math.round(Number(form.stack_third ?? 50)) || 50)),
+    stack_min_gap: Math.min(5, Math.max(0, Number(form.stack_min_gap ?? 0.05) || 0)),
+    stack_only: Boolean(form.stack_only),
     tq_only: form.tq_only !== false,
     tq_exit: Boolean(form.tq_exit),
     tq_exit_score: Math.min(100, Math.max(0, Math.round(Number(form.tq_exit_score ?? 40)))) || 0,
@@ -1371,6 +1376,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           <OrderFlowCheck form={form} set={set} isOwn={isOwn} />
           <BuyersSellersMap form={form} set={set} />
           <TrendTrade form={form} set={set} isOwn={isOwn} />
+          <StackEntry form={form} set={set} isOwn={isOwn} />
           <PressureEntry form={form} set={set} isOwn={isOwn} />
           <FlowTrigger form={form} set={set} isOwn={isOwn} />
           <Only s="sma trend turn colour">
@@ -4359,6 +4365,13 @@ export function activeRules(f: SmaConfig): Rule[] {
       text: `After ${Number(f.chop_losses)} losing trades on a stock today, it moves to Bot 2`,
       off: { chop_losses: "0" },
     });
+  if (f.stack_entry)
+    add({
+      group: "enter",
+      key: "stack_entry",
+      text: `Three SMAs (${stackLines(f)}): a flat stock is entered once they are stacked and both gaps have widened ${f.stack_widen ?? 2} candle(s) in a row${Number(f.stack_min_gap ?? 0.05) > 0 ? `, each gap at least ${f.stack_min_gap ?? 0.05}%` : ""}${f.stack_only ? " (only this opens trades)" : ""}`,
+      off: { stack_entry: false },
+    });
   if (f.tq_entry)
     add({
       group: "enter",
@@ -6758,6 +6771,90 @@ function FlattenExit({
         </span>
       </span>
     </label>
+  );
+}
+
+/** The three lines the stack entry reads: the bot's own fast / medium / slow, else fast / slow / the third SMA. */
+function stackLines(f: Partial<SmaConfig>): string {
+  const fast = Number(f.sma_fast ?? 9);
+  const slow = Number(f.sma_slow ?? 21);
+  const medium = Number(f.sma_medium ?? 0);
+  if (medium > fast && medium < slow) return `${fast} / ${medium} / ${slow}`;
+  return `${fast} / ${slow} / ${Number(f.stack_third ?? 50) || 50}`;
+}
+
+/** Three SMAs stacked with widening gaps as an entry (backend stack_entry.py). Owner's request: the Trend quality
+ *  card's "3 SMAs" read as a bot strategy. */
+function StackEntry({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const own = (["stack_entry", "stack_widen", "stack_third", "stack_min_gap", "stack_only"] as const).some((k) => isOwn(k));
+  const box = "min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9";
+  const on = Boolean(form.stack_entry);
+  const fast = Number(form.sma_fast ?? 9);
+  const slow = Number(form.sma_slow ?? 21);
+  const medium = Number(form.sma_medium ?? 0);
+  const ownThree = medium > fast && medium < slow;
+  const third = Number(form.stack_third ?? 50);
+  const badThird = on && !ownThree && !(third > slow && third <= 200);
+  return (
+    <div id="sma-stack-entry" className="mb-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-white/10">
+      <p className="text-sm text-slate-300">
+        {own && <OwnTag />}
+        <b className="text-slate-100">Enter on three SMAs with widening gaps</b> <NewTag id="set-stack-entry" />{" "}
+        <InfoTip label="About the three-SMA entry">
+          The &quot;3 SMAs&quot; column of the Trend quality card as a bot entry. A stock the bot is not holding is bought when
+          its three moving averages are in order (fast above slow above the third) and BOTH gaps between them have grown on
+          each of the last candles you set: the trend is still opening up. The mirror (fast below slow below the third) sells.
+          No SMA cross is needed. Each widening run is traded once; when the lines flatten and later open up again, that is a
+          new run. A run that has already widened for 30 candles or more is too old to join. Every ticked entry check, the
+          stop, flip, cut-off, caps, &quot;wait after an exit&quot; and one LIVE bot per stock still apply; a check that says no is
+          asked again on the next candle. Your exits and stop close the trade as usual. With &quot;only this opens trades&quot; the
+          bot&apos;s own signals (the SMA cross, a turn, join…) open nothing on the stock; a cross still closes a trade. Not used
+          in gap mode or the candle colour / pattern / second candle / executed volume modes. PAPER and LIVE, backtests too.
+          Entry reason &quot;3 SMAs widening&quot;.
+        </InfoTip>
+      </p>
+      <label className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300">
+        <input type="checkbox" checked={on} onChange={(e) => set("stack_entry", e.target.checked)} className="accent-[#10B981]" />
+        Enter when SMA {stackLines(form)} are stacked and both gaps have widened for
+        <input type="number" min={1} max={10} step={1} disabled={!on} value={Number(form.stack_widen ?? 2)}
+          onChange={(e) => set("stack_widen", e.target.value)} className={box} aria-label="Candles in a row both gaps must have widened" />
+        candle(s) in a row
+      </label>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 pl-6 text-sm text-slate-300">
+        {ownThree ? (
+          <span className="text-xs text-slate-400">Uses this bot&apos;s own three lines (Fast / Medium / Slow MA above).</span>
+        ) : (
+          <label className="flex items-center gap-2">
+            Third SMA (longer than {slow})
+            <input type="number" min={slow + 1} max={200} step={1} disabled={!on} value={Number.isFinite(third) ? third : 50}
+              onChange={(e) => set("stack_third", e.target.value)} className={box} aria-label="Third SMA period" />
+          </label>
+        )}
+        <label className="flex items-center gap-2">
+          Each gap at least
+          <input type="number" min={0} max={5} step={0.01} disabled={!on} value={Number(form.stack_min_gap ?? 0.05)}
+            onChange={(e) => set("stack_min_gap", e.target.value)} className={box} aria-label="Smallest gap in percent" />
+          % (0 = any)
+        </label>
+      </div>
+      {badThird ? (
+        <p role="alert" className="mt-1 pl-6 text-xs text-amber-400">
+          The third SMA must be longer than the slow SMA ({slow}) and at most 200, or nothing is entered.
+        </p>
+      ) : null}
+      <label className="mt-2 flex items-center gap-2 pl-6 text-sm text-slate-300">
+        <input type="checkbox" disabled={!on} checked={Boolean(form.stack_only)} onChange={(e) => set("stack_only", e.target.checked)} />
+        Only this opens trades (the SMA cross and the other signals open nothing; a cross still closes a trade)
+      </label>
+    </div>
   );
 }
 
