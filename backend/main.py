@@ -6102,6 +6102,10 @@ class StrategyLabChoice(BaseModel):
     symbols: list[str] = Field(default_factory=list, max_length=strategy_lab.MAX_STOCKS)
     #: Intraday margin % of a trade's value, for the capital it needs (20 = Groww MIS 5x).
     margin_pct: float = Field(default=strategy_lab.DEFAULT_MARGIN_PCT, ge=1, le=100)
+    #: What opens trades: CROSS (the SMA cross) or STACK (three SMAs stacked, both gaps widening, each gap at least
+    #: `stack_gap` %, one of strategy_lab.STACK_GAPS).
+    source: Literal["CROSS", "STACK"] = "CROSS"
+    stack_gap: float = Field(default=0.05, ge=0, le=5)
 
 
 def _lab_job_or_404(job_id: str) -> tuple[dict, list[dict]]:
@@ -6126,6 +6130,8 @@ def _lab_rules() -> dict:
         "exits": [{"name": k, "label": v} for k, v in strategy_lab.EXIT_RULES.items()],
         "stops": [{"name": k, "label": strategy_lab.STOP_LABELS[k]} for k in strategy_lab.STOPS],
         "targets": [{"name": k, "label": v} for k, v in strategy_lab.TARGETS.items()],
+        "sources": [{"name": k, "label": v} for k, v in strategy_lab.ENTRY_SOURCES.items()],
+        "stack_gaps": list(strategy_lab.STACK_GAPS),
     }
 
 

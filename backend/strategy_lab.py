@@ -72,6 +72,7 @@ import pivots
 import slope_exit
 import small_colour
 import smart_stop
+import stack_entry
 import stop_plan
 import supertrend
 import target_net
@@ -149,6 +150,14 @@ TARGETS: dict[str, str] = {
     "day_level": "Day high / low target",
     "net": "Profit safety net",
 }
+#: What opens the base trades (owner's request: the bot's "Enter on three SMAs with widening gaps" in the lab too).
+ENTRY_SOURCES: dict[str, str] = {
+    "CROSS": "SMA cross",
+    "STACK": "3 SMAs stacked, gaps widening",
+}
+#: The "each gap at least" levels (%) a STACK run is read at: each widening run gives one entry per level, at the first
+#: candle both gaps reached it, so the evaluate step can pick any of them without reading the days again.
+STACK_GAPS = (0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5)
 #: The exit candle the lab reads when the bot has none set: the next size up from the bot's candle.
 EXIT_CANDLE_DEFAULTS = (5, 15, 30, 60)
 #: The ATR target multiple the lab reads when the bot has none set.
@@ -320,7 +329,60 @@ def lab_settings(cfg) -> dict:
         "smart": smart_stop.settings(cfg),
         "plan_be_r": stop_plan.be_r(cfg),
         "plan_trail_r": stop_plan.trail_r(cfg),
+        # The three lines and widening run of the three-SMA entry (stack_entry.periods / widen_need); None = no third SMA.
+        "stack_lines": list(stack_entry.periods(cfg) or []) or None,
+        "stack_widen": stack_entry.widen_need(cfg),
+        "stack_third": _int(cfg, "stack_third", stack_entry.THIRD_DEFAULT),
     }
+
+
+def snap_gap(value) -> float:
+    """The nearest STACK_GAPS level to `value` (a typed or saved "each gap at least" %)."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 0.05
+    return min(STACK_GAPS, key=lambda g: abs(g - v))
+
+
+def _stack_signals(rich: pd.DataFrame, s: dict) -> list[tuple[int, str, list[float]]]:
+    """The three-SMA entries on the bot's candles, as `stack_entry.call` takes them: (closed candle, side, the gap levels
+    it is the entry for). Lines in order shortest to longest; both gaps widening `stack_widen` closed candles in a row
+    (chop_scan.three_read's count); each widening run entered once per gap level, at the first candle its smaller gap
+    reached that level; a run widening `stack_entry.RUN_CAP` candles or more is too old to join."""
+    lines = s.get("stack_lines")
+    if not lines or "close" not in rich:
+        return []
+    a, b, c = sorted(int(n) for n in lines)
+    close = pd.to_numeric(rich["close"], errors="coerce")
+    f, m, t = (close.rolling(n).mean().to_numpy(dtype=float) for n in (a, b, c))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        g1 = (f - m) / m * 100.0
+        g2 = (m - t) / t * 100.0
+    need = max(1, int(s.get("stack_widen") or 2))
+    out: list[tuple[int, str, list[float]]] = []
+    widen = 0
+    used: dict[tuple[str, int], set[float]] = {}
+    for i in range(1, len(close)):
+        x1, x2, p1, p2 = g1[i], g2[i], g1[i - 1], g2[i - 1]
+        if not (np.isfinite(x1) and np.isfinite(x2)) or not ((x1 > 0 and x2 > 0) or (x1 < 0 and x2 < 0)):
+            widen = 0
+            continue
+        sign = 1.0 if x1 > 0 else -1.0
+        grew = np.isfinite(p1) and np.isfinite(p2) and abs(x1) > abs(p1) and abs(x2) > abs(p2)
+        same = np.isfinite(p1) and np.isfinite(p2) and p1 * sign > 0 and p2 * sign > 0
+        widen = (widen + 1 if same else 1) if grew else 0
+        if widen < need or widen >= stack_entry.RUN_CAP:
+            continue
+        side = "LONG" if sign > 0 else "SHORT"
+        run = (side, i - widen + 1)
+        floor = min(abs(x1), abs(x2))
+        taken = used.setdefault(run, set())
+        steps = [g for g in STACK_GAPS if g not in taken and floor >= g]
+        if steps:
+            taken.update(steps)
+            out.append((i, side, steps))
+    return out
 
 
 def _decel_settings(cfg) -> dict:
@@ -398,7 +460,9 @@ def choice_from_cfg(cfg) -> dict:
         targets.append("pivot_r1")
     elif mode == "R2":
         targets.append("pivot_r2")
-    return {"entries": entries, "exits": exits, "stop": stop, "targets": targets}
+    source = "STACK" if stack_entry.enabled(cfg) and stack_entry.only(cfg) else "CROSS"
+    return {"entries": entries, "exits": exits, "stop": stop, "targets": targets, "source": source,
+            "stack_gap": snap_gap(stack_entry.min_gap(cfg))}
 
 
 def settings_for_choice(choice: dict, base: dict | None = None) -> dict:
@@ -450,6 +514,14 @@ def settings_for_choice(choice: dict, base: dict | None = None) -> dict:
     out["target_net"] = "net" in targets
     if base and base.get("candle_minutes"):
         out["candle_minutes"] = int(base["candle_minutes"])
+    # What opens trades: the three-SMA entry alone (STACK) or the SMA cross (the three-SMA entry off).
+    stack = str(choice.get("source") or "CROSS").upper() == "STACK"
+    out["stack_entry"] = stack
+    out["stack_only"] = stack
+    if stack:
+        out["stack_min_gap"] = snap_gap(choice.get("stack_gap"))
+        if base and base.get("stack_widen"):
+            out["stack_widen"] = int(base["stack_widen"])
     return out
 
 
@@ -492,8 +564,10 @@ def numbers_for_bot(settings: dict | None, choice: dict) -> dict:
     for k in ("pct", "days", "min_pct", "max_pct", "follow"):
         if k in smart:
             out[f"smart_{k}"] = smart[k]
-    # The lab only opens trades on SMA crosses.
+    # The lab opens trades on SMA crosses or the three-SMA stack (stack_entry, on top of the SMA entry mode).
     out["entry_mode"] = "SMA"
+    put("stack_widen", "stack_widen")
+    put("stack_third", "stack_third")
     return out
 
 
@@ -975,17 +1049,19 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
     or_cache: dict[tuple, bool] = {}
     day_hl = _day_highs_lows(t_ts, t_high, t_low, t_day)
     day_list = np.unique(t_day)
+    signals: list[tuple[int, str, str, list[float] | None]] = []
     for i in range(1, len(x.ts) - 1):
-        if x.day[i] not in wanted:
-            continue
         a, b = diff[i - 1], diff[i]
         if not (np.isfinite(a) and np.isfinite(b)):
             continue
         if a <= 0 < b:
-            side = "LONG"
+            signals.append((i, "LONG", "cross", None))
         elif a >= 0 > b:
-            side = "SHORT"
-        else:
+            signals.append((i, "SHORT", "cross", None))
+    signals += [(i, side, "stack", steps) for i, side, steps in _stack_signals(rich, s) if i < len(x.ts) - 1]
+    signals.sort(key=lambda sig: (sig[0], sig[2]))
+    for i, side, source, gap_steps in signals:
+        if x.day[i] not in wanted:
             continue
         e = i + 1
         if x.day[e] != x.day[i]:
@@ -1071,6 +1147,10 @@ def analyze_stock(symbol: str, tape: pd.DataFrame | None, cfg, days: list[dt.dat
                 "symbol": symbol,
                 "day": day_date.isoformat(),
                 "side": side,
+                # What opened it: "cross" (SMA cross) or "stack" (three SMAs stacked, gaps widening; gap_steps = the
+                # "each gap at least" levels this is the entry for).
+                "source": source,
+                **({"gap_steps": gap_steps} if gap_steps is not None else {}),
                 "cross_ts": int(x.ts[i]),
                 "entry_ts": entry_ts,
                 "entry_price": entry,
@@ -1380,6 +1460,8 @@ def clean_choice(raw: dict | None) -> dict:
         "qty": qty,
         "symbols": symbols,
         "margin_pct": round(min(100.0, max(1.0, margin)), 2),
+        "source": str(raw.get("source") or "CROSS").upper() if str(raw.get("source") or "CROSS").upper() in ENTRY_SOURCES else "CROSS",
+        "stack_gap": snap_gap(raw.get("stack_gap", 0.05)),
     }
 
 
@@ -1468,7 +1550,13 @@ def evaluate(trades: list[dict], choice: dict, settings: dict | None = None, wit
     by_symbol: dict[str, list[dict]] = {}
     universe: dict[str, int] = {}
     excluded = 0
+    source = choice["source"].lower()
+    gap = choice["stack_gap"]
     for t in trades:
+        if t.get("source", "cross") != source:
+            continue
+        if source == "stack" and not any(abs(float(g) - gap) < 1e-9 for g in t.get("gap_steps") or []):
+            continue
         universe[t["symbol"]] = universe.get(t["symbol"], 0) + 1
         if wanted and t["symbol"] not in wanted:
             excluded += 1
@@ -1532,6 +1620,10 @@ def evaluate(trades: list[dict], choice: dict, settings: dict | None = None, wit
     out["settings"] = settings_for_choice(choice, settings)
     if with_trades:
         out["missing"] = missing_rules(trades)
+        # A run read before the three-SMA source existed has only cross trades: read the days again for it.
+        out["stack_missing"] = bool(trades) and not any("source" in t for t in trades)
+        out["stack_lines"] = (settings or {}).get("stack_lines")
+        out["stack_widen"] = (settings or {}).get("stack_widen")
         out["trades"] = kept[-MAX_TRADES_OUT:]
         out["trades_cut"] = max(0, len(kept) - MAX_TRADES_OUT)
     return out

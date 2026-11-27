@@ -68,7 +68,8 @@ def test_the_bots_own_switches_become_the_starting_choice():
     assert choice["entries"] == ["vwap", "rsi", "gap"]
     assert set(choice["exits"]) == {"cross", "bb_band", "bb_middle", "supertrend", "counter"}
     assert choice["stop"] == "TSL" and set(choice["targets"]) == {"tsl", "pivot_r1"}
-    assert lab.choice_from_cfg(_cfg(cross_exit=False, use_stop=False)) == {"entries": [], "exits": [], "stop": "NONE", "targets": []}
+    assert lab.choice_from_cfg(_cfg(cross_exit=False, use_stop=False)) == {
+        "entries": [], "exits": [], "stop": "NONE", "targets": [], "source": "CROSS", "stack_gap": 0.05}
     fields = lab.settings_for_choice(choice, {"counter_count": 3, "slope_bend_pct": 60.0})
     assert fields["use_vwap"] and fields["use_rsi"] and fields["use_gap_long"] and fields["use_gap_short"] and not fields["use_macd"]
     assert fields["bb_exit"] == "BOTH" and fields["st_exit"] and fields["counter_exit_count"] == 3 and fields["use_stop"] and fields["stop_type"] == "TSL"
@@ -134,7 +135,7 @@ def test_the_combiner_applies_checks_exits_stops_and_the_in_position_rule():
     # unknown names are dropped, not an error
     assert lab.clean_choice({"entries": ["nope", "rsi"], "exits": ["x"], "stop": "weird"}) == {
         "entries": ["rsi"], "exits": [], "stop": "NONE", "targets": [], "entry_from": "09:20", "entry_to": "15:30", "qty": 0,
-        "symbols": [], "margin_pct": 20.0,
+        "symbols": [], "margin_pct": 20.0, "source": "CROSS", "stack_gap": 0.05,
     }
     # the settings the replay needs for this choice ride along
     assert stop["settings"]["use_stop"] and stop["settings"]["stop_type"] == "ATR" and stop["settings"]["cross_exit"]
@@ -419,3 +420,56 @@ def test_a_run_read_before_the_newer_rules_leaves_them_out_of_what_each_rule_add
     assert ("entry", "fresh") not in names and ("stop", "SMART") not in names and ("target", "net") not in names
     assert rec["missing"] == ["entry:fresh", "stop:SMART", "target:net"]
     assert lab.evaluate(trades, lab.clean_choice({}), settings)["missing"] == ["entry:fresh", "stop:SMART", "target:net"]
+
+
+def _bot_stack_entries(rich: pd.DataFrame, cfg) -> list[tuple[int, str]]:
+    """The candles the bot's own three-SMA entry (stack_entry.call, once per widening run) would enter on."""
+    import stack_entry
+
+    out, done = [], None
+    for i in range(1, len(rich) - 1):
+        side, start, _ = stack_entry.call(rich.iloc[: i + 2], cfg)
+        if side is None:
+            continue
+        if done and done[0] == side and start <= done[1]:
+            continue
+        out.append((i, side))
+        done = (side, int(rich["ts"].iloc[i]))
+    return out
+
+
+@pytest.mark.parametrize("gap", [0.0, 0.05, 0.1])
+def test_three_sma_entries_match_the_bots_own_stack_entry(gap):
+    """The lab's STACK source enters on the same candles as the bot's "Enter on three SMAs with widening gaps"."""
+    from candles import resample
+    import indicators
+
+    cfg = _cfg(stack_entry=True, stack_widen=2, stack_third=50, stack_min_gap=gap)
+    s = lab.lab_settings(cfg)
+    rich = indicators.enrich(resample(_tape(), 5).reset_index(drop=True), 9, 21, 14)
+    got = [(i, side) for i, side, steps in lab._stack_signals(rich, s) if gap in steps]
+    assert got == _bot_stack_entries(rich, cfg)
+    assert got  # the test tape trends enough to stack
+
+
+def test_the_stack_source_is_its_own_set_of_trades():
+    cfg = _cfg(stack_entry=True, stack_widen=2, stack_third=50)
+    trades, settings = lab.analyze_stock("TEST", _tape(), cfg, [D1, D2])
+    sources = {t["source"] for t in trades}
+    assert sources == {"cross", "stack"}
+    stack = [t for t in trades if t["source"] == "stack"]
+    assert all(t["gap_steps"] for t in stack) and set(stack[0]["exits"]) == set(lab.EXIT_RULES)
+    base = {"exits": ["cross"], "stop": "ATR"}
+    cross_out = lab.evaluate(trades, {**base, "source": "CROSS"}, settings)
+    stack_out = lab.evaluate(trades, {**base, "source": "STACK", "stack_gap": 0.0}, settings)
+    assert cross_out["totals"]["trades"] and stack_out["totals"]["trades"]
+    assert stack_out["totals"]["trades"] <= sum(1 for t in stack if 0.0 in t["gap_steps"])
+    assert lab.evaluate(trades, {**base, "source": "STACK", "stack_gap": 0.5}, settings)["totals"]["trades"] <= stack_out["totals"]["trades"]
+    fields = lab.settings_for_choice({**base, "source": "STACK", "stack_gap": 0.1}, settings)
+    assert fields["stack_entry"] and fields["stack_only"] and fields["stack_min_gap"] == 0.1 and fields["stack_widen"] == 2
+    assert lab.settings_for_choice({**base, "source": "CROSS"}, settings)["stack_entry"] is False
+    assert lab.choice_from_cfg(_cfg(stack_entry=True, stack_only=True, stack_min_gap=0.12))["source"] == "STACK"
+    assert lab.choice_from_cfg(_cfg(stack_entry=True, stack_only=True, stack_min_gap=0.12))["stack_gap"] == 0.1
+    # a run read before the source existed says so
+    old = [{k: v for k, v in t.items() if k not in ("source", "gap_steps")} for t in trades if t["source"] == "cross"]
+    assert lab.evaluate(old, base, settings)["stack_missing"] is True

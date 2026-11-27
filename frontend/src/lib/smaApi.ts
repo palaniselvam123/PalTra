@@ -4115,7 +4115,15 @@ export type RegimeBucket = {
 export type RegimeSignal = { key: string; label: string; buckets: RegimeBucket[]; spread: number; pnl_spread: number; verdict: string };
 /** Strategy lab (backend strategy_lab.py). A rule's name and its label on the screen. */
 export type StrategyLabRule = { name: string; label: string };
-export type StrategyLabRules = { entries: StrategyLabRule[]; exits: StrategyLabRule[]; stops: StrategyLabRule[]; targets: StrategyLabRule[] };
+export type StrategyLabRules = {
+  entries: StrategyLabRule[];
+  exits: StrategyLabRule[];
+  stops: StrategyLabRule[];
+  targets: StrategyLabRule[];
+  /** What can open trades (CROSS = SMA cross, STACK = 3 SMAs stacked, gaps widening) and the gap levels read. */
+  sources?: StrategyLabRule[];
+  stack_gaps?: number[];
+};
 export type StrategyLabStop = "NONE" | "ATR" | "TSL" | "SUPERTREND" | "VWAP" | "SMART" | "PLAN";
 export type StrategyLabChoice = {
   entries: string[];
@@ -4129,6 +4137,10 @@ export type StrategyLabChoice = {
   symbols?: string[];
   /** Intraday margin % of a trade's value, for the capital it needs (20 = 5x). */
   margin_pct?: number;
+  /** What opens trades: the SMA cross, or the three SMAs stacked with both gaps widening (backend stack_entry). */
+  source?: "CROSS" | "STACK";
+  /** With STACK: each gap at least this % (one of the run's stack_gaps). */
+  stack_gap?: number;
 };
 /** The money the kept trades needed (strategy_lab.capital). */
 export type StrategyLabCapital = {
@@ -4203,6 +4215,11 @@ export type StrategyLabTrade = {
 export type StrategyLabResult = {
   /** Rules ("entry:fresh", "stop:SMART"…) the run was read without (read before the lab knew them). */
   missing?: string[];
+  /** True when the run was read before the three-SMA source existed (read the days again for it). */
+  stack_missing?: boolean;
+  /** The three SMA lengths the STACK source read, and the widening candles it needed. */
+  stack_lines?: number[] | null;
+  stack_widen?: number | null;
   totals: StrategyLabTotals;
   per_day: { day: string; trades: number; gross: number; net: number; cum_gross: number }[];
   per_stock: { symbol: string; trades: number; win_pct: number; gross: number; net: number; days: number; green_days: number; per_trade: number }[];
