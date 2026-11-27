@@ -745,7 +745,7 @@ export const FEATURES: Feature[] = [
     purpose: "Saved scans keep the trend as they read it, so to test the skip on past days the pick backtests now take it too: each day's trend is read without today's first N candles (and must have moved 1 ATR since them), then the bot trades the picks. The run detail and PDF show it." },
   { id: "tq-skip-first", area: "trend", added: "2026-11-24", pr: 524, href: "/scalp/#trend", where: "Scalp → Trend quality → Skip today's first candles", title: "Trend quality can skip the opening candles",
     purpose: "Big opening candles made a stock that went sideways after them read as a strong trend at 10:00. Pick 'First N' and the crosses, phases, strong-trend checks and VWAP start after those candles; a strong trend must also have moved 1 ATR its way since then. The auto re-scan keeps the choice." },
-  { id: "scan-sizes-sma", area: "trend", added: "2026-11-27", pr: 550, href: "/scalp/#trend", where: "Scalp → Trend quality and Cross scan → Candle, Moving averages (SMA)", title: "30-minute and 1-hour candles, and your own moving averages",
+  { id: "scan-sizes-sma", area: "trend", added: "2026-11-27", pr: 556, href: "/scalp/#trend", where: "Scalp → Trend quality and Cross scan → Candle, Moving averages (SMA)", title: "30-minute and 1-hour candles, and your own moving averages",
     purpose: "The Candle menu, 'Crosses today on' and 'Trend on' now also have 30 min and 1 hour. A new 'Moving averages (SMA)' menu picks what the scan reads: Bot 1's own, 9 / 21, 20 / 50, 50 / 200, or two numbers you type. Only the scan changes; no bot setting is touched. The first scan of a day downloads more days so the bigger candles have enough history." },
 ];
 
