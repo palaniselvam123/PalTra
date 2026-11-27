@@ -34,7 +34,11 @@ const POLL_MS = 2500;
 const DAYS = [1, 2, 3, 5, 10, 15, 20, 30];
 const BOTS = [1, 2, 3, 4];
 const LAB_CANDLES = [1, 2, 3, 5, 10, 15];
-const TIMES = ["09:20", "09:30", "09:45", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30"];
+// Every 5 minutes up to 10:30 (owner's request: skip the opening candles, e.g. enter only from 09:45), then every 15.
+const TIMES = [
+  ...Array.from({ length: 15 }, (_, k) => 9 * 60 + 20 + k * 5),
+  ...Array.from({ length: 20 }, (_, k) => 10 * 60 + 45 + k * 15),
+].map((m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
 const EMPTY: StrategyLabChoice = { entries: [], exits: ["cross"], stop: "ATR", targets: [], entry_from: "09:20", entry_to: "15:30", qty: 0, symbols: [], margin_pct: 20, source: "CROSS", stack_gap: 0.05 };
 const STACK_GAPS = [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5];
 /** Sent as the stock list when every stock is unticked: matches no stock, so nothing is traded. */
