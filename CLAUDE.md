@@ -3136,7 +3136,8 @@ No credentials are needed. The desk starts on the simulated feed.
     their `trade_log`, `review_log`, `handoff_log`, `replay_pnl` and `trend_reads` rows under new ids (dry run without
     `--write`; a run already here, same start / days / settings, is skipped; targets backed up as `*.before-merge`).
     Copied runs carry `copied_from` in their settings: `run_source.describe` says "copied from the backtest server"
-    and `paper_wallet._counted` leaves them out
+    and `paper_wallet._counted` leaves them out; a later pass still adds the P&L log / trend readings of runs copied before (`known`, INSERT
+    OR IGNORE), and a damaged source file (`_healthy`, PRAGMA quick_check; a copy cut short) stops it before any write
   - it needs the repo secret `FLY_API_TOKEN`
     (`fly tokens create deploy -a paltra`); the deploy job runs in the
     `production` environment, which GitHub creates on first use (add required
