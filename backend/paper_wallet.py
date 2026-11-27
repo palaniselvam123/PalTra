@@ -86,7 +86,10 @@ def _counted(since: dt.datetime):
     """The trades the wallet counts: PAPER ones opened since the start, and
     REPLAY ones of runs started since then (a replayed trade's own times are
     the past day it replays, so the run's start decides)."""
-    runs = select(ReplayRun.id).where(ReplayRun.created_at >= since)
+    # Runs copied in from another server (merge_backtests.py, `copied_from` in their settings) never used this wallet.
+    runs = select(ReplayRun.id).where(
+        ReplayRun.created_at >= since, ReplayRun.settings.notlike('%"copied_from"%')
+    )
     return or_(
         and_(TradeLog.mode == "PAPER", TradeLog.entry_time >= since),
         and_(TradeLog.mode == "REPLAY", TradeLog.run_id.in_(runs)),

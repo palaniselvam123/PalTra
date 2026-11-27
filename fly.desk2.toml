@@ -1,0 +1,41 @@
+# The second desk: a full copy of the main desk (desk + SMA terminal + bots) on its own Fly account,
+# with its own volume, database, Groww key, settings and secrets. Same image as `paltra`. Setup: DESK2.md.
+#
+# CI deploys it with Run workflow → target desk2 (.github/workflows/test-and-deploy.yml). The app is
+# `pritra`; CI passes the repo variable DESK2_APP with -a, so a different name created on the new
+# account is used instead. By hand: fly deploy -c fly.desk2.toml
+
+app = 'pritra'
+primary_region = 'sin'
+# Time to ring the owner and send the WhatsApp alert before a deploy stops the app.
+kill_timeout = '15s'
+
+[build]
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+# Fly's default limit is 25 requests at once per machine; the pages poll many endpoints
+# (state, chart, replay, scans) and a few open tabs passed it, so Fly's proxy queued or
+# refused requests ("Can't reach the trading engine"). One uvicorn process serves them all.
+[http_service.concurrency]
+  type = 'requests'
+  soft_limit = 200
+  hard_limit = 250
+
+[[mounts]]
+  source = 'data'
+  destination = '/data'
+
+# A shared-CPU machine: the second desk's Fly account is on the Free plan, which refuses performance
+# machines. 2 shared CPUs and 2 GB run the desk, the bots and replays; a heavy replay can slow its pages.
+# On a Pay As You Go account switch to cpu_kind = 'performance', memory_mb = 4096 like fly.toml.
+[[vm]]
+  cpu_kind = 'shared'
+  cpus = 2
+  memory_mb = 2048

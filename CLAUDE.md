@@ -2892,7 +2892,7 @@ spinning top), body and range) / Matched / Call columns
   thread's stack to stderr), then `STALL over: …` with how long it lasted. Started
   first in `boot_engine`; `GET /api/stall` reports it. Search the Fly log for `STALL`.
 - `scripts/health_watch.sh`, `.github/workflows/health-watch.yml` – outside watcher
-  for the owner's phone. GitHub Actions asks `https://paltra.fly.dev/api/health/deep`
+  for the owner's phone. GitHub Actions asks `https://pritra.fly.dev/api/health/deep` (repo variable `HEALTH_URL`)
   every 5 minutes between 03:00 and 10:55 UTC (08:30-16:25 IST) on weekdays and, when
   the answer is not 200 for two runs in a row and the time is between 09:10 and 15:40
   IST, rings the owner through CallMeBot Telegram and, when the repo secrets
@@ -3110,6 +3110,21 @@ No credentials are needed. The desk starts on the simulated feed.
     internal registry address (on 11 Nov every deploy failed for over an hour with "failed to push …
     `_api.internal:5000` … dial tcp [fdaa::3]:5000: connect: connection refused" while Fly's status page
     was green). Each job's limit is 30 minutes.
+  - **second desk** (another Fly account, `fly.desk2.toml`, setup in `DESK2.md`): "Run workflow" with
+    `target: desk2` (same `commit` / `market_hours_ok` rules) deploys only it (`deploy-desk2`), to the app
+    named by the repo variable `DESK2_APP` (`scripts/fly_deploy.sh` passes `FLY_APP` as `-a`) with the
+    secret `FLY_DESK2_API_TOKEN`; its own volume, database, keys and secrets, boots PAPER
+  - **moving off the old Fly account** (owner's plan: close the account running `paltra`, `paltra-backtest`
+    and `paltra-scanner`; `pritra` becomes the desk): Run workflow's default target is `desk2`; with the repo
+    variables `DEPLOY_BACKTEST` / `DEPLOY_SCANNER` false a merge deploys nothing (the release gate's note says
+    so); the health watcher reads `https://pritra.fly.dev/api/health/deep` (`scripts/health_watch.sh`; the repo
+    variable `HEALTH_URL` overrides it). Steps in `DESK2.md`, "Closing the old account"
+  - **the backtest server's runs** (`backend/merge_backtests.py`, run on pritra: `python merge_backtests.py --sma …
+    [--pnl …] [--trend …] [--write]`): copies another server's finished / stopped / interrupted `replay_run` rows with
+    their `trade_log`, `review_log`, `handoff_log`, `replay_pnl` and `trend_reads` rows under new ids (dry run without
+    `--write`; a run already here, same start / days / settings, is skipped; targets backed up as `*.before-merge`).
+    Copied runs carry `copied_from` in their settings: `run_source.describe` says "copied from the backtest server"
+    and `paper_wallet._counted` leaves them out
   - it needs the repo secret `FLY_API_TOKEN`
     (`fly tokens create deploy -a paltra`); the deploy job runs in the
     `production` environment, which GitHub creates on first use (add required

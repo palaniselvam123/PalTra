@@ -46,7 +46,16 @@ def clean(origin: str | None) -> str | None:
 
 def describe(settings: dict | None) -> dict:
     """{"code", "label", "via"}: what the run is (its pick rule, else where it was started) and, for a pick
-    backtest started by something else (the daily run, the queue, a comparison), that starter in `via`."""
+    backtest started by something else (the daily run, the queue, a comparison), that starter in `via`. A run copied
+    in from another server (merge_backtests.py) says so in `via` when nothing else does."""
+    out = _describe(settings)
+    s = settings if isinstance(settings, dict) else {}
+    if s.get("copied_from") and not out.get("via"):
+        out["via"] = "copied from the backtest server"
+    return out
+
+
+def _describe(settings: dict | None) -> dict:
     s = settings if isinstance(settings, dict) else {}
     origin = clean(s.get("origin") if isinstance(s.get("origin"), str) else None)
     via = ORIGINS[origin] if origin else None
