@@ -164,6 +164,7 @@ export const SETTING_LABELS: Record<string, string> = {
   macd_shrink_candles: "MACD histogram exit: candles",
   pc_entry: "Candle-pattern check (entry)",
   pc_exit: "Candle-pattern exit",
+  triple_exit: "Fast / medium SMA exit (three lines)",
   pc_minutes: "Candle patterns: candle size",
   pc_set: "Candle patterns: which ones",
   pc_within: "Candle-pattern check: last candles",

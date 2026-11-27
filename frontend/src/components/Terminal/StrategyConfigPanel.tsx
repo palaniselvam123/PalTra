@@ -460,6 +460,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     pc_minutes: PATTERN_CHECK_SIZES.includes(Number(form.pc_minutes ?? 0)) ? Number(form.pc_minutes ?? 0) : 0,
     pc_set: String(form.pc_set ?? "STRONG").toUpperCase() === "ALL" ? "ALL" : "STRONG",
     pc_within: Math.min(5, Math.max(1, Math.round(Number(form.pc_within ?? 1)) || 1)),
+    triple_exit: Boolean(form.triple_exit),
     use_cvd: Boolean(form.use_cvd),
     cvd_lookback: Math.min(50, Math.max(1, Math.round(Number(form.cvd_lookback ?? 5)) || 5)),
     cvd_div_exit: Boolean(form.cvd_div_exit),
@@ -1029,6 +1030,26 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </button>
             ) : null}
           </div>
+          {form.sma_medium != null && String(form.sma_medium).trim() !== "" ? (
+            <label id="sma-triple-exit" className="mt-2 flex scroll-mt-24 items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={Boolean(form.triple_exit)}
+                onChange={(e) => set("triple_exit", e.target.checked)}
+                className="accent-[#10B981]"
+              />
+              {isOwn("triple_exit") && <OwnTag />}
+              Close when SMA {String(form.sma_fast)} crosses SMA {String(form.sma_medium)} against the trade
+              <NewTag id="triple-exit" />
+              <InfoTip label="About the fast / medium exit">
+                With three lines a trade opens when they stack up ({String(form.sma_fast)} &gt; {String(form.sma_medium)} &gt;{" "}
+                {String(form.sma_slow)}) and, with only the SMA cross exit, closes when they stack the other way, which can give
+                back much of the profit. Ticked, a buy also closes as soon as SMA {String(form.sma_fast)} crosses under SMA{" "}
+                {String(form.sma_medium)} on a closed candle (a sell when it crosses over). No reverse: a new trade still needs
+                the full stack. SMA {String(form.sma_slow)} stays the trend filter. Reason &quot;FAST/MED&quot; in the blotter.
+              </InfoTip>
+            </label>
+          ) : null}
           <div className="mt-2 flex items-center gap-1 text-xs text-slate-300">
             <label htmlFor="sma-candle-interval">Candle interval{isOwn("candle_minutes") ? " (own)" : ""}</label>
             <InfoTip label="About the candle interval">
@@ -4191,6 +4212,8 @@ export function activeRules(f: SmaConfig): Rule[] {
   if (n(f.counter_exit_count, 0) > 0 && f.counter_reenter) add({ group: "enter", key: "counter_reenter", text: `Re-enter after a counter-candle exit when a candle breaks the exit candle (up to ${n(f.counter_reenter_max, 3)} per SMA run)`, off: { counter_reenter: false } });
   if (f.ema_exit) add({ group: "exit", key: "ema_exit", text: `Close when EMA ${n(f.ema_fast, 9)} / ${n(f.ema_slow, 200)} cross against the trade`, off: { ema_exit: false } });
   if (f.macd_exit) add({ group: "exit", key: "macd_exit", text: `Close when MACD ${n(f.macd_fast, 12)}/${n(f.macd_slow, 26)}/${n(f.macd_signal, 9)} crosses its signal line against the trade`, off: { macd_exit: false } });
+  if (f.triple_exit && f.sma_medium != null && String(f.sma_medium).trim() !== "")
+    add({ group: "exit", key: "triple_exit", text: `Close when SMA ${n(f.sma_fast, 9)} crosses SMA ${f.sma_medium} against the trade`, off: { triple_exit: false } });
   if (f.pc_exit) add({ group: "exit", key: "pc_exit", text: `Close on a ${patternSetWords(f)} candle pattern against the trade (${patternSizeWords(f)})`, off: { pc_exit: false } });
   if (f.macd_shrink_exit) add({ group: "exit", key: "macd_shrink_exit", text: `Close when the MACD histogram moves against the trade ${n(f.macd_shrink_candles, 2)} candle(s) in a row`, off: { macd_shrink_exit: false } });
   if (f.cvd_div_exit) add({ group: "exit", key: "cvd_div_exit", text: `Close when price makes a new high / low over ${n(f.cvd_div_lookback, 10)} candles without the cumulative delta`, off: { cvd_div_exit: false } });

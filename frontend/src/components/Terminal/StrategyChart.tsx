@@ -1040,17 +1040,22 @@ function usePageTheme(): "dark" | "light" {
   return theme;
 }
 
-type SmaHover = { sma9: number | null; sma21: number | null };
+/** The third (medium) SMA line in three-line mode. */
+const MID_LINE_COLOR = "#F59E0B";
+
+type SmaHover = { sma9: number | null; sma21: number | null; smaMid?: number | null };
 
 function latestSma(rows: Candle[]): SmaHover {
   let sma9: number | null = null;
   let sma21: number | null = null;
+  let smaMid: number | null = null;
   for (let i = rows.length - 1; i >= 0; i -= 1) {
     if (sma9 == null && rows[i].sma9 != null) sma9 = rows[i].sma9;
     if (sma21 == null && rows[i].sma21 != null) sma21 = rows[i].sma21;
+    if (smaMid == null && rows[i].smaMid != null) smaMid = rows[i].smaMid ?? null;
     if (sma9 != null && sma21 != null) break;
   }
-  return { sma9, sma21 };
+  return { sma9, sma21, smaMid };
 }
 
 function istClock(time: unknown): string {
@@ -1178,6 +1183,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   }, [theme]);
   const profileLines = useRef<IPriceLine[]>([]);
   const smaFastRef = useRef<ISeriesApi<"Line"> | null>(null);
+  // The third (medium) SMA in three-line mode (sma_medium set): drawn only while the chart rows carry it.
+  const smaMidRef = useRef<ISeriesApi<"Line"> | null>(null);
   const smaSlowRef = useRef<ISeriesApi<"Line"> | null>(null);
   const atrRef = useRef<ISeriesApi<"Line"> | null>(null);
   const drillSmaRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -1766,6 +1773,13 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       lastValueVisible: false,
       title: tag("SMA 21"),
     });
+    const mid = instance.addLineSeries({
+      color: MID_LINE_COLOR,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      visible: false,
+    });
     const atr = instance.addLineSeries({
       color: "#A78BFA",
       lineWidth: 2,
@@ -1953,6 +1967,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     candleRef.current = candles;
     smaFastRef.current = fast;
     smaSlowRef.current = slow;
+    smaMidRef.current = mid;
     atrRef.current = atr;
     const measureLine = instance.addLineSeries({
       color: "#FBBF24",
@@ -2005,6 +2020,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
       setHover({
         sma9: lineValue(param.seriesData.get(fast)),
         sma21: lineValue(param.seriesData.get(slow)),
+        smaMid: lineValue(param.seriesData.get(mid)),
       });
     };
     instance.subscribeCrosshairMove(onCrosshair);
@@ -2080,6 +2096,10 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     smaSlowRef.current.setData(
       rows.filter((c) => c.sma21 != null).map((c) => ({ time: c.time as never, value: c.sma21 as number }))
     );
+    // Three-line mode: the medium SMA between them (the trend filter's middle line).
+    const midRows = rows.filter((c) => c.smaMid != null);
+    smaMidRef.current?.setData(midRows.map((c) => ({ time: c.time as never, value: c.smaMid as number })));
+    smaMidRef.current?.applyOptions({ visible: midRows.length > 0 && look.sma21.show !== "off" });
     atrRef.current.setData(
       rows.filter((c) => c.atr14 != null).map((c) => ({ time: c.time as never, value: c.atr14 as number }))
     );
@@ -2615,6 +2635,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   const ohlc = hoverOhlc ?? ohlcAt(rows, rows.length - 1);
   const sma9 = hover ? hover.sma9 : latest.sma9;
   const sma21 = hover ? hover.sma21 : latest.sma21;
+  const smaMid = hover ? hover.smaMid ?? null : latest.smaMid ?? null;
   // (SMA 9 − SMA 21) ÷ SMA 21 × 100, the gap the gap filter and gap mode read.
   const smaGap = sma9 != null && sma21 != null && sma21 !== 0 ? ((sma9 - sma21) / sma21) * 100 : null;
   // The stock whose candles are drawn: a past range keeps its own stock.
@@ -2917,6 +2938,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
         hovering={hoverOhlc != null}
         sma9={sma9}
         sma21={sma21}
+        smaMid={smaMid}
+        smaNames={{ fast: filters?.sma_fast ?? 9, mid: filters?.sma_medium ?? null, slow: filters?.sma_slow ?? 21 }}
         gap={smaGap}
         vwap={shownVwap}
         rsi={shownRsi}
@@ -3432,6 +3455,8 @@ function OhlcLine({
   hovering,
   sma9,
   sma21,
+  smaMid,
+  smaNames,
   gap,
   vwap,
   rsi,
@@ -3461,6 +3486,10 @@ function OhlcLine({
   hovering: boolean;
   sma9: number | null;
   sma21: number | null;
+  /** The medium SMA in three-line mode (null = no third line). */
+  smaMid?: number | null;
+  /** The SMA lengths, so the lines are named by what they are (9 / 21 / 50). */
+  smaNames?: { fast: number; mid: number | null; slow: number };
   gap: number | null;
   vwap: number | null;
   rsi: number | null;
@@ -3530,10 +3559,15 @@ function OhlcLine({
         {pct.toFixed(2)}%)
       </span>
       <span className="whitespace-nowrap">
-        <LineKey color={colors.sma9}>SMA 9</LineKey> <span className="text-slate-100">{px(sma9)}</span>
+        <LineKey color={colors.sma9}>SMA {smaNames?.fast ?? 9}</LineKey> <span className="text-slate-100">{px(sma9)}</span>
       </span>
+      {smaNames?.mid ? (
+        <span className="whitespace-nowrap">
+          <LineKey color={MID_LINE_COLOR}>SMA {smaNames.mid}</LineKey> <span className="text-slate-100">{px(smaMid ?? null)}</span>
+        </span>
+      ) : null}
       <span className="whitespace-nowrap">
-        <LineKey color={colors.sma21}>SMA 21</LineKey> <span className="text-slate-100">{px(sma21)}</span>
+        <LineKey color={colors.sma21}>SMA {smaNames?.slow ?? 21}</LineKey> <span className="text-slate-100">{px(sma21)}</span>
       </span>
       <span className="whitespace-nowrap">
         <span className="text-slate-400">Gap</span>{" "}

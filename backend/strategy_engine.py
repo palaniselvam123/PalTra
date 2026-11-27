@@ -72,6 +72,7 @@ import ema_filter
 import heikin_ashi
 import macd
 import pattern_check
+import triple_exit
 import cum_delta
 import reverse_exit
 import exit_join
@@ -310,6 +311,8 @@ class OpenPosition:
     cvd_bar: int | None = None
     # Candle-pattern exit (pattern_check.py): the last closed pattern candle read.
     pc_bar: int | None = None
+    # Three-line fast / medium cross exit (triple_exit.py): the last closed candle read.
+    tx_bar: int | None = None
     # Last exit candle read by the mixed-candle exit (exit_candle.py), memory only.
     xc_bar: int | None = None
     # Watch smaller candles (small_candles.py): the last closed candle read per size, and what each size says.
@@ -426,7 +429,7 @@ SNAPSHOT_FIELDS = (
     "counter_reenter", "counter_reenter_max",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "use_macd_grow", "macd_grow_candles", "macd_shrink_exit", "macd_shrink_candles", "ha_colours", "ha_scope",
-    "pc_entry", "pc_exit", "pc_minutes", "pc_set", "pc_within",
+    "pc_entry", "pc_exit", "pc_minutes", "pc_set", "pc_within", "triple_exit",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "reverse_on_exit", "reverse_colour_exit", "reverse_settings",
     "exit_join", "exit_group", "exit_need", "exit_within",
@@ -1122,6 +1125,10 @@ def chart_filters(cfg) -> dict:
         # Which SMA 9 slope rules are on, and the fast SMA length, so the chart can shade where the next
         # candle's close would fire an exit (or a turn entry) and say so on hover (display only).
         "sma_fast": int(getattr(cfg, "sma_fast", 9) or 9),
+        # The third line's length (three-line mode) and the slow one's, so the chart can name its lines.
+        "sma_medium": triple_exit.medium(cfg),
+        "sma_slow": int(getattr(cfg, "sma_slow", 21) or 21),
+        "triple_exit": triple_exit.on(cfg),
         "slope_rules": slope_exit.on(cfg),
         "slope_turn": slope_exit.on(cfg) and slope_exit.turn_on(cfg),
         "decel_exit": decel_guard.on(cfg),
@@ -1185,7 +1192,7 @@ _FILTER_KEYS = (
     "use_candle_dir", "candle_dir_count", "candle_dir_rule",
     "use_ema", "ema_exit", "ema_fast", "ema_slow",
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "use_macd_grow", "macd_grow_candles", "macd_shrink_exit", "macd_shrink_candles", "ha_colours", "ha_scope",
-    "pc_entry", "pc_exit", "pc_minutes", "pc_set", "pc_within",
+    "pc_entry", "pc_exit", "pc_minutes", "pc_set", "pc_within", "triple_exit",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
@@ -1208,6 +1215,7 @@ def _forming_row(bar) -> dict:
         "close": float(bar["close"]),
         "sma9": None,
         "sma21": None,
+        "smaMid": None,
         "atr14": None,
         "adx14": None,
         "vwap": None,
@@ -1250,6 +1258,8 @@ def candle_rows(
                 "close": float(row["close"]),
                 "sma9": _finite(row.get("sma_9")),
                 "sma21": _finite(row.get("sma_21")),
+                # The third (medium) SMA in three-line mode, drawn as its own line.
+                "smaMid": _finite(row.get("sma_medium")),
                 "atr14": _finite(row.get("atr_14")),
                 # The ADX the bot's ADX check reads (indicators.adx_wilder), for the chart's ADX strip.
                 "adx14": _finite(row.get("adx_14")),
@@ -2158,6 +2168,7 @@ class StrategyEngine:
         await self._watch_macd_exit(symbol_cfg)
         await self._watch_macd_shrink(symbol_cfg)
         await self._watch_pattern_exit(symbol_cfg)
+        await self._watch_triple_exit(symbol_cfg)
         await self._watch_cvd_exit(symbol_cfg)
         await self._watch_exit_candle(symbol_cfg)
         await self._watch_small_candles(symbol_cfg)
@@ -5929,6 +5940,32 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} MACD histogram exit — {note}"
         await self._exit_now(cfg, self.ltp, macd.SHRINK_REASON)
 
+    async def _watch_triple_exit(self, cfg: BotConfig) -> None:
+        """Once per closed candle: in three-line mode, exit when the fast SMA crosses the medium SMA against the trade
+        (triple_exit.py)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or not triple_exit.on(cfg) or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._exit_frame(symbol, cfg)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.tx_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
+            return
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        minutes = self._exit_minutes(symbol, cfg)
+        if closed_ts + minutes * 60 <= opened.timestamp():
+            # That candle had closed before the entry: a cross on it is not "after the entry".
+            return
+        pos.tx_bar = closed_ts
+        hit, note = triple_exit.crossed_against(frame.iloc[:-1], pos.signal_direction, cfg)
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} fast / medium SMA exit — {note}"
+        await self._exit_now(cfg, self.ltp, triple_exit.REASON)
+
     async def _watch_pattern_exit(self, cfg: BotConfig) -> None:
         """Once per closed pattern candle that closed after the entry: exit on a candle pattern against the trade
         (pattern_check.py)."""
@@ -6584,6 +6621,7 @@ class StrategyEngine:
                     "MACD_CROSS": "MACD crossed its signal line against the trade — flat",
                     "MACD_SHRINK": "MACD histogram moved against the trade — flat",
                     pattern_check.REASON: "candle pattern against the trade — flat",
+                    triple_exit.REASON: "fast SMA crossed the medium SMA against the trade — flat",
                     "CVD_DIVERGENCE": "price made a new extreme without the cumulative delta — flat",
                     "SUPERTREND": "Supertrend turned against the trade — flat",
                     "SMA9_BEND": "SMA 9 bent — flat",
@@ -8385,6 +8423,7 @@ _ALERT_REASON = {
     "MACD_CROSS": "MACD cross against the trade",
     "MACD_SHRINK": "MACD histogram against the trade",
     pattern_check.REASON: "candle pattern against the trade",
+    triple_exit.REASON: "fast SMA crossed the medium SMA against the trade",
     "MANUAL_REVERSE": "reversed by hand",
     "CVD_DIVERGENCE": "price / cumulative delta divergence",
     "SUPERTREND": "Supertrend turned against the trade",
@@ -8881,7 +8920,7 @@ def _stop_reason(pos: "OpenPosition") -> str:
 
 
 _TAKEN_EXITS = (
-    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", "MACD_SHRINK", pattern_check.REASON, cum_delta.EXIT_REASON, "SUPERTREND",
+    "TARGET_HIT", "BB_TARGET", "BB_MIDDLE", "GAP_FADE", "CANDLE_END", "COLOUR_TURN", "COUNTER_CANDLES", "EMA_CROSS", "MACD_CROSS", "MACD_SHRINK", pattern_check.REASON, triple_exit.REASON, cum_delta.EXIT_REASON, "SUPERTREND",
     "SMA9_BEND", "SMA9_TURN", "SMA9_VTURN", "SMA9_TURN_AGAINST", "SMA9_DECEL",
     "SLOW_SMA_BREACH", "RECOVERY_TARGET_HIT", "EMERGENCY_RECOVERY_ABORT", "SQUARE_OFF_CUTOFF",
     "BREAKOUT_STOP", "PIVOT_TARGET", day_target.EXIT_REASON, target_net.EXIT_REASON, stop_plan.EXIT_REASON, small_candles.REASON,

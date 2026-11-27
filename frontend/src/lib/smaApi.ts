@@ -244,6 +244,8 @@ export type SmaConfig = {
   pc_minutes?: number;
   pc_set?: "STRONG" | "ALL";
   pc_within?: number;
+  /** Three-line mode: close on the fast / medium SMA cross against the trade (triple_exit.py). */
+  triple_exit?: boolean;
   /** Cumulative delta (cum_delta.py): entry only while it moves the trade's way; exit on a price / delta divergence. */
   use_cvd?: boolean;
   cvd_lookback?: number;
@@ -1860,6 +1862,8 @@ export type Candle = {
   close: number;
   sma9: number | null;
   sma21: number | null;
+  /** The third (medium) SMA in three-line mode (sma_medium set). */
+  smaMid?: number | null;
   atr14: number | null;
   /** Session VWAP after this candle (what the VWAP filter reads). */
   vwap?: number | null;
@@ -1884,6 +1888,9 @@ export const BB_EXITS = ["OFF", "BAND", "MIDDLE", "BOTH"] as const;
 export type BbExit = (typeof BB_EXITS)[number];
 
 export type ChartFilters = {
+  /** The SMA lengths (the medium one only in three-line mode), so the chart names its lines. */
+  sma_medium?: number | null;
+  sma_slow?: number;
   /** Breakout hand-off on this bot / stock, and the candle height it needs in ATRs (breakout.py). */
   breakout_handoff?: boolean;
   breakout_atr_mult?: number;
@@ -1930,6 +1937,8 @@ export type ChartFilters = {
   pc_minutes?: number;
   pc_set?: "STRONG" | "ALL";
   pc_within?: number;
+  /** Three-line mode: close on the fast / medium SMA cross against the trade (triple_exit.py). */
+  triple_exit?: boolean;
   /** Draw the Supertrend line (its check or exit on) and its settings. */
   st_line?: boolean;
   st_period?: number;

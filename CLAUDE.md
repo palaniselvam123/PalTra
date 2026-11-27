@@ -965,6 +965,19 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   (`flow_exit.CONFIRM_REASONS`), counts as an exit for `strategyChecks.noExitOn`. Settings → 2. Checks before entering
   (`StrategyConfigPanel.PatternCheckCard`, anchor `#sma-pattern-check`) and 3. When to exit (`#sma-pattern-exit`), shown
   with the "Indicator checks" or "Candle colour & patterns" style. The Strategy lab does not know them.
+- `backend/triple_exit.py` – **Three lines: exit on the fast / medium cross** (owner's request: with SMA 9 / 21 / 50 a
+  trade opened on the stack, `closed_candle_cross_triple`, and closed only on the opposite stack, giving back profit;
+  `triple_exit`, off by default, read only while `sma_medium` is set; per bot and per stock, PAPER and LIVE, replays too):
+  `StrategyEngine._watch_triple_exit` (held-stock loop, after the candle-pattern exit), once per candle closed after the
+  entry (`pos.tx_bar`), closes the trade when SMA fast crossed SMA medium against its signal side on the bot's exit
+  candles (`crossed_against`, its own rolling means of the closes): `FAST_MEDIUM_CROSS` via `_exit_now` (LIVE stop
+  cancelled first; a LIVE position restored without its stop id is left to that stop). No reverse: a new trade still
+  needs the whole stack. Groupable in "How exits combine" (key `TRIPLE`), confirmable by the executed volume
+  (`flow_exit.CONFIRM_REASONS`), counts as an exit for `strategyChecks.noExitOn`. Settings → 1. When to enter, under
+  Medium MA (shown once one is typed), anchor `#sma-triple-exit`. **The third line on the chart** (display only):
+  `candle_rows` carries `smaMid` (the enriched `sma_medium`), `chart_filters` carries `sma_medium` / `sma_slow` /
+  `triple_exit`; `StrategyChart` draws it amber (`MID_LINE_COLOR`, hidden with the slow line's Indicators switch) and
+  names every line by its length on the reading line ("SMA 9 · SMA 21 · SMA 50").
 - `backend/cum_delta.py` – cumulative delta (CVD) check and divergence exit (off by default, per bot and per stock, PAPER
   and LIVE, replays too). Groww gives no buy / sell split, so each candle's delta is estimated (owner's choice): volume ×
   (close − open) ÷ (high − low) (0 for no range or no volume), summed from each IST session's first candle (`series`).

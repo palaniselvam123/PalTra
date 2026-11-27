@@ -773,6 +773,8 @@ class ConfigUpdate(BaseModel):
     pc_minutes: Literal[0, 1, 3, 5, 10, 15, 30, 60] | None = None
     pc_set: Literal["STRONG", "ALL"] | None = None
     pc_within: int | None = Field(default=None, ge=1, le=pattern_check.WITHIN_MAX)
+    # Three-line mode: close on the fast / medium SMA cross (triple_exit.py).
+    triple_exit: bool | None = None
     use_cvd: bool | None = None
     cvd_lookback: int | None = Field(default=None, ge=1, le=cum_delta.MAX_LOOKBACK)
     cvd_div_exit: bool | None = None
@@ -2028,6 +2030,7 @@ def _gap_dict(row) -> dict:
         "pc_minutes": int(getattr(row, "pc_minutes", 0) or 0),
         "pc_set": pattern_check.pattern_set(row),
         "pc_within": pattern_check.within(row),
+        "triple_exit": bool(getattr(row, "triple_exit", False)),
         "use_cvd": cum_delta.entry_on(row),
         "cvd_lookback": cum_delta.lookback(row),
         "cvd_div_exit": cum_delta.exit_on(row),
