@@ -1443,7 +1443,7 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   `apply_signal(..., why="STACK_WIDEN")`, so every entry check, the stop, flip, cut-off, caps, wait after an exit and
   one LIVE bot per stock apply. Each widening run enters once (`_stack_done`: side and the closed candle at the entry; a
   run that began at or before it is the same run), a refused run is asked again on its next candle, and one that has
-  widened `RUN_CAP` (30) candles or more is too old to join. `stack_only`: `stack_entry.blocks` in `_apply_locked` (next
+  widened `RUN_CAP` (30) candles or more is too old to join. **Only a fresh line-up** (`stack_fresh`, off; `stack_fresh_candles` 6, 1-30; owner's request): the lines must have been stacked that way no more than N closed candles (`three_read`'s `stack3_candles`, `fresh_need`), so a stack standing since yesterday is not entered when its gaps widen again; the Strategy lab reads it too (`Choice.stack_fresh`, trades carry `stack_age`). `stack_only`: `stack_entry.blocks` in `_apply_locked` (next
   to `_trend_only_hit`) refuses the bot's own signals on the stock (a cross still closes, it does not reverse; Force,
   news, hand-offs pass). Not in gap mode or the per-candle / executed-volume-only modes. The tape keeps enough candles
   for the third line (`stack_entry.longest` in `tick`'s history need and `replay.warmup_days`). Exits are the bot's own.

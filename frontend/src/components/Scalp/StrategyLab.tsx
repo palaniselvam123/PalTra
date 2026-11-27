@@ -39,14 +39,14 @@ const TIMES = [
   ...Array.from({ length: 15 }, (_, k) => 9 * 60 + 20 + k * 5),
   ...Array.from({ length: 20 }, (_, k) => 10 * 60 + 45 + k * 15),
 ].map((m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
-const EMPTY: StrategyLabChoice = { entries: [], exits: ["cross"], stop: "ATR", targets: [], entry_from: "09:20", entry_to: "15:30", qty: 0, symbols: [], margin_pct: 20, source: "CROSS", stack_gap: 0.05 };
+const EMPTY: StrategyLabChoice = { entries: [], exits: ["cross"], stop: "ATR", targets: [], entry_from: "09:20", entry_to: "15:30", qty: 0, symbols: [], margin_pct: 20, source: "CROSS", stack_gap: 0.05, stack_fresh: 0 };
 const STACK_GAPS = [0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.5];
 /** Sent as the stock list when every stock is unticked: matches no stock, so nothing is traded. */
 const NO_STOCK = "-";
 
 const sameChoice = (a: StrategyLabChoice, b: StrategyLabChoice) =>
-  JSON.stringify([a.entries, a.exits, a.stop, a.targets, a.entry_from, a.entry_to, a.qty, a.symbols ?? [], a.margin_pct ?? 20, a.source ?? "CROSS", a.stack_gap ?? 0.05]) ===
-  JSON.stringify([b.entries, b.exits, b.stop, b.targets, b.entry_from, b.entry_to, b.qty, b.symbols ?? [], b.margin_pct ?? 20, b.source ?? "CROSS", b.stack_gap ?? 0.05]);
+  JSON.stringify([a.entries, a.exits, a.stop, a.targets, a.entry_from, a.entry_to, a.qty, a.symbols ?? [], a.margin_pct ?? 20, a.source ?? "CROSS", a.stack_gap ?? 0.05, a.stack_fresh ?? 0]) ===
+  JSON.stringify([b.entries, b.exits, b.stop, b.targets, b.entry_from, b.entry_to, b.qty, b.symbols ?? [], b.margin_pct ?? 20, b.source ?? "CROSS", b.stack_gap ?? 0.05, b.stack_fresh ?? 0]);
 
 const hhmm = (ts: number) => new Date(ts * 1000).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
 
@@ -838,6 +838,32 @@ function EntrySource({
             ))}
           </select>
         </div>
+      ) : null}
+      {source === "STACK" ? (
+        <label className="flex flex-col gap-1">
+          <span className="flex items-center gap-1 font-semibold text-slate-200">
+            <input
+              type="checkbox"
+              checked={(choice.stack_fresh ?? 0) > 0}
+              onChange={(e) => onChange({ ...choice, stack_fresh: e.target.checked ? 6 : 0 })}
+            />
+            Only a fresh line-up <NewTag id="set-stack-fresh" />
+          </span>
+          <select
+            value={String(choice.stack_fresh ?? 0)}
+            disabled={!(choice.stack_fresh ?? 0)}
+            onChange={(e) => onChange({ ...choice, stack_fresh: Number(e.target.value) })}
+            className={select}
+            aria-label="Lined up within the last N candles"
+          >
+            {!(choice.stack_fresh ?? 0) ? <option value="0">not checked</option> : null}
+            {[1, 2, 3, 4, 5, 6, 8, 10, 15, 20, 30].map((n) => (
+              <option key={n} value={String(n)}>
+                lined up within {n} candle{n === 1 ? "" : "s"}
+              </option>
+            ))}
+          </select>
+        </label>
       ) : null}
       <p className="max-w-2xl flex-1 leading-relaxed text-slate-400">
         {source === "STACK" ? (

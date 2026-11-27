@@ -315,6 +315,8 @@ export const SETTING_LABELS: Record<string, string> = {
   stack_third: "three-SMA entry: third (longest) SMA",
   stack_min_gap: "three-SMA entry: smallest gap %",
   stack_only: "only the three-SMA stack opens trades",
+  stack_fresh: "three-SMA entry: only a fresh line-up",
+  stack_fresh_candles: "three-SMA entry: lined up within N candles",
   tq_only: "only the trend opens trades on these stocks",
   tq_exit: "close when the trend fades (Trend quality)",
   tq_exit_score: "close when the trend score falls under",

@@ -464,6 +464,9 @@ export type SmaConfig = {
   stack_third?: number;
   stack_min_gap?: number;
   stack_only?: boolean;
+  /** Only a fresh line-up: the lines stacked no more than stack_fresh_candles candles ago. */
+  stack_fresh?: boolean;
+  stack_fresh_candles?: number;
   tq_only?: boolean;
   tq_exit?: boolean;
   tq_exit_score?: number;
@@ -4141,6 +4144,8 @@ export type StrategyLabChoice = {
   source?: "CROSS" | "STACK";
   /** With STACK: each gap at least this % (one of the run's stack_gaps). */
   stack_gap?: number;
+  /** With STACK: only lines lined up at most this many candles before the entry (0 = not checked). */
+  stack_fresh?: number;
 };
 /** The money the kept trades needed (strategy_lab.capital). */
 export type StrategyLabCapital = {

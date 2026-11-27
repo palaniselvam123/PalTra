@@ -69,7 +69,7 @@ def test_the_bots_own_switches_become_the_starting_choice():
     assert set(choice["exits"]) == {"cross", "bb_band", "bb_middle", "supertrend", "counter"}
     assert choice["stop"] == "TSL" and set(choice["targets"]) == {"tsl", "pivot_r1"}
     assert lab.choice_from_cfg(_cfg(cross_exit=False, use_stop=False)) == {
-        "entries": [], "exits": [], "stop": "NONE", "targets": [], "source": "CROSS", "stack_gap": 0.05}
+        "entries": [], "exits": [], "stop": "NONE", "targets": [], "source": "CROSS", "stack_gap": 0.05, "stack_fresh": 0}
     fields = lab.settings_for_choice(choice, {"counter_count": 3, "slope_bend_pct": 60.0})
     assert fields["use_vwap"] and fields["use_rsi"] and fields["use_gap_long"] and fields["use_gap_short"] and not fields["use_macd"]
     assert fields["bb_exit"] == "BOTH" and fields["st_exit"] and fields["counter_exit_count"] == 3 and fields["use_stop"] and fields["stop_type"] == "TSL"
@@ -136,6 +136,7 @@ def test_the_combiner_applies_checks_exits_stops_and_the_in_position_rule():
     assert lab.clean_choice({"entries": ["nope", "rsi"], "exits": ["x"], "stop": "weird"}) == {
         "entries": ["rsi"], "exits": [], "stop": "NONE", "targets": [], "entry_from": "09:20", "entry_to": "15:30", "qty": 0,
         "symbols": [], "margin_pct": 20.0, "source": "CROSS", "stack_gap": 0.05,
+        "stack_fresh": 0,
     }
     # the settings the replay needs for this choice ride along
     assert stop["settings"]["use_stop"] and stop["settings"]["stop_type"] == "ATR" and stop["settings"]["cross_exit"]
@@ -438,18 +439,21 @@ def _bot_stack_entries(rich: pd.DataFrame, cfg) -> list[tuple[int, str]]:
     return out
 
 
-@pytest.mark.parametrize("gap", [0.0, 0.05, 0.1])
-def test_three_sma_entries_match_the_bots_own_stack_entry(gap):
-    """The lab's STACK source enters on the same candles as the bot's "Enter on three SMAs with widening gaps"."""
+@pytest.mark.parametrize("gap,fresh", [(0.0, 0), (0.05, 0), (0.1, 0), (0.0, 3), (0.05, 6)])
+def test_three_sma_entries_match_the_bots_own_stack_entry(gap, fresh):
+    """The lab's STACK source enters on the same candles as the bot's "Enter on three SMAs with widening gaps", with
+    and without the fresh line-up check."""
     from candles import resample
     import indicators
 
-    cfg = _cfg(stack_entry=True, stack_widen=2, stack_third=50, stack_min_gap=gap)
+    cfg = _cfg(stack_entry=True, stack_widen=2, stack_third=50, stack_min_gap=gap, stack_fresh=bool(fresh),
+               stack_fresh_candles=fresh or 6)
     s = lab.lab_settings(cfg)
     rich = indicators.enrich(resample(_tape(), 5).reset_index(drop=True), 9, 21, 14)
-    got = [(i, side) for i, side, steps in lab._stack_signals(rich, s) if gap in steps]
+    got = [(i, side) for i, side, steps, age in lab._stack_signals(rich, s) if gap in steps and (not fresh or age <= fresh)]
     assert got == _bot_stack_entries(rich, cfg)
-    assert got  # the test tape trends enough to stack
+    if not fresh:
+        assert got  # the test tape trends enough to stack
 
 
 def test_the_stack_source_is_its_own_set_of_trades():
@@ -465,6 +469,10 @@ def test_the_stack_source_is_its_own_set_of_trades():
     assert cross_out["totals"]["trades"] and stack_out["totals"]["trades"]
     assert stack_out["totals"]["trades"] <= sum(1 for t in stack if 0.0 in t["gap_steps"])
     assert lab.evaluate(trades, {**base, "source": "STACK", "stack_gap": 0.5}, settings)["totals"]["trades"] <= stack_out["totals"]["trades"]
+    every = lab.evaluate(trades, {**base, "source": "STACK", "stack_gap": 0.0}, settings)["totals"]["trades"]
+    fresh = lab.evaluate(trades, {**base, "source": "STACK", "stack_gap": 0.0, "stack_fresh": 2}, settings)["totals"]["trades"]
+    assert fresh <= every and all("stack_age" in t for t in stack)
+    assert lab.settings_for_choice({**base, "source": "STACK", "stack_fresh": 4}, settings)["stack_fresh_candles"] == 4
     fields = lab.settings_for_choice({**base, "source": "STACK", "stack_gap": 0.1}, settings)
     assert fields["stack_entry"] and fields["stack_only"] and fields["stack_min_gap"] == 0.1 and fields["stack_widen"] == 2
     assert lab.settings_for_choice({**base, "source": "CROSS"}, settings)["stack_entry"] is False
