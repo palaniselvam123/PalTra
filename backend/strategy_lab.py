@@ -77,6 +77,7 @@ import stop_plan
 import supertrend
 import target_net
 import trade_flow
+import triple_exit
 import tsl as tsl_mod
 from candles import CANDLE_MINUTES, candle_minutes, resample
 from charges import calculate_charges, legs_for
@@ -140,6 +141,7 @@ EXIT_RULES: dict[str, str] = {
     "decel": "SMA 9 deceleration guard",
     "exit_candle": "SMA cross on the exit candle",
     "flow_exit": "Executed volume exit",
+    "triple": "Three lines: fast SMA crosses the middle SMA",
 }
 STOPS = ("NONE", "ATR", "TSL", "SUPERTREND", "VWAP", "SMART", "PLAN")
 TARGETS: dict[str, str] = {
@@ -164,6 +166,7 @@ EXIT_CANDLE_DEFAULTS = (5, 15, 30, 60)
 DEFAULT_ATR_TARGET = 3.0
 EXIT_REASONS = {
     "cross": "MA_CROSS",
+    "triple": "FAST_MEDIUM_CROSS",
     "bb_band": "BB_TARGET",
     "bb_middle": "BB_MIDDLE",
     "supertrend": "SUPERTREND",
@@ -333,6 +336,8 @@ def lab_settings(cfg) -> dict:
         "stack_lines": list(stack_entry.periods(cfg) or []) or None,
         "stack_widen": stack_entry.widen_need(cfg),
         "stack_third": _int(cfg, "stack_third", stack_entry.THIRD_DEFAULT),
+        # The bot's medium SMA (three-line mode, triple_exit.medium); None = two lines.
+        "sma_medium": triple_exit.medium(cfg),
     }
 
 
@@ -439,6 +444,8 @@ def choice_from_cfg(cfg) -> dict:
         exits.append("exit_candle")
     if flow_exit.on(cfg) and flow_exit.closes(cfg):
         exits.append("flow_exit")
+    if triple_exit.on(cfg):
+        exits.append("triple")
     stop = "NONE"
     use_stop = getattr(cfg, "use_stop", None)
     if use_stop is None or bool(use_stop):
@@ -483,7 +490,10 @@ def settings_for_choice(choice: dict, base: dict | None = None) -> dict:
             out["use_adx_filter"] = "adx" in entries
         else:
             out[f"use_{name}"] = name in entries
-    out["cross_exit"] = "cross" in exits
+    # The three-line exit: the bot's triple_exit with a medium SMA; with two lines its fast / slow pair is the SMA cross.
+    triple = "triple" in exits
+    out["cross_exit"] = "cross" in exits or (triple and not (base or {}).get("sma_medium"))
+    out["triple_exit"] = triple and bool((base or {}).get("sma_medium"))
     band, middle = "bb_band" in exits, "bb_middle" in exits
     out["bb_exit"] = "BOTH" if band and middle else "BAND" if band else "MIDDLE" if middle else "OFF"
     out["st_exit"] = "supertrend" in exits
@@ -975,7 +985,36 @@ def _exit_candidates(x: _Series, e: int, side: str, s: dict, square_ts: int, ric
                 out[name] = list(fill) if fill else None
                 pending.discard(name)
     out["decel"] = _decel_candidate(x, rich, e, last, side, s, square_ts)
+    out["triple"] = _triple_candidate(rich, e, last, side, s, square_ts, x)
     return out
+
+
+def _triple_pair(s: dict) -> tuple[int, int]:
+    """The two shorter lines the three-line exit reads: the bot's fast / medium SMA, else the two shortest of the
+    three-SMA entry's lines (with no medium SMA that is fast / slow, the same as the SMA cross)."""
+    medium = s.get("sma_medium")
+    if medium:
+        return int(s["sma_fast"]), int(medium)
+    lines = sorted(int(n) for n in (s.get("stack_lines") or [s["sma_fast"], s["sma_slow"]]))
+    return lines[0], lines[1]
+
+
+def _triple_candidate(rich: pd.DataFrame, e: int, last: int, side: str, s: dict, square_ts: int, x: _Series) -> list | None:
+    """triple_exit.crossed_against on each candle closed from the entry candle on: the first on which the fast SMA
+    crossed the middle one against the trade, filled at the next candle's open."""
+    a, b = _triple_pair(s)
+    close = pd.to_numeric(rich["close"], errors="coerce")
+    fast = close.rolling(a).mean().to_numpy(dtype=float)
+    mid = close.rolling(b).mean().to_numpy(dtype=float)
+    long = side == "LONG"
+    for j in range(max(e, 1), last + 1):
+        f0, f1, m0, m1 = fast[j - 1], fast[j], mid[j - 1], mid[j]
+        if not all(np.isfinite(v) for v in (f0, f1, m0, m1)):
+            continue
+        if (long and f0 >= m0 and f1 < m1) or (not long and f0 <= m0 and f1 > m1):
+            fill = _fill_after(x, j, square_ts)
+            return list(fill) if fill else None
+    return None
 
 
 def _decel_candidate(x: _Series, rich: pd.DataFrame, e: int, last: int, side: str, s: dict, square_ts: int) -> list | None:

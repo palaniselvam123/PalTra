@@ -473,3 +473,38 @@ def test_the_stack_source_is_its_own_set_of_trades():
     # a run read before the source existed says so
     old = [{k: v for k, v in t.items() if k not in ("source", "gap_steps")} for t in trades if t["source"] == "cross"]
     assert lab.evaluate(old, base, settings)["stack_missing"] is True
+
+
+def test_the_three_line_exit_matches_the_bots_own_triple_exit():
+    """The lab's "Three lines" exit closes on the candle the bot's triple_exit.crossed_against fires, next open."""
+    import triple_exit
+
+    cfg = _cfg(sma_slow=50, sma_medium=21, triple_exit=True, stack_entry=True, stack_widen=2)
+    trades, settings = lab.analyze_stock("TEST", _tape(), cfg, [D1, D2])
+    assert settings["sma_medium"] == 21 and lab._triple_pair(settings) == (9, 21)
+    from candles import resample
+    import indicators
+
+    rich = indicators.enrich(resample(_tape(), 5).reset_index(drop=True), 9, 50, 14)
+    ts = rich["ts"].tolist()
+    checked = 0
+    for t in trades:
+        hit = t["exits"]["triple"]
+        e = ts.index(t["entry_ts"])
+        want = None
+        j = e
+        while j < len(rich) - 1 and dt.datetime.fromtimestamp(ts[j + 1], IST).date().isoformat() == t["day"]:
+            if triple_exit.crossed_against(rich.iloc[: j + 1], t["side"], cfg)[0]:
+                want = ts[j + 1] if ts[j + 1] < t["square"][0] else None
+                break
+            j += 1
+        assert (hit[0] if hit else None) == want
+        checked += bool(hit)
+    assert checked  # the test tape turns enough to cross
+    assert "triple" in lab.choice_from_cfg(cfg)["exits"]
+    fields = lab.settings_for_choice({"exits": ["triple"], "stop": "ATR"}, settings)
+    assert fields["triple_exit"] is True and fields["cross_exit"] is False
+    # two lines only: the pair is fast / slow, so the replay gets the SMA cross exit
+    two = lab.lab_settings(_cfg())
+    assert lab._triple_pair(two) == (9, 21)
+    assert lab.settings_for_choice({"exits": ["triple"], "stop": "ATR"}, two)["cross_exit"] is True
