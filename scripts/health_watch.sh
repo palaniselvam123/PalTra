@@ -5,7 +5,8 @@
 # when the Fly machine is frozen or down. Read-only: it never touches an order.
 #
 # Environment:
-#   HEALTH_URL       default https://paltra.fly.dev/api/health/deep
+#   HEALTH_URL       default https://pritra.fly.dev/api/health/deep (the desk on the new Fly account;
+#                    the workflow passes the repo variable HEALTH_URL when it is set)
 #   CALLMEBOT_USER   Telegram @username or phone to ring (a secret: never printed)
 #   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, TWILIO_TO
 #                    optional: also ring TWILIO_TO with a Twilio voice call from the
@@ -16,7 +17,7 @@
 #   NOW_IST          "<weekday 1-7> <HHMM>" to pretend the time (tests)
 # Exit 0 = healthy. Exit 1 = not working (the run shows red, which is the streak).
 set -u
-URL="${HEALTH_URL:-https://paltra.fly.dev/api/health/deep}"
+URL="${HEALTH_URL:-https://pritra.fly.dev/api/health/deep}"
 STREAK="${STREAK:-0}"
 FIRST_CALL_AT=2   # failed runs in a row before the first call (about 10 minutes at a 5-minute cadence)
 REPEAT_EVERY=6    # then ring again every 6 failed runs (about 30 minutes)

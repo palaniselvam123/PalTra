@@ -92,3 +92,29 @@ about US$60-65 a month).
   links (`SCANNER_LINK_TOKEN`, `BACKTEST_URL`) point at the main desk only.
 - Settings, presets and trade history are not copied. Use Settings → Export / import settings on the
   main desk and import the file here.
+
+## Closing the old account (paltra, paltra-backtest, paltra-scanner)
+
+pritra then becomes the only desk. In this order:
+
+1. **After 15:45 IST, every bot flat** on paltra (no open position, no LIVE bot) and nothing open or
+   pending on Groww itself.
+2. **Copy the data again** (the earlier copy stops at that moment): `/data/sma_terminal.db` and
+   `/data/open_pnl.db` from paltra to pritra the same way as before (backup on paltra, `fly ssh sftp get`,
+   `put` to pritra as `new_*.db`, set every bot to PAPER, `mv` into place, `fly apps restart pritra`).
+   Optional: `scan_history.db`, `trend_reads.db` and the settings files (`fast_bot.json`,
+   `scalp_alerts.json`, `scan_arm.json`, `strategy_presets.json`, `handoff_return.json`, `chop_auto.json`,
+   `trend_picks_auto.json`, `backtest_queue.json`, `active_auto.json`). Backtests made on the backtest
+   server live on its own volume and are lost unless downloaded.
+3. **Enter again on pritra's Settings** (stored encrypted with paltra's key, so not copied): the Groww
+   login (paltra's key can be used once paltra is gone), Telegram / Twilio alert channels, the OpenAI key,
+   news watch lists, and `MCP_TOKEN` (`fly secrets set -a pritra`; point n8n / Gemini / Claude at pritra).
+4. **GitHub**, Settings → Secrets and variables → Actions → Variables: `DEPLOY_BACKTEST` = `false`,
+   `DEPLOY_SCANNER` = `false`. A merge then deploys nothing; deploy with Run workflow → target `desk2`
+   (the default). The health watcher already reads pritra (`HEALTH_URL` overrides it). The old secrets
+   `FLY_API_TOKEN`, `FLY_BACKTEST_API_TOKEN`, `FLY_SCANNER_API_TOKEN` can be deleted.
+5. **pritra's size**: the Free plan runs it on a shared CPU, which can be throttled in busy market hours.
+   For LIVE trading, upgrade the new account to Pay As You Go and set `[[vm]]` in `fly.desk2.toml` to
+   `cpu_kind = 'performance'`, `memory_mb = 4096`.
+6. Close the old account last.
+
