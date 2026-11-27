@@ -350,7 +350,7 @@ function group(bars: Candle[], n: number): Candle[] {
   return out;
 }
 
-const SIZES = [1, 2, 3, 5, 10, 15] as const;
+const SIZES = [1, 2, 3, 5, 10, 15, 30, 60] as const;
 
 /** The candle size: 1-minute candles grouped into longer ones; the bot judges each one once it closes. */
 export function CandleSizePicture({ form, set }: Props) {
@@ -401,7 +401,7 @@ export function CandleSizePicture({ form, set }: Props) {
         {SIZES.map((m) => (
           <label key={m} className={clsx("flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 ring-1 ring-inset", minutes === m ? "bg-sky-400/15 text-sky-100 ring-sky-400/50" : "ring-white/15 hover:bg-white/5")}>
             <input type="radio" name="candle-size-picture" value={m} checked={minutes === m} onChange={() => set("candle_minutes", String(m))} className="accent-sky-400" />
-            {m} min
+            {m === 60 ? "1 hour" : `${m} min`}
           </label>
         ))}
       </div>

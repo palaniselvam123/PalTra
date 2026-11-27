@@ -205,7 +205,7 @@ def test_crosses_are_counted_on_every_candle_size_for_the_no_cross_filter():
     """A steady rise all day crosses on no candle size; a wobbling one crosses on the short ones."""
     import math
 
-    from candles import CANDLE_MINUTES
+    CANDLE_MINUTES = (1, 2, 3, 5, 10, 15)  # the sizes two days of candles can form SMA 21 on
 
     yesterday = [100 + i * 0.05 for i in range(375)]
     steady = _minutes(yesterday, dt.date(2026, 10, 7)).pipe(

@@ -101,6 +101,9 @@ function toCheckMinutes(value: unknown): number[] {
   return kept.length ? kept : [1];
 }
 
+/** The longest slow SMA a 30-minute / 1-hour bot candle can form from Groww's 30-day download (candles.formed_candles). */
+const LONG_CANDLE_MAX_SMA: Record<30 | 60, number> = { 30: 224, 60: 116 };
+
 export const LABELS = SETTING_LABELS;
 
 export function ownSummary(own: Record<string, unknown> | undefined): string {
@@ -1037,11 +1040,28 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
             >
               {CANDLE_MINUTES.map((m) => (
                 <option key={m} value={String(m)}>
-                  {m} minute{m === 1 ? "" : "s"}
+                  {m === 60 ? "1 hour" : `${m} minute${m === 1 ? "" : "s"}`}
                 </option>
               ))}
             </select>
           </label>
+          <p className="mt-1 text-xs text-slate-400">
+            <NewTag id="bot-candle-30-60" /> 30 minutes and 1 hour are new.
+            {Number(form.candle_minutes ?? 1) >= 30 ? (
+              <>
+                {" "}
+                A day has only {Number(form.candle_minutes) === 60 ? "7 one-hour" : "13 thirty-minute"} candles, so the bot loads more
+                days of history for these stocks and gives far fewer signals.{" "}
+                {Number(form.sma_slow) > LONG_CANDLE_MAX_SMA[Number(form.candle_minutes) === 60 ? 60 : 30] ? (
+                  <span className="text-amber-300">
+                    Slow MA {String(form.sma_slow)} is too long for this candle: Groww gives about{" "}
+                    {LONG_CANDLE_MAX_SMA[Number(form.candle_minutes) === 60 ? 60 : 30]} of them, so the average would never form and
+                    the bot would not trade. Use a shorter Slow MA or a smaller candle.
+                  </span>
+                ) : null}
+              </>
+            ) : null}
+          </p>
           <CandleSizePicture form={form} set={set} />
           <SectionTitle>How a trade opens</SectionTitle>
           <div className="mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10">

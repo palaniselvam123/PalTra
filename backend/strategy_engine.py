@@ -60,6 +60,7 @@ from indicators import (
 from candle_patterns import colour_count as _colour_count, colour_min_body as _colour_min_body
 from candle_patterns import closes_bucket, colour_call, pattern_call, per_candle, setting as pattern_setting, uses_colour, uses_nth, uses_patterns
 import nth_candle
+import candles as candles_mod
 from candles import bucket_start, candle_minutes, last_prices, resample
 from gap_mode import Pending, fade_confirmed, judge_exit, judge_pending, uses_gap_mode
 from gap_trail import gap_levels, tighten, uses_gap_stop
@@ -1333,6 +1334,9 @@ class StrategyEngine:
     #: Whether this engine's live prices go to the second-by-second record
     #: (tick_store). A replay's prices are made up from minute candles: never.
     records_ticks = True
+    #: Whether this engine asks the shared quote client for the longer history a 30-minute / 1-hour candle needs
+    #: (candles.note_need). A replay has its own candles: never.
+    asks_history = True
     #: Whether PAPER (and REPLAY) entries take margin from the practice wallet
     #: (paper_wallet). Bots 1-4 and their replays do; the research engines don't.
     uses_wallet = True
@@ -1892,6 +1896,11 @@ class StrategyEngine:
         for symbol in watch:
             if not symbol:
                 continue
+            # A stock traded on 30-minute or 1-hour candles needs more days of 1-minute candles for its slow SMA:
+            # say so to the quote client, which every bot shares (candles.note_need; read-only, no order).
+            own = stock_overrides(cfg, symbol)
+            ask = (candle_minutes(cfg, own), own.get("sma_slow", cfg.sma_slow))
+            _, keep_bars = candles_mod.note_need(id(self), symbol, *ask) if self.asks_history else candles_mod.history_need(*ask)
             try:
                 ltp, frame, source = await self.broker.refresh(symbol)
             except Exception as exc:  # noqa: BLE001
@@ -1899,8 +1908,8 @@ class StrategyEngine:
                     self.last_error = str(exc)
                     self.data_source = "ERROR"
                 continue
-            if frame is not None and not frame.empty and len(frame) > 2500:
-                frame = frame.iloc[-2500:].reset_index(drop=True)
+            if frame is not None and not frame.empty and len(frame) > keep_bars:
+                frame = frame.iloc[-keep_bars:].reset_index(drop=True)
             # The 1-minute tape is kept only for the human review's read-out.
             self._tapes[symbol] = frame
             # Candles of the chosen interval (candles.py); the bot never sees the 1-minute tape then.

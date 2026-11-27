@@ -14,7 +14,15 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-CANDLE_MINUTES = (1, 2, 3, 5, 10, 15)
+CANDLE_MINUTES = (1, 2, 3, 5, 10, 15, 30, 60)
+# Sizes that need more 1-minute history than the five days every stock gets (history_days).
+LONG_MINUTES = 30
+SESSION_MINUTES = 375  # 09:15-15:30
+BASE_HISTORY_DAYS = 5  # what the live tape always downloads
+MAX_HISTORY_DAYS = 29  # Groww's candle download takes at most 30 days
+BASE_TAPE_BARS = 2500  # 1-minute bars a stock's tape keeps
+MAX_TAPE_BARS = 8000
+SPARE_CANDLES = 10  # candles past the slow SMA, so it is formed before the first one of the day
 DEFAULT_MINUTES = 1
 _IST_OFFSET = 5 * 3600 + 30 * 60  # epoch seconds to IST wall clock
 _SESSION_OPEN = 9 * 3600 + 15 * 60  # 09:15 IST
@@ -38,6 +46,60 @@ def candle_minutes(cfg, own: dict | None = None) -> int:
     except (TypeError, ValueError):
         return DEFAULT_MINUTES
     return value if value in CANDLE_MINUTES else DEFAULT_MINUTES
+
+
+def history_need(minutes: int, sma_slow: int) -> tuple[int, int]:
+    """(calendar days of 1-minute candles, bars to keep) a stock on `minutes` candles needs for its slow SMA.
+
+    Up to 15-minute candles this is the five days and 2,500 bars every stock has always had. A 30-minute or 1-hour
+    candle has only 13 or 7 a session, so its slow SMA needs more days (owner's request: 30 min and 1 hour as a bot
+    candle); never more than Groww's 30-day download, so a very long SMA on 1-hour candles is not formed."""
+    try:
+        minutes, slow = int(minutes), max(2, int(sma_slow or 21))
+    except (TypeError, ValueError):
+        return BASE_HISTORY_DAYS, BASE_TAPE_BARS
+    if minutes < LONG_MINUTES:
+        return BASE_HISTORY_DAYS, BASE_TAPE_BARS
+    per_session = -(-SESSION_MINUTES // minutes)
+    sessions = -(-(slow + SPARE_CANDLES) // per_session)
+    days = -(-sessions * 7 // 5) + 3  # weekends, and a holiday or two to spare
+    bars = (sessions + 1) * SESSION_MINUTES
+    return max(BASE_HISTORY_DAYS, min(MAX_HISTORY_DAYS, days)), max(BASE_TAPE_BARS, min(MAX_TAPE_BARS, bars))
+
+
+def formed_candles(minutes: int) -> int:
+    """About how many closed candles of this size the longest download holds (the longest slow SMA it can form)."""
+    sessions = (MAX_HISTORY_DAYS - 3) * 5 // 7
+    return sessions * (-(-SESSION_MINUTES // max(1, int(minutes)))) - SPARE_CANDLES
+
+
+# What each engine's stocks need now: symbol -> {engine id: (days, bars)}. The quote client is shared by every bot
+# and has no settings of its own, so the engines say here what they trade a stock on (StrategyEngine.tick) and the
+# client reads the most any of them asks for. Memory only.
+_NEEDS: dict[str, dict[int, tuple[int, int]]] = {}
+
+
+def note_need(owner: int, symbol: str, minutes: int, sma_slow: int) -> tuple[int, int]:
+    """An engine trades `symbol` on these candles: keep (or drop) its longer-history ask. Returns the ask."""
+    need = history_need(minutes, sma_slow)
+    name = (symbol or "").upper()
+    if need == (BASE_HISTORY_DAYS, BASE_TAPE_BARS):
+        asks = _NEEDS.get(name)
+        if asks is not None:
+            asks.pop(owner, None)
+            if not asks:
+                _NEEDS.pop(name, None)
+    else:
+        _NEEDS.setdefault(name, {})[owner] = need
+    return need
+
+
+def need_of(symbol: str) -> tuple[int, int]:
+    """(days, bars) the stock's tape should hold: the most any engine asked for, else the usual five days."""
+    asks = _NEEDS.get((symbol or "").upper())
+    if not asks:
+        return BASE_HISTORY_DAYS, BASE_TAPE_BARS
+    return max(d for d, _ in asks.values()), max(b for _, b in asks.values())
 
 
 def bucket_start(ts: int, minutes: int) -> int:
