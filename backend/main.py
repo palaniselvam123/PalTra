@@ -19,7 +19,7 @@ import io
 import re
 import types
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -5987,6 +5987,24 @@ class StrategyLabStart(BaseModel):
     label: str = ""
     # The candle to read every stock on (0 / None = the bot's own).
     minutes: Literal[0, 1, 2, 3, 5, 10, 15] | None = None
+    # The Numbers panel: rule numbers for this read only (every stock, the bot's Settings untouched).
+    numbers: dict[str, Any] | None = None
+
+
+def _lab_numbers(raw: dict | None) -> dict:
+    """The Numbers panel's values, checked like Save (ConfigUpdate bounds); only strategy_lab.NUMBER_FIELDS."""
+    raw = {k: v for k, v in (raw or {}).items() if v is not None and v != ""}
+    bad = sorted(k for k in raw if k not in strategy_lab.NUMBER_NAMES)
+    if bad:
+        raise HTTPException(400, f"Not a lab number: {', '.join(bad)}")
+    if not raw:
+        return {}
+    try:
+        checked = ConfigUpdate(**raw)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        raise HTTPException(400, f"{'.'.join(str(x) for x in first.get('loc', []))}: {first.get('msg')}") from exc
+    return {k: getattr(checked, k) for k in raw}
 
 
 class StrategyLabChoice(BaseModel):
@@ -6025,6 +6043,7 @@ def _lab_rules() -> dict:
         "exits": [{"name": k, "label": v} for k, v in strategy_lab.EXIT_RULES.items()],
         "stops": [{"name": k, "label": strategy_lab.STOP_LABELS[k]} for k in strategy_lab.STOPS],
         "targets": [{"name": k, "label": v} for k, v in strategy_lab.TARGETS.items()],
+        "numbers": strategy_lab.NUMBER_FIELDS,
     }
 
 
@@ -6050,16 +6069,18 @@ async def strategy_lab_start(body: StrategyLabStart):
     if bot_engine is None:
         raise HTTPException(400, "Bot must be 1-4.")
     cfg = bot_engine.load_config()
+    numbers = _lab_numbers(body.numbers)
 
     def cfg_for(symbol: str):
-        return _cfg_for(cfg, symbol)
+        return strategy_lab.apply_numbers(_cfg_for(cfg, symbol), numbers)
 
     async def fetch(name, start, end):
         return await fetch_frame(_scan_broker(), name, start, end)
 
     try:
         job = strategy_lab.lab().start(
-            body.symbols, first, last, body.bot, cfg_for, fetch, wait=groww_pressure.wait_for_bots, label=body.label, minutes=body.minutes or None
+            body.symbols, first, last, body.bot, cfg_for, fetch, wait=groww_pressure.wait_for_bots, label=body.label, minutes=body.minutes or None,
+            numbers=numbers, fields=strategy_lab.numbers_of(strategy_lab.apply_numbers(cfg, numbers)),
         )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -6131,8 +6152,11 @@ async def strategy_lab_apply(job_id: str, body: StrategyLabApply):
             raise HTTPException(409, f"Bot {bot}'s backtest is playing: stop it or let it finish first")
         await session.stop()
     choice = strategy_lab.clean_choice(body.model_dump())
-    settings = job.get("settings") or {}
-    fields = dict(strategy_lab.settings_for_choice(choice, settings))
+    settings = dict(job.get("settings") or {})
+    if job.get("fields"):  # the bot's numbers as read (with the panel's changes), not the first stock's own
+        settings["fields"] = job["fields"]
+    # The Numbers panel's changes go with the switches, reset or not.
+    fields = {**(job.get("numbers") or {}), **strategy_lab.settings_for_choice(choice, settings)}
     if body.reset:
         defaults = {k: v for k, v in strategy_defaults().items() if v is not None}
         fields = {**defaults, **strategy_lab.numbers_for_bot(settings, choice), **fields}

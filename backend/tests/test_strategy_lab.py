@@ -419,3 +419,65 @@ def test_a_run_read_before_the_newer_rules_leaves_them_out_of_what_each_rule_add
     assert ("entry", "fresh") not in names and ("stop", "SMART") not in names and ("target", "net") not in names
     assert rec["missing"] == ["entry:fresh", "stop:SMART", "target:net"]
     assert lab.evaluate(trades, lab.clean_choice({}), settings)["missing"] == ["entry:fresh", "stop:SMART", "target:net"]
+
+
+def test_numbers_panel_changes_a_copy_and_the_answers():
+    cfg = _cfg(counter_exit_count=4, target_net_keep=70.0, day_target_min_pct=0.3)
+    out = lab.apply_numbers(cfg, {"counter_exit_count": 1, "target_net_keep": 55.0, "not_a_number": 3})
+    assert out is not cfg and cfg.counter_exit_count == 4 and out.counter_exit_count == 1 and not hasattr(out, "not_a_number")
+    assert lab.apply_numbers(cfg, {}) is cfg
+    fields = lab.lab_settings(out)["fields"]
+    assert fields["counter_exit_count"] == 1 and fields["target_net_keep"] == 55.0 and set(fields) == set(lab.NUMBER_NAMES)
+    # The counter-candle exit fires sooner with 1 candle than with 4
+    slow, _ = lab.analyze_stock("TEST", _tape(), cfg, [D1, D2])
+    fast, _ = lab.analyze_stock("TEST", _tape(), out, [D1, D2])
+    first = lambda trades: [t["exits"].get("counter") for t in trades]  # noqa: E731
+    assert first(slow) != first(fast)
+    # Carried onto the bot on reset, the net and day target included
+    numbers = lab.numbers_for_bot(lab.lab_settings(out), lab.clean_choice({}))
+    assert numbers["target_net_keep"] == 55.0 and numbers["day_target_min_pct"] == 0.3
+
+
+def test_api_reads_the_days_with_lab_numbers_and_carries_them(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.setenv("STRATEGY_LAB_DIR", str(tmp_path / "lab"))
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    import main
+
+    monkeypatch.setattr(lab, "_LAB", None)
+    monkeypatch.setattr(main, "market_is_open", lambda *a, **k: False)
+    tape = _tape()
+
+    async def fake_fetch(broker, name, start, end):
+        return tape
+
+    monkeypatch.setattr(main, "fetch_frame", fake_fetch)
+    with TestClient(main.app) as client:
+        meta = client.get("/api/strategy-lab").json()["rules"]["numbers"]
+        assert any(n["field"] == "target_net_keep" and n["rule"] == "target:net" for n in meta)
+        base = {"symbols": ["TCS"], "date": D1.isoformat(), "end_date": D2.isoformat(), "bot": 1}
+        assert client.post("/api/strategy-lab/start", json={**base, "numbers": {"use_vwap": True}}).status_code == 400
+        assert client.post("/api/strategy-lab/start", json={**base, "numbers": {"target_net_keep": 500}}).status_code == 400
+        ok = client.post("/api/strategy-lab/start", json={**base, "numbers": {"counter_exit_count": 2, "target_net_keep": 60}})
+        assert ok.status_code == 200, ok.text
+        job = ok.json()["job"]
+        assert job["numbers"] == {"counter_exit_count": 2, "target_net_keep": 60.0} and job["fields"]["target_net_keep"] == 60.0
+        for _ in range(600):
+            if not client.get("/api/strategy-lab").json()["running"]:
+                break
+            time.sleep(0.05)
+        from models import BotConfig as Cfg
+
+        with database.session_factory()() as db:
+            assert db.get(Cfg, 1).target_net_keep != 60.0  # the bot's Settings untouched by the read
+        applied = client.post(f"/api/strategy-lab/{job['id']}/apply", json={"entries": [], "exits": ["cross", "counter"], "stop": "ATR"})
+        assert applied.status_code == 200, applied.text
+        with database.session_factory()() as db:
+            row = db.get(Cfg, 1)
+            assert row.target_net_keep == 60.0 and row.counter_exit_count == 2  # carried without reset
+    database.reset_engine()

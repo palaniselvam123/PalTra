@@ -3510,7 +3510,7 @@ export const smaApi = {
   regimeStudyStop: () => request<RegimeStudy>("/api/regime-study/stop", { method: "POST" }, 20000, false),
   /** Strategy lab (backend strategy_lab.py): base trades with every rule's answer, any choice evaluated in seconds. */
   strategyLab: () => request<StrategyLabView>("/api/strategy-lab", undefined, undefined, false),
-  strategyLabStart: (body: { symbols: string[]; date: string; end_date?: string; bot: number; label?: string; minutes?: number }) =>
+  strategyLabStart: (body: { symbols: string[]; date: string; end_date?: string; bot: number; label?: string; minutes?: number; numbers?: Record<string, StrategyLabNumberValue> }) =>
     request<StrategyLabView & { job: StrategyLabJob }>("/api/strategy-lab/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   strategyLabStop: () => request<StrategyLabView>("/api/strategy-lab/stop", { method: "POST" }, 20000, false),
   strategyLabJob: (id: string) =>
@@ -4048,7 +4048,10 @@ export type RegimeBucket = {
 export type RegimeSignal = { key: string; label: string; buckets: RegimeBucket[]; spread: number; pnl_spread: number; verdict: string };
 /** Strategy lab (backend strategy_lab.py). A rule's name and its label on the screen. */
 export type StrategyLabRule = { name: string; label: string };
-export type StrategyLabRules = { entries: StrategyLabRule[]; exits: StrategyLabRule[]; stops: StrategyLabRule[]; targets: StrategyLabRule[] };
+/** One number behind a lab rule (a bot setting); `rule` is "general" or "entry:rsi", "stop:SMART", "target:net"... */
+export type StrategyLabNumber = { field: string; label: string; rule: string; kind: "num" | "int" | "bool" | "text" | "choice"; choices?: string[] };
+export type StrategyLabNumberValue = number | string | boolean | null;
+export type StrategyLabRules = { entries: StrategyLabRule[]; exits: StrategyLabRule[]; stops: StrategyLabRule[]; targets: StrategyLabRule[]; numbers?: StrategyLabNumber[] };
 export type StrategyLabStop = "NONE" | "ATR" | "TSL" | "SUPERTREND" | "VWAP" | "SMART" | "PLAN";
 export type StrategyLabChoice = {
   entries: string[];
@@ -4095,6 +4098,10 @@ export type StrategyLabJob = {
   finished_at: string | null;
   settings: Record<string, unknown> | null;
   choice: StrategyLabChoice | null;
+  /** The Numbers panel's changes this run was read with (every stock). */
+  numbers?: Record<string, StrategyLabNumberValue>;
+  /** The bot's numbers as read, with those changes on. */
+  fields?: Record<string, StrategyLabNumberValue>;
 };
 export type StrategyLabView = { running: boolean; current: StrategyLabJob | null; jobs: StrategyLabJob[]; rules: StrategyLabRules };
 export type StrategyLabTotals = {
