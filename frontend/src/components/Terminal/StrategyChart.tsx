@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Layers, Loader2, Maximize2, Minimize2, Newspaper, Pin, PinOff, Radio, Ruler, SlidersHorizontal, Table2, TrendingUp, X } from "lucide-react";
+import { BarChartHorizontal, ChevronDown, ChevronUp, Eye, EyeOff, GripHorizontal, History, Layers, Loader2, Maximize2, Minimize2, Newspaper, Pin, PinOff, Radio, Ruler, Scissors, SlidersHorizontal, Table2, TrendingUp, X } from "lucide-react";
 import clsx from "clsx";
 import {
   ColorType,
@@ -34,6 +34,7 @@ import { usePinned } from "@/lib/usePinned";
 import { StockNewsPanel } from "./StockNewsPanel";
 import { DrillAsk, DrillPanel, drillSizes, withSlopes, type Drill, type DrillAskAt } from "./ChartDrill";
 import { qtyShort } from "@/lib/qtyShort";
+import { cutChart, cutTrades, orderAfter, orderBefore } from "@/lib/chartCut";
 
 type Props = {
   chart: ChartPayload | null;
@@ -774,6 +775,7 @@ function baseWhy(p: {
 }
 
 const NO_MARKERS: ChartPayload["markers"] = [];
+const NO_TRADES: TradeRow[] = [];
 const BOX_SMALL_KEY = "sma.chart.posbox.small";
 const BOX_POS_KEY = "sma.chart.posbox.pos";
 const POC_COLOR = "#FACC15";
@@ -1164,7 +1166,7 @@ function livePnl(state: SmaState | null): { gross: number; pct: number; points: 
   };
 }
 
-export function StrategyChart({ chart, state, trades = [], allTrades, closing, onClose, onReverse, onLiveBars, pin, onHoldChange }: Props) {
+export function StrategyChart({ chart: liveChart, state, trades: liveTrades = NO_TRADES, allTrades: liveAllTrades, closing, onClose, onReverse, onLiveBars, pin, onHoldChange }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -1339,10 +1341,20 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   // come at the bot's size and bigger sizes are merged from them here; a smaller size
   // (1 or 3 minutes for a 5-minute bot) or one the bot's candle does not divide into
   // is asked of the server, which draws it from the 1-minute tape.
-  const liveSource = Math.max(1, Number(chart?.candle_minutes) || 1);
+  const liveSource = Math.max(1, Number(liveChart?.candle_minutes) || 1);
   const botCandle = Math.max(1, Number(state?.candle_minutes) || liveSource);
   const barChoices: number[] = Array.from(new Set<number>([...BAR_MINUTES, botCandle])).sort((a, b) => a - b);
   const bar: number = barChoices.includes(pickedBar) ? pickedBar : botCandle;
+  // "Hide what came after" (lib/chartCut.ts, display only): the start of the last candle shown; everything later
+  // (candles, lines, markers, readings, the trades' exits) is cut, so a finished day reads as the bot saw it then.
+  const [cutAt, setCutAt] = useState<number | null>(null);
+  const [cutPick, setCutPick] = useState(false);
+  const cutPickRef = useRef(false);
+  cutPickRef.current = cutPick;
+  const cutEnd = cutAt == null ? null : cutAt + bar * 60;
+  const chart = useMemo(() => cutChart(liveChart, cutEnd), [liveChart, cutEnd]);
+  const trades = useMemo(() => cutTrades(liveTrades, cutEnd), [liveTrades, cutEnd]);
+  const allTrades = useMemo(() => (liveAllTrades ? cutTrades(liveAllTrades, cutEnd) : undefined), [liveAllTrades, cutEnd]);
   const serverInterval = bar !== botCandle && !(bar > botCandle && bar % botCandle === 0) ? bar : null;
   const measureLineRef = useRef<ISeriesApi<"Line"> | null>(null);
   const [measuring, setMeasuring] = useState(false);
@@ -1374,7 +1386,8 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   // later at the default width, squeezed against the right edge with empty space to the left.
   const fittedFor = useRef("");
   const [range, setRange] = useState(() => presetRange(0));
-  const [past, setPast] = useState<(ChartPayload & { symbol: string; from: string; to: string; interval?: number }) | null>(null);
+  const [pastRaw, setPast] = useState<(ChartPayload & { symbol: string; from: string; to: string; interval?: number }) | null>(null);
+  const past = useMemo(() => cutChart(pastRaw, cutEnd), [pastRaw, cutEnd]);
   const [loadingPast, setLoadingPast] = useState(false);
   const [pastError, setPastError] = useState<string | null>(null);
   const pastSeq = useRef(0);
@@ -1397,6 +1410,31 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     setLoadingPast(false);
   }, [symbol]);
   const view = past ?? chart;
+  // The uncut candle starts at the size on screen, for the cut's step buttons; another stock, size or range ends the cut.
+  const cutTimes = useMemo(() => {
+    const raw = pastRaw ?? liveChart;
+    if (!raw) return [];
+    return Array.from(new Set(sessionCandles(raw.candles).map((c) => bucketStart(c.time, bar)))).sort((a, b) => a - b);
+  }, [pastRaw, liveChart, bar]);
+  useEffect(() => {
+    setCutAt(null);
+    setCutPick(false);
+  }, [symbol, bar, pastRaw?.symbol, pastRaw?.from, pastRaw?.to]);
+  const cutStep = (by: number) => {
+    if (!cutTimes.length) return;
+    const at = cutAt == null ? cutTimes.length - 1 : cutTimes.findIndex((t) => t >= cutAt);
+    const next = (at < 0 ? cutTimes.length - 1 : at) + by;
+    if (next >= cutTimes.length - 1 && by > 0) setCutAt(null); // the last candle: nothing left to hide
+    else setCutAt(cutTimes[Math.max(0, Math.min(cutTimes.length - 1, next))]);
+  };
+  // Stop on the last candle that closed before an order, so the order itself is the next thing revealed.
+  const cutBeforeOrder = (order: ChartPayload["markers"][number] | null) => {
+    if (!order) return;
+    const before = cutTimes.filter((t) => t + bar * 60 <= order.time);
+    setCutAt(before.length ? before[before.length - 1] : cutTimes[0] ?? null);
+  };
+  const cutNextOrder = orderAfter(pastRaw ?? liveChart, cutEnd);
+  const cutPrevOrder = orderBefore(pastRaw ?? liveChart, cutAt == null ? null : cutAt);
 
   // Candles as drawn: live bars (the bot's candle interval, 1 minute by
   // default) merged into the chosen size, or the past range Groww already built
@@ -1575,7 +1613,7 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
   // Candle times change with the size, range or stock, so an old measurement no longer fits.
   useEffect(() => {
     setMeasure(NO_MEASURE);
-  }, [bar, past, symbol]);
+  }, [bar, pastRaw, symbol]);
   useEffect(() => {
     const line = measureLineRef.current;
     if (!line) return;
@@ -1983,6 +2021,12 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
 
     // Measure: first click is the start, second the end, a third starts again.
     const onClick = (param: { time?: unknown; point?: { x: number; y: number } }) => {
+      if (cutPickRef.current && typeof param.time === "number") {
+        // "Hide what came after": this candle becomes the last one shown.
+        setCutAt(drillStartRef.current(param.time) ?? param.time);
+        setCutPick(false);
+        return;
+      }
       if (!measuringRef.current && drillOnRef.current && typeof param.time === "number" && param.point) {
         // Drill-down: ask which smaller size to split this candle into (a drilled candle maps back to its own).
         const t = drillStartRef.current(param.time);
@@ -2434,7 +2478,9 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
     // A short live series (few big candles) fills the width instead of hugging the right edge.
     if (past || rowsRef.current.length <= 150) api.timeScale().fitContent();
     else api.timeScale().scrollToRealTime();
-  }, [past, bar]);
+    // The loaded range, not its cut copy: hiding later candles must not re-fit the zoom.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pastRaw, bar]);
 
   const pnl = livePnl(state);
   const pos = state?.position;
@@ -2711,6 +2757,25 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           >
             {hold ? <PinOff size={14} aria-hidden /> : <Pin size={14} aria-hidden />}
             {hold ? "Holding" : "Hold view"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (cutAt != null || cutPick) {
+                setCutAt(null);
+                setCutPick(false);
+              } else setCutPick(true);
+            }}
+            aria-pressed={cutAt != null || cutPick}
+            title="Hide the candles and lines after a candle you click, so a finished day reads as the bot saw it at that moment. Then reveal it one candle or one order at a time."
+            className={clsx(
+              "flex min-h-9 items-center gap-1 rounded-md px-2 text-xs ring-1 ring-inset",
+              cutAt != null || cutPick ? "bg-amber-400/20 font-semibold text-amber-100 ring-amber-400/50" : "text-slate-300 ring-white/10 hover:bg-white/5"
+            )}
+          >
+            <Scissors size={14} aria-hidden />
+            {cutAt != null ? "Show all" : cutPick ? "Click a candle…" : "Hide what came after"}
+            <NewTag id="term-chart-hide-after" link={false} />
           </button>
           <button
             type="button"
@@ -3198,6 +3263,51 @@ export function StrategyChart({ chart, state, trades = [], allTrades, closing, o
           </div>
         )}
       </div>
+      {cutAt != null || cutPick ? (
+        <div className="flex flex-wrap items-center gap-2 border-t border-white/5 px-3 py-2 text-xs text-slate-300 sm:px-4">
+          {cutAt == null ? (
+            <span className="text-amber-200">Click the last candle you want to see. Everything after it will be hidden.</span>
+          ) : (
+            <>
+              <span className="font-semibold text-amber-200">
+                Hidden after the {istClock(cutAt)} candle ({istDay(cutAt)})
+              </span>
+              <button type="button" onClick={() => cutStep(-1)} className="min-h-9 rounded-md px-2 ring-1 ring-inset ring-white/10 hover:bg-white/5" title="Hide one more candle">
+                ‹ Candle
+              </button>
+              <button type="button" onClick={() => cutStep(1)} className="min-h-9 rounded-md px-2 ring-1 ring-inset ring-white/10 hover:bg-white/5" title="Reveal the next candle">
+                Candle ›
+              </button>
+              <button
+                type="button"
+                disabled={!cutPrevOrder}
+                onClick={() => cutBeforeOrder(cutPrevOrder)}
+                className="min-h-9 rounded-md px-2 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
+                title="Go back to just before the previous entry or exit"
+              >
+                ‹ Before previous order
+              </button>
+              <button
+                type="button"
+                disabled={!cutNextOrder}
+                onClick={() => cutBeforeOrder(cutNextOrder)}
+                className="min-h-9 rounded-md px-2 ring-1 ring-inset ring-white/10 hover:bg-white/5 disabled:opacity-40"
+                title="Jump to the last candle that closed before the next entry or exit: what the bot had seen when it decided"
+              >
+                Before next order ›
+              </button>
+              <button type="button" onClick={() => setCutPick(true)} className="min-h-9 rounded-md px-2 ring-1 ring-inset ring-white/10 hover:bg-white/5">
+                Pick another candle
+              </button>
+              <span className="text-slate-400">
+                {cutNextOrder
+                  ? `Next hidden order: ${cutNextOrder.kind === "ENTRY" ? (cutNextOrder.direction === "LONG" ? "buy" : "sell") : "exit"} at ${istClock(cutNextOrder.time)}. Press Candle › to reveal it.`
+                  : "No more orders after this point."}
+              </span>
+            </>
+          )}
+        </div>
+      ) : null}
       <DrillPanel drill={drill} loading={drillLoading} error={drillError} onClear={clearDrill} />
       {/* Under the dates, like Groww's range buttons. */}
       <RangeBar

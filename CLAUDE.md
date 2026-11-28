@@ -615,6 +615,13 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`&date=&run=` for a replay, `&desk=research`) in a new tab, a read-only
   chart that follows the replay while it plays and shows the replayed day
   afterwards. "Hold view" on the chart keeps its zoom, scroll and stock.
+  **Hide what came after** (`frontend/src/lib/chartCut.ts`, display only; the chart toolbar's button, owner's request: on a
+  finished backtest the later candles and lines give the answer away): press it and click a candle (`cutPick` → `cutAt`, the
+  start of the last candle shown); `StrategyChart` then reads cut copies of the live payload, the past range and the trades
+  (`cutChart`: candles, markers, refused crosses, buyers / executed reads, the bot's notes and trend readings before the cut;
+  an entry whose exit is hidden shows as open; `cutTrades`: later trades dropped, a later exit blanked). The bar under the
+  chart steps one candle either way, jumps to the last candle closed before the next / previous order (`orderAfter` /
+  `orderBefore`) and names the next hidden order; Show all, or another stock, candle size or range, ends it.
   **Drill-down candles** (`components/Terminal/ChartDrill.tsx`, display only; the chart's "Drill down" switch, on by default,
   kept per browser as `sma.chart.drill`): clicking a candle asks for a smaller size that divides it (`drillSizes`: 1 / 2 / 3
   / 5 / 10 / 15 / 30 / 60 under the candle on screen) and whether to split the candle before it too (on by default); the chart
