@@ -2117,7 +2117,12 @@ spinning top), body and range) / Matched / Call columns
   back by `settings_for_choice`; a run read before has no answer for them (`missing_rules`, result `missing`): greyed on
   the page ("read the days again") and skipped by `recommend`. `recommend` (`POST …/recommend`, `judge` `NET` | `ROC`): every rule toggled one at a time against the choice ("what
   each rule adds", `delta_net`, and the capital it needs `capital_changed` = peak margin with the return on it `roc_changed` = net ÷ that, %) and a greedy climb (`SEARCH_STEPS`, `SEARCH_MIN_TRADES`) to the best found, judged by net or by return on capital (`_score`); the page shows it above the rule ticks (`StrategyLab.BestFound`: Judge by, default return on capital, Use it).
-  `choice_from_cfg` is the bot's own switches, the run's starting choice. **Auto-arm picks** (`StrategyLabStart.auto_arm`, `LabAutoArm`; owner's request: test on the stocks the Trend quality
+  `choice_from_cfg` is the bot's own switches, the run's starting choice. **What it cannot play** (`not_played` / `not_played_all`, job `not_played`; owner's case: a backtest of the same bot
+  took 50 trades where the lab kept 21): at Start `main._lab_not_played` lists every strategy field of the bot (and of the
+  picked stocks' own settings, `stocks`) that differs from its default, is in use (`backtest_compare.in_use`, `_SWITCH_OF`)
+  and is not one the lab knows (`played_fields`: `settings_for_choice` + `numbers_for_bot` + `_READ_PREFIXES`), plus an
+  entry mode other than SMA; the page's "Will a backtest match this?" box (`StrategyLab.NotPlayed`). A new strategy setting
+  shows there by itself until the lab plays it. **Auto-arm picks** (`StrategyLabStart.auto_arm`, `LabAutoArm`; owner's request: test on the stocks the Trend quality
   auto-arm picks, not the armed ones): the stock lists are what the rule reads; `StrategyLab._pick` loads every tape, then
   each day's picks with `auto_arm.picks_for_day` (TREND source, the rule built by `main._auto_arm_rule` like the auto-arm
   replay, unset values = the live auto-arm's Scalp alerts settings), only the picked stocks are read on their own days and

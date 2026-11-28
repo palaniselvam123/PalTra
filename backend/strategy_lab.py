@@ -593,6 +593,130 @@ def numbers_for_bot(settings: dict | None, choice: dict) -> dict:
 
 
 # ----------------------------------------------------------------------------------------------------------------
+# What the lab cannot play (owner's request: a backtest of the same bot gave other trades and nothing said why)
+# ----------------------------------------------------------------------------------------------------------------
+
+#: Numbers the lab reads through the bot's own modules (not listed by `numbers_for_bot`).
+_READ_PREFIXES = ("day_target_", "target_net_")
+_READ_KEYS = frozenset({"sc_count", "sc_join", "sc_need", "sma_medium"})
+#: Settings that never change a backtest's trades.
+_QUIET_KEYS = frozenset({"turn_alert"})
+#: A number or choice that only matters while its own switch is on: prefix → the switch field(s), any of them on.
+_SWITCH_OF: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("flow_trigger_", ("flow_trigger",)),
+    ("pressure_exit_", ("pressure_exit",)),
+    ("pressure_over_counter", ("pressure_exit",)),
+    ("pressure_entry_", ("pressure_entry",)),
+    ("pressure_flip_", ("pressure_flip",)),
+    ("og_entry_exec_", ("og_entry_exec",)),
+    ("og_entry_wait_", ("og_entry_wait",)),
+    ("og_exit_exec_", ("og_exit_exec",)),
+    ("og_exit_wait_", ("og_exit_wait",)),
+    ("tq_", ("tq_entry", "tq_exit")),
+    ("colour_exit_", ("colour_exit_on",)),
+    ("turn_gap_", ("turn_gap_on",)),
+    ("turn_", ("turn_entry",)),
+    ("fade_unarm_", ("fade_unarm",)),
+    ("live_sma_", ("live_sma_check",)),
+    ("entry_candle_", ("entry_candle_confirm", "handoff_candle")),
+    ("index_rule", ("use_index",)),
+    ("macd_grow_", ("use_macd_grow",)),
+    ("macd_shrink_", ("macd_shrink_exit",)),
+    ("flow_exit_", ("flow_exit",)),
+    ("ha_scope", ("ha_colours",)),
+    ("handoff_now", ("recovery_hold", "vturn_handoff", "chop_losses")),
+)
+_OFF_WORDS = ("", "OFF", "NONE", "0")
+
+
+def _is_on(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().upper() not in _OFF_WORDS
+    return bool(value)
+
+
+def _same_value(a, b) -> bool:
+    if isinstance(a, bool) or isinstance(b, bool):
+        return bool(a) == bool(b)
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(float(a) - float(b)) < 1e-9
+    return str(a if a is not None else "").strip().upper() == str(b if b is not None else "").strip().upper()
+
+
+_PLAYED: frozenset[str] | None = None
+
+
+def played_fields() -> frozenset[str]:
+    """Every BotConfig field the lab knows: the switches of its rules and the numbers behind them."""
+    global _PLAYED
+    if _PLAYED is None:
+        from types import SimpleNamespace
+
+        base = {**lab_settings(SimpleNamespace()), "sma_medium": 21, "sc_minutes": "1"}
+        every = {"entries": list(ENTRY_CHECKS), "exits": list(EXIT_RULES), "stop": "PLAN", "targets": list(TARGETS),
+                 "source": "STACK", "stack_gap": 0.1, "stack_fresh": 3}
+        _PLAYED = frozenset(set(settings_for_choice(every, base)) | set(numbers_for_bot(base, every)) | _READ_KEYS)
+    return _PLAYED
+
+
+def not_played(fields: dict, defaults: dict, in_use=None) -> list[dict]:
+    """The settings in `fields` (a bot's strategy fields) that are on / changed from their default and that the lab
+    does not play, so a backtest of the same bot can trade differently: [{field, value}], switches first.
+
+    `in_use(key, fields)` (backtest_compare.in_use) drops numbers whose own switch is off."""
+    played = played_fields()
+    out: list[dict] = []
+
+    def add(field: str, value) -> None:
+        out.append({"field": field, "value": value})
+
+    mode = str(fields.get("entry_mode") or "SMA").upper()
+    if mode != "SMA":
+        add("entry_mode", mode)  # the lab opens trades on the SMA cross or the three-SMA stack only
+    if str(fields.get("flow_exit_mode") or "EXIT").upper() == "CONFIRM" and _is_on(fields.get("flow_exit")):
+        add("flow_exit_mode", "CONFIRM")
+    if (_is_on(fields.get("use_stop", True)) and str(fields.get("stop_type") or "ATR").upper() == "SMART"
+            and _is_on(fields.get("smart_live", True))):
+        add("smart_live", True)  # the lab sizes the room at the entry only
+    stop = str(fields.get("stop_type") or "ATR").upper()
+    if _is_on(fields.get("use_stop", True)) and stop not in STOPS:
+        add("stop_type", stop)
+    if _is_on(fields.get("stack_entry")) and not _is_on(fields.get("stack_only")):
+        add("stack_only", False)  # the lab plays the cross or the stack, never both
+    for field in sorted(fields):
+        if field in played or field in _QUIET_KEYS or field.startswith(_READ_PREFIXES) or field not in defaults:
+            continue
+        value = fields[field]
+        if value is None or _same_value(value, defaults[field]):
+            continue
+        switch = next((sw for prefix, sw in _SWITCH_OF if field.startswith(prefix) and field not in sw), None)
+        if switch is not None and not any(_is_on(fields.get(name)) for name in switch):
+            continue
+        if in_use is not None and not in_use(field, fields):
+            continue
+        add(field, value)
+    out.sort(key=lambda r: (r["field"] != "entry_mode", not isinstance(r["value"], bool), r["field"]))
+    return out
+
+
+def not_played_all(fields: dict, stock_fields: dict[str, dict], defaults: dict, in_use=None) -> list[dict]:
+    """`not_played` for the bot's shared settings plus each stock's own: a setting only some stocks have on carries
+    `stocks` (their names)."""
+    rows = [{**r, "stocks": []} for r in not_played(fields, defaults, in_use)]
+    seen = {r["field"] for r in rows}
+    extra: dict[str, dict] = {}
+    for symbol in sorted(stock_fields):
+        own = stock_fields[symbol] or {}
+        if not own:
+            continue
+        for r in not_played({**fields, **own}, defaults, in_use):
+            if r["field"] in seen:
+                continue
+            extra.setdefault(r["field"], {**r, "stocks": []})["stocks"].append(symbol)
+    return rows + list(extra.values())
+
+
+# ----------------------------------------------------------------------------------------------------------------
 # Candle cache
 # ----------------------------------------------------------------------------------------------------------------
 
@@ -2075,7 +2199,7 @@ class StrategyLab:
     # -- run
     def start(
         self, symbols: list[str], first: dt.date, last: dt.date, bot: int, cfg_for, fetch, wait=None, label: str = "",
-        minutes: int | None = None, pick_rule=None,
+        minutes: int | None = None, pick_rule=None, not_played: list[dict] | None = None,
     ) -> dict:
         """`minutes` (1/2/3/5/10/15) reads every stock on that candle instead of the bot's own (None = the bot's).
 
@@ -2117,6 +2241,8 @@ class StrategyLab:
             "pick": pick_rule.as_dict() if pick_rule is not None else None,
             "picks": {} if pick_rule is not None else None,
             "phase": "pick" if pick_rule is not None else "read",
+            # The bot's settings in use that the lab does not play (not_played_all), so the page can say why a backtest differs.
+            "not_played": list(not_played or []),
         }
         self.jobs.append(job)
         self.jobs = self.jobs[-KEEP_JOBS:]

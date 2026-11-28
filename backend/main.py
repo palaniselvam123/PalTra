@@ -6183,6 +6183,17 @@ def _lab_rules() -> dict:
     }
 
 
+def _lab_not_played(cfg, symbols: list[str]) -> list[dict]:
+    """The bot's settings in use (shared, and the picked stocks' own) that the Strategy lab does not play."""
+    wanted = {str(s).strip().upper() for s in symbols}
+    own = {name: fields for name, fields in stock_settings(cfg).items() if name.upper() in wanted}
+    try:
+        return strategy_lab.not_played_all(_strategy_fields(_config_dict(cfg)), own, strategy_defaults(), backtest_compare.in_use)
+    except Exception:  # noqa: BLE001 - a note for the page; never stops a run
+        logging.getLogger("sma.strategy_lab").exception("could not list the settings the lab does not play")
+        return []
+
+
 @app.post("/api/strategy-lab/start")
 async def strategy_lab_start(body: StrategyLabStart):
     """Read the picked stocks' past days once (cached candles, read-only, no order) into a table of base trades.
@@ -6226,7 +6237,7 @@ async def strategy_lab_start(body: StrategyLabStart):
     try:
         job = strategy_lab.lab().start(
             body.symbols, first, last, body.bot, cfg_for, fetch, wait=groww_pressure.wait_for_bots, label=body.label,
-            minutes=body.minutes or None, pick_rule=rule,
+            minutes=body.minutes or None, pick_rule=rule, not_played=_lab_not_played(cfg, body.symbols),
         )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
