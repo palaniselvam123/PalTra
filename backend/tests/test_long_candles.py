@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import time
 
 import pandas as pd
 
@@ -75,6 +76,13 @@ def _client(sdk) -> GrowwClient:
     return client
 
 
+def _stale(client) -> None:
+    """Make the held candles due for a refresh. Not `_candle_at.clear()`: a missing time reads as 0, and on a machine
+    booted under a minute ago (a fresh CI runner) time.monotonic() is still inside the refresh interval."""
+    for name in list(client._candle_at):
+        client._candle_at[name] = time.monotonic() - 3600
+
+
 def test_the_live_download_is_unchanged_for_a_stock_nobody_trades_on_long_candles():
     candles._NEEDS.clear()
     sdk = _Sdk()
@@ -97,7 +105,7 @@ def test_a_long_candle_stock_gets_its_older_days_once():
     span_days = (int(ts.iloc[-1]) - int(ts.iloc[0])) / 86_400
     assert candles.BASE_HISTORY_DAYS < span_days <= days + 1
     # The minute-by-minute refresh downloads only the last five days again: the older days are kept.
-    client._candle_at.clear()
+    _stale(client)
     _, again = client._load_quote("SBIN")
     assert len(sdk.calls) == first_calls + 1 and len(again) == len(frame)
     # An hour candle now has its 51 closed candles for SMA 50.
@@ -114,7 +122,7 @@ def test_a_failed_older_download_keeps_the_usual_candles_and_is_asked_again():
     _, frame = client._load_quote("SBIN")
     assert 0 < len(frame) <= candles.BASE_TAPE_BARS and "SBIN" not in client._older
     sdk.fail_older = False
-    client._candle_at.clear()
+    _stale(client)
     client._load_quote("SBIN")
     assert "SBIN" in client._older
     candles._NEEDS.clear()

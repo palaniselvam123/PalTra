@@ -614,3 +614,22 @@ def test_api_starts_a_run_on_auto_arm_picks(tmp_path, monkeypatch):
         assert job["status"] == "DONE" and job["pick"]["min_checks"] == 7 and job["pick"]["max_day"] == 3
         assert job["pick"]["source"] == "TREND" and set(job["picks"]) == {D1.isoformat(), D2.isoformat()}
         assert rules and rules[0].first == dt.time(9, 30) and rules[0].last == dt.time(11, 0)
+
+
+def test_the_lab_names_the_settings_it_does_not_play():
+    """A bot's settings in use that the lab cannot play are listed (why a backtest of the same bot differs)."""
+    import backtest_compare
+    import main
+
+    defaults = main.strategy_defaults()
+    assert lab.not_played(defaults, defaults, backtest_compare.in_use) == []
+    fields = {**defaults, "entry_mode": "COLOUR", "colour_exit_on": True, "join_trend": True, "use_vwap": True,
+              "flow_trigger_pct": 70, "tsl_sl_points": 3, "turn_alert": True, "counter_exit_count": 2}
+    rows = lab.not_played_all(fields, {"SBIN": {"always_in": True}, "TCS": {}}, defaults, backtest_compare.in_use)
+    names = [r["field"] for r in rows]
+    assert names[0] == "entry_mode"
+    assert {"colour_exit_on", "join_trend", "always_in"} <= set(names)
+    # Played rules, numbers whose switch is off and alert-only settings are not listed.
+    assert not {"use_vwap", "flow_trigger_pct", "tsl_sl_points", "turn_alert", "counter_exit_count"} & set(names)
+    assert next(r for r in rows if r["field"] == "always_in")["stocks"] == ["SBIN"]
+    assert next(r for r in rows if r["field"] == "join_trend")["stocks"] == []

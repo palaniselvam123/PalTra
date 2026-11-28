@@ -22,6 +22,7 @@ import {
 } from "@/lib/smaApi";
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { NewTag } from "@/components/ui/NewTag";
+import { settingLabel } from "@/lib/settingLabels";
 import { GuideBar } from "./GuideBar";
 import { DEFAULT_LAB_ARM, LabArmedList, LabAutoArmPick } from "./LabAutoArmPick";
 
@@ -484,6 +485,7 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
             onFind={recommend}
             onUse={useBest}
           />
+          <NotPlayed job={job} />
           {missingRules.size ? (
             <p className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-200 ring-1 ring-inset ring-amber-400/30">
               This run was read before the lab knew {missingRules.size} of its rules (greyed below), so they are left out of
@@ -941,6 +943,58 @@ function EntrySource({
           again with the same stocks and days (the candles are cached, so it is quick).
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/** The bot's settings that are on but the lab cannot play: why a backtest of the same bot gives other trades. */
+function NotPlayed({ job }: { job: StrategyLabJob }) {
+  const rows = job.not_played;
+  if (rows === undefined) {
+    return (
+      <p className="rounded-md bg-slate-800/40 px-3 py-2 text-xs text-slate-400">
+        Read the days again to see which of this bot&apos;s settings the lab cannot play (this run was read before that check).
+      </p>
+    );
+  }
+  const show = (v: unknown) => (v === true ? "on" : v === false ? "off" : String(v));
+  return (
+    <div
+      className={`rounded-md px-3 py-2 text-xs ring-1 ring-inset ${rows.length ? "bg-amber-500/10 text-amber-200 ring-amber-400/30" : "bg-emerald-500/10 text-emerald-200 ring-emerald-400/30"}`}
+    >
+      <p className="font-semibold">
+        Will a backtest match this? <NewTag id="lab-not-played" />
+      </p>
+      {rows.length ? (
+        <>
+          <p className="mt-1">
+            Bot {job.bot} has {rows.length} setting{rows.length === 1 ? "" : "s"} on that the lab cannot play. A backtest of
+            this bot uses them, so its trades and profit will differ from the numbers here:
+          </p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+            {rows.map((r) => (
+              <li key={r.field}>
+                <span className="font-medium">{settingLabel(r.field)}</span>: {show(r.value)}
+                {r.stocks.length ? ` (only ${r.stocks.slice(0, 6).join(", ")}${r.stocks.length > 6 ? ` and ${r.stocks.length - 6} more` : ""})` : ""}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1">
+            To get the same trades in both, tick &quot;Reset the bot&apos;s other settings first&quot; and press
+            &quot;Backtest this in the replay&quot;: the bot is then set to exactly what the lab tested.
+          </p>
+        </>
+      ) : (
+        <p className="mt-1">
+          Every setting Bot {job.bot} has on is one the lab plays, so a backtest of the same stocks and days should take the
+          same trades.
+        </p>
+      )}
+      <p className="mt-1 opacity-80">
+        Small differences always remain: the lab fills at the next candle&apos;s open, the backtest follows the price every 10
+        seconds. A backtest also plays hand-offs to other bots, forced orders when a stock is auto-armed, the daily loss
+        limit and the wallet; the lab does not.
+      </p>
     </div>
   );
 }

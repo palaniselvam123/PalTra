@@ -4192,6 +4192,8 @@ export type StrategyLabJob = {
   picks?: Record<string, { symbol: string; at: string; side?: string; why?: string }[]> | null;
   /** load = reading the candles, pick = finding each day's arms, read = reading the picked stocks' trades. */
   phase?: "load" | "pick" | "read";
+  /** The bot's settings in use that the lab does not play (backend strategy_lab.not_played_all); `stocks` = only those stocks have it. */
+  not_played?: { field: string; value: unknown; stocks: string[] }[];
 };
 /** The Trend quality auto-arm rule for the Strategy lab's picks (backend LabAutoArm); unset values = the live auto-arm's. */
 export type LabAutoArmBody = {
