@@ -16,6 +16,9 @@ reads as `PCT`). Stateless: the floor comes from the best price, so a restart fi
 from __future__ import annotations
 
 EXIT_REASON = "TARGET_NET"
+#: The stop the net moved up to its floor was hit (in LIVE Groww's stop filled it, so no second exit): the same net,
+#: booked under its own name instead of the stop type's ("ATR SL") so a profit lock reads as one.
+STOP_REASON = "NET_SL_HIT"
 DEFAULT_KEEP = 70.0
 DEFAULT_KEEP2 = 75.0
 DEFAULT_AT2 = 2.0
