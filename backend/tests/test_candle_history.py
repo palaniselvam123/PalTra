@@ -158,6 +158,9 @@ def test_markers_show_entries_and_exits_inside_the_range(db):
     assert out["markers"][1]["net_pnl"] == 12.0
     assert out["markers"][0]["net_pnl"] == 12.0  # the entry is coloured by the trade's result too
     assert out["markers"][1]["reason"] == "MA_CROSS"  # the chart colours stop exits from this
+    # The trade card of a past run reads these when the blotter list does not hold the trade.
+    assert out["markers"][1]["gross_pnl"] == 30.0 and out["markers"][0]["gross_pnl"] == 30.0
+    assert out["markers"][1]["qty"] == 10
     assert out["entry_price"] is None and out["sl_trigger"] is None
 
 
