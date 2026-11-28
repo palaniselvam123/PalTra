@@ -2107,7 +2107,13 @@ spinning top), body and range) / Matched / Call columns
   back by `settings_for_choice`; a run read before has no answer for them (`missing_rules`, result `missing`): greyed on
   the page ("read the days again") and skipped by `recommend`. `recommend` (`POST …/recommend`, `judge` `NET` | `ROC`): every rule toggled one at a time against the choice ("what
   each rule adds", `delta_net`, and the capital it needs `capital_changed` = peak margin with the return on it `roc_changed` = net ÷ that, %) and a greedy climb (`SEARCH_STEPS`, `SEARCH_MIN_TRADES`) to the best found, judged by net or by return on capital (`_score`); the page shows it above the rule ticks (`StrategyLab.BestFound`: Judge by, default return on capital, Use it).
-  `choice_from_cfg` is the bot's own switches, the run's starting choice. `GET /api/strategy-lab` (runs, `rules` with
+  `choice_from_cfg` is the bot's own switches, the run's starting choice. **Auto-arm picks** (`StrategyLabStart.auto_arm`, `LabAutoArm`; owner's request: test on the stocks the Trend quality
+  auto-arm picks, not the armed ones): the stock lists are what the rule reads; `StrategyLab._pick` loads every tape, then
+  each day's picks with `auto_arm.picks_for_day` (TREND source, the rule built by `main._auto_arm_rule` like the auto-arm
+  replay, unset values = the live auto-arm's Scalp alerts settings), only the picked stocks are read on their own days and
+  `armed_trades` keeps the trades entered after each stock's arm minute (`armed_at`). The job carries `pick` (the rule) and
+  `picks` (per day: symbol, at, side, why); the page's "Which stocks" switch (`components/Scalp/LabAutoArmPick.tsx`,
+  "Stocks auto-armed each day"), and "Backtest this in the replay" then starts the auto-arm replay with the same rule. `GET /api/strategy-lab` (runs, `rules` with
   labels), `GET /api/strategy-lab/{id}` (the run's choice evaluated), `POST /api/strategy-lab/stop`, `DELETE
   /api/strategy-lab/{id}`. UI: lists / days / bot / name, Read the days, the runs, three rule boxes (Select all / Clear),
   stop and targets, entry hours, qty, the totals, "What does each rule add?" (table + "Use the best found"), the equity

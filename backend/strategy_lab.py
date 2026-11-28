@@ -1961,6 +1961,29 @@ def trading_days_between(first: dt.date, last: dt.date) -> list[dt.date]:
     return out
 
 
+def armed_trades(trades: list[dict], picks: dict[str, list[dict]]) -> list[dict]:
+    """The trades the auto-arm picks allow: only on a day the stock was armed, and only those entered after its arm
+    minute (a cross on a candle that closed before the stock was armed was already on the tape, as live, where an armed
+    stock waits for a fresh signal). Each kept trade carries `armed_at` (HH:MM)."""
+    armed: dict[tuple[str, str], tuple[int, str]] = {}
+    for day, got in (picks or {}).items():
+        d = dt.date.fromisoformat(day)
+        for p in got or []:
+            at = str(p.get("at") or "")
+            try:
+                hh, mm = (int(v) for v in at.split(":"))
+            except ValueError:
+                continue
+            ts = int(dt.datetime.combine(d, dt.time(hh, mm), tzinfo=IST).timestamp())
+            armed.setdefault((day, str(p.get("symbol") or "").upper()), (ts, at))
+    out: list[dict] = []
+    for t in trades:
+        hit = armed.get((str(t.get("day")), str(t.get("symbol") or "").upper()))
+        if hit and int(t.get("entry_ts") or 0) > hit[0]:
+            out.append({**t, "armed_at": hit[1]})
+    return out
+
+
 def _meta_path() -> Path:
     return _data_dir() / "jobs.json"
 
@@ -2051,9 +2074,13 @@ class StrategyLab:
 
     # -- run
     def start(
-        self, symbols: list[str], first: dt.date, last: dt.date, bot: int, cfg_for, fetch, wait=None, label: str = "", minutes: int | None = None
+        self, symbols: list[str], first: dt.date, last: dt.date, bot: int, cfg_for, fetch, wait=None, label: str = "",
+        minutes: int | None = None, pick_rule=None,
     ) -> dict:
-        """`minutes` (1/2/3/5/10/15) reads every stock on that candle instead of the bot's own (None = the bot's)."""
+        """`minutes` (1/2/3/5/10/15) reads every stock on that candle instead of the bot's own (None = the bot's).
+
+        `pick_rule` (an auto_arm.AutoArmRule, Trend quality): `symbols` are the stocks the rule reads; each day only the
+        stocks it would have armed are traded, from their arm minute on (`armed_trades`)."""
         if self.running:
             raise RuntimeError("A Strategy lab run is already going. Stop it or wait for it to finish.")
         if minutes is not None and int(minutes) not in CANDLE_MINUTES:
@@ -2086,37 +2113,92 @@ class StrategyLab:
             "finished_at": None,
             "settings": None,
             "choice": None,
+            # Auto-arm picks: the rule (as saved on a backtest run) and, per day, each stock armed with its minute.
+            "pick": pick_rule.as_dict() if pick_rule is not None else None,
+            "picks": {} if pick_rule is not None else None,
+            "phase": "pick" if pick_rule is not None else "read",
         }
         self.jobs.append(job)
         self.jobs = self.jobs[-KEEP_JOBS:]
         self.current = job
         self._stop = False
         self._save()
-        self._task = asyncio.create_task(self._run(job, names, days, cfg_for, fetch, wait))
+        self._task = asyncio.create_task(self._run(job, names, days, cfg_for, fetch, wait, pick_rule))
         return job
 
     def stop(self) -> dict:
         self._stop = True
         return self.view()
 
-    async def _run(self, job: dict, names: list[str], days: list[dt.date], cfg_for, fetch, wait) -> None:
+    async def _pick(self, job: dict, names: list[str], days: list[dt.date], fetch, wait, rule) -> tuple[dict, dict]:
+        """Every stock's tape, then each day's auto-arm picks (auto_arm.picks_for_day, the auto-arm replay's own
+        reading). Returns (tapes, {day ISO: [{symbol, at, side, why}]})."""
+        import auto_arm
+
+        first = days[0] - dt.timedelta(days=WARMUP_DAYS)
+        tapes: dict[str, pd.DataFrame] = {}
+        job["phase"], job["done"], job["total"] = "load", 0, len(names)
+        for name in names:
+            if self._stop:
+                return tapes, {}
+            try:
+                if wait is not None:
+                    await wait()
+                tape = await load_tape(name, first, days[-1], fetch)
+                if tape is not None and not tape.empty:
+                    tapes[name] = tape
+            except Exception as exc:  # noqa: BLE001 - one stock never stops the run
+                job["errors"].append({"symbol": name, "error": str(exc)[:200]})
+            job["done"] += 1
+            await asyncio.sleep(0)
+        picks: dict[str, list[dict]] = {}
+        job["phase"], job["done"], job["total"] = "pick", 0, len(days)
+        for day in days:
+            if self._stop:
+                break
+            got = await asyncio.to_thread(auto_arm.picks_for_day, tapes, day, rule)
+            picks[day.isoformat()] = [{k: p.get(k) for k in ("symbol", "at", "side", "why")} for p in got]
+            job["picks"] = picks
+            job["done"] += 1
+            await asyncio.sleep(0)
+        return tapes, picks
+
+    async def _run(self, job: dict, names: list[str], days: list[dt.date], cfg_for, fetch, wait, rule=None) -> None:
         first = days[0] - dt.timedelta(days=WARMUP_DAYS)
         last = days[-1]
         rows: list[dict] = []
         settings: dict | None = None
         choice: dict | None = None
+        tapes: dict[str, pd.DataFrame] = {}
+        picks: dict[str, list[dict]] | None = None
         try:
+            if rule is not None:
+                tapes, picks = await self._pick(job, names, days, fetch, wait, rule)
+                chosen = sorted({p["symbol"] for got in picks.values() for p in got})
+                if settings is None and names:
+                    cfg0 = cfg_for(names[0])
+                    if job.get("minutes"):
+                        cfg0 = with_candle(cfg0, int(job["minutes"]))
+                    settings, choice = lab_settings(cfg0), choice_from_cfg(cfg0)
+                names = chosen
+                job["phase"], job["done"], job["total"] = "read", 0, len(names)
             for name in names:
                 if self._stop:
                     break
                 try:
                     if wait is not None:
                         await wait()
-                    tape = await load_tape(name, first, last, fetch)
                     cfg = cfg_for(name)
                     if job.get("minutes"):
                         cfg = with_candle(cfg, int(job["minutes"]))
-                    got, s = await asyncio.to_thread(analyze_stock, name, tape, cfg, days)
+                    if picks is not None:
+                        tape = tapes.get(name)
+                        on = [d for d in days if any(p["symbol"] == name for p in picks.get(d.isoformat(), []))]
+                        got, s = await asyncio.to_thread(analyze_stock, name, tape, cfg, on)
+                        got = armed_trades(got, picks)
+                    else:
+                        tape = await load_tape(name, first, last, fetch)
+                        got, s = await asyncio.to_thread(analyze_stock, name, tape, cfg, days)
                     rows.extend(got)
                     if settings is None:
                         settings = s

@@ -516,3 +516,101 @@ def test_the_three_line_exit_matches_the_bots_own_triple_exit():
     two = lab.lab_settings(_cfg())
     assert lab._triple_pair(two) == (9, 21)
     assert lab.settings_for_choice({"exits": ["triple"], "stop": "ATR"}, two)["cross_exit"] is True
+
+
+def test_auto_arm_picks_keep_only_trades_after_the_arm_minute():
+    """With auto-arm picks only a stock's trades on the day it was armed, entered after its arm minute, count."""
+    def at(day, hhmm):
+        hh, mm = map(int, hhmm.split(":"))
+        return int(dt.datetime.combine(day, dt.time(hh, mm), tzinfo=IST).timestamp())
+
+    trades = [
+        {"symbol": "TEST", "day": D1.isoformat(), "entry_ts": at(D1, "10:00")},   # before the arm: dropped
+        {"symbol": "TEST", "day": D1.isoformat(), "entry_ts": at(D1, "10:30")},   # the arm minute itself: dropped
+        {"symbol": "TEST", "day": D1.isoformat(), "entry_ts": at(D1, "10:35")},   # after: kept
+        {"symbol": "TEST", "day": D2.isoformat(), "entry_ts": at(D2, "11:00")},   # not armed that day: dropped
+        {"symbol": "OTHER", "day": D1.isoformat(), "entry_ts": at(D1, "11:00")},  # never armed: dropped
+    ]
+    picks = {D1.isoformat(): [{"symbol": "TEST", "at": "10:30", "side": "LONG", "why": "strong"}], D2.isoformat(): []}
+    kept = lab.armed_trades(trades, picks)
+    assert [(_hhmm(t["entry_ts"]), t["armed_at"]) for t in kept] == [("10:35", "10:30")]
+
+
+@pytest.mark.asyncio
+async def test_a_run_with_auto_arm_picks_reads_only_the_picked_stocks(tmp_path, monkeypatch):
+    monkeypatch.setenv("STRATEGY_LAB_DIR", str(tmp_path))
+    import auto_arm
+
+    tape = _tape()
+
+    async def fetch(symbol, start, end):
+        return tape
+
+    seen: list[tuple[dt.date, set]] = []
+
+    def fake_picks(frames, day, rule):
+        seen.append((day, set(frames)))
+        return [{"symbol": "TEST", "at": "09:30", "side": "LONG", "why": "strong"}] if day == D1 else []
+
+    monkeypatch.setattr(auto_arm, "picks_for_day", fake_picks)
+    room = lab.StrategyLab()
+    rule = auto_arm.AutoArmRule(source="TREND")
+    job = room.start(["TEST", "SKIP"], D1, D2, 1, lambda symbol: _cfg(), fetch, pick_rule=rule)
+    for _ in range(200):
+        if not room.running:
+            break
+        await asyncio.sleep(0.05)
+    assert job["status"] == "DONE" and job["pick"]["kind"] == auto_arm.KIND
+    # every stock of the universe is read for the picks; only the picked one is analysed, on its own day
+    assert [d for d, _ in seen] == [D1, D2] and seen[0][1] == {"TEST", "SKIP"}
+    assert job["picks"] == {D1.isoformat(): [{"symbol": "TEST", "at": "09:30", "side": "LONG", "why": "strong"}], D2.isoformat(): []}
+    rows = room.trades_of(job["id"])
+    assert rows and {r["symbol"] for r in rows} == {"TEST"} and {r["day"] for r in rows} == {D1.isoformat()}
+    assert all(r["armed_at"] == "09:30" for r in rows)
+    assert job["settings"]["qty"] == 100 and job["choice"] == lab.choice_from_cfg(_cfg())
+
+
+def test_api_starts_a_run_on_auto_arm_picks(tmp_path, monkeypatch):
+    monkeypatch.setenv("SMA_DATABASE_URL", f"sqlite:///{tmp_path}/api.db")
+    monkeypatch.setenv("STRATEGY_LAB_DIR", str(tmp_path / "lab"))
+    monkeypatch.setenv("SCALP_ALERTS_FILE", str(tmp_path / "alerts.json"))
+    monkeypatch.delenv("GROWW_ACCESS_TOKEN", raising=False)
+    import auto_arm
+    import database
+
+    database.reset_engine()
+    database.init_db()
+    from fastapi.testclient import TestClient
+    import main
+
+    monkeypatch.setattr(lab, "_LAB", None)
+    monkeypatch.setattr(main, "market_is_open", lambda *a, **k: False)
+    tape = _tape()
+
+    async def fake_fetch(broker, name, start, end):
+        return tape
+
+    monkeypatch.setattr(main, "fetch_frame", fake_fetch)
+    rules: list = []
+
+    def fake_picks(frames, day, rule):
+        rules.append(rule)
+        return [{"symbol": "TCS", "at": "09:30", "side": "LONG", "why": "strong"}]
+
+    monkeypatch.setattr(auto_arm, "picks_for_day", fake_picks)
+    body = {"symbols": ["TCS", "INFY"], "date": D1.isoformat(), "end_date": D2.isoformat(), "bot": 1,
+            "auto_arm": {"first": "09:30", "last": "11:00", "every_min": 5, "minutes": 5, "min_checks": 7, "max_day": 3}}
+    with TestClient(main.app) as client:
+        bad = {**body, "auto_arm": {**body["auto_arm"], "first": "12:00"}}
+        assert client.post("/api/strategy-lab/start", json=bad).status_code == 400
+        ok = client.post("/api/strategy-lab/start", json=body)
+        assert ok.status_code == 200
+        for _ in range(600):
+            view = client.get("/api/strategy-lab").json()
+            if not view["running"]:
+                break
+            time.sleep(0.05)
+        job = view["jobs"][0]
+        assert job["status"] == "DONE" and job["pick"]["min_checks"] == 7 and job["pick"]["max_day"] == 3
+        assert job["pick"]["source"] == "TREND" and set(job["picks"]) == {D1.isoformat(), D2.isoformat()}
+        assert rules and rules[0].first == dt.time(9, 30) and rules[0].last == dt.time(11, 0)
