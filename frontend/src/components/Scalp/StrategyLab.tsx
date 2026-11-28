@@ -633,7 +633,7 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
                 </span>
                 <label
                   className="inline-flex items-center gap-1.5 text-xs text-slate-300"
-                  title="Off: only the lab's switches change on the bot; its other settings (entry mode, pullbacks, smart stop, hand-offs…) stay and play in the replay too. On: every other strategy setting goes back to its default first and the lab's numbers are put on, so the replay trades only what the lab tested. The Trade list, PAPER/LIVE, name and per-stock settings stay."
+                  title="Off: only the lab's switches change on the bot; its other settings (entry mode, pullbacks, smart stop, hand-offs…) stay and play in the replay too. On: every other strategy setting goes back to its default first and the lab's numbers are put on, so the replay trades only what the lab tested. The Trade list, PAPER/LIVE, name, per-stock settings and the bot's daily limits (max daily loss, max trades a day) stay."
                 >
                   <input type="checkbox" checked={resetFirst} onChange={(e) => setResetFirst(e.target.checked)} disabled={busy} />
                   Reset the bot&apos;s other settings first <NewTag id="lab-replay-reset" />
