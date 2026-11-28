@@ -251,6 +251,8 @@ export function exitOrder(cfg: Partial<SmaConfig> | null | undefined): ExitStep[
     });
   if (cfg.pivot_target === "R1" || cfg.pivot_target === "R2") out.push({ name: `Pivot target (${cfg.pivot_target})`, when: price, code: "PIVOT_TARGET" });
   if (cfg.day_target) out.push({ name: "Day high / low target (today's or yesterday's)", when: price, code: "DAY_LEVEL_TARGET" });
+  if (Number(cfg.trade_loss_rs ?? 0) > 0)
+    out.push({ name: `Loss limit per trade: the trade is down ₹${Number(cfg.trade_loss_rs).toLocaleString("en-IN")}`, when: price, code: "TRADE_LOSS_LIMIT" });
   if (cfg.target_net)
     out.push({ name: "Profit safety net on every trade (keeps part of the best profit)", when: price, code: "TARGET_NET" });
   if (cfg.flow_exit && String(cfg.flow_exit_mode ?? "EXIT").toUpperCase() !== "CONFIRM")

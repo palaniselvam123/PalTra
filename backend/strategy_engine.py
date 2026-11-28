@@ -104,6 +104,7 @@ import handoff_log
 import stop_handoff
 import stock_regime
 import target_net
+import trade_loss
 import day_target
 import live_sma
 import turn_entry
@@ -462,6 +463,7 @@ SNAPSHOT_FIELDS = (
     "day_target", "day_target_min_pct", "day_target_early_pct", "day_target_skip_min",
     "target_net", "target_net_keep", "target_net_keep2", "target_net_at2",
     "target_net_start", "target_net_start_pct", "target_net_start_rs", "target_net_start_atr",
+    "trade_loss_rs",
     "live_sma_check", "live_sma_min_gap",
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
@@ -2196,6 +2198,7 @@ class StrategyEngine:
         await self._trail_smart(symbol_cfg)
         await self._trail_stop_plan(symbol_cfg)
         await self._watch_stop(symbol_cfg)
+        await self._watch_trade_loss(symbol_cfg)
         await self._watch_bollinger(symbol_cfg)
         await self._watch_counter_candles(symbol_cfg)
         await self._watch_ema_exit(symbol_cfg)
@@ -6399,6 +6402,27 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} day target — {goal[0]} {goal[1]:.2f} reached"
         await self._exit_now(cfg, self.ltp, day_target.EXIT_REASON)
 
+    async def _watch_trade_loss(self, cfg: BotConfig) -> None:
+        """Every price: the loss limit per trade in ₹ (trade_loss.py). Closes only this trade once its open loss before
+        charges reaches the limit; a trade in profit is never touched."""
+        pos = self.position
+        if pos is None or not trade_loss.on(cfg) or self.status != "RUNNING" or self.ltp <= 0:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the other exits).
+            return
+        qty = int(pos.qty or 0)
+        entry = float(pos.entry_price)
+        if not trade_loss.hit(pos.direction, entry, self.ltp, qty, cfg):
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        lost = trade_loss.open_loss(pos.direction, entry, self.ltp, qty)
+        self._signals[symbol] = (
+            f"{symbol} loss limit per trade — down ₹{lost:,.0f} at {self.ltp:.2f} "
+            f"(limit ₹{trade_loss.limit(cfg):,.0f}), closed"
+        )
+        await self._exit_now(cfg, self.ltp, trade_loss.EXIT_REASON)
+
     async def _watch_profit_net(self, cfg: BotConfig) -> None:
         """Every price: the profit safety net on any trade, started at a profit (target_net_start PCT / RS / ATR)."""
         pos = self.position
@@ -6698,6 +6722,7 @@ class StrategyEngine:
                     "PIVOT_TARGET": "pivot target reached — flat",
                     day_target.EXIT_REASON: "day high / low target reached — flat",
                     target_net.EXIT_REASON: "profit safety net — flat",
+                    trade_loss.EXIT_REASON: "loss limit per trade — flat",
                     pressure_exit.EXIT_REASON: "buyers / sellers faded — flat",
                     "COUNTER_CANDLES": "candles turned against the trade — flat",
                     "EMA_CROSS": "EMAs crossed against the trade — flat",
@@ -8521,6 +8546,7 @@ _ALERT_REASON = {
     "PIVOT_TARGET": "pivot target (R1 / S1)",
     day_target.EXIT_REASON: "day high / low target",
     target_net.EXIT_REASON: "profit safety net",
+    trade_loss.EXIT_REASON: "loss limit per trade",
     "REPLAY_STOPPED": "replay stopped",
     "EOD_SQUARE_OFF": "square-off",
     "KILL_SWITCH": "panic square-off",

@@ -261,6 +261,7 @@ def _ensure_bot_config_columns(engine) -> None:
             "target_net_start_pct": "FLOAT DEFAULT 0.25",
             "target_net_start_rs": "FLOAT DEFAULT 500",
             "target_net_start_atr": "FLOAT DEFAULT 1",
+            "trade_loss_rs": "FLOAT DEFAULT 0",
             "day_extreme_guard": "BOOLEAN DEFAULT 0",
             "day_extreme_pct": "FLOAT DEFAULT 0.15",
             "day_extreme_pull_pct": "FLOAT DEFAULT 0.15",

@@ -336,6 +336,7 @@ FIELD_HELP = {
     "target_net_start": "where the profit safety net starts on any trade: PCT | RS | ATR profit",
     "target_net_start_pct": "safety net starts at this % profit of the entry", "target_net_start_rs": "safety net starts at this ₹ profit for the trade",
     "target_net_start_atr": "safety net starts at this many ATRs of profit",
+    "trade_loss_rs": "loss limit per trade in ₹ before charges: that one trade closes once its open loss reaches it (0 = off)",
     "tall_pullback": "tall signal candle: wait for a pullback", "tall_atr_mult": "tall = height >= this x ATR",
     "extreme_entry": "wait at the signal candle's extreme (limit entry)", "entry_candle_confirm": "wait for the entry candle to go the trade's way",
     "day_extreme_guard": "no buy at the day's high / sell at the day's low without a pullback",

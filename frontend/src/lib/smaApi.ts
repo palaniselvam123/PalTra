@@ -318,6 +318,8 @@ export type SmaConfig = {
   target_net_start_pct?: number;
   target_net_start_rs?: number;
   target_net_start_atr?: number;
+  /** Loss limit per trade in ₹ before charges (trade_loss.py); 0 = off. */
+  trade_loss_rs?: number;
   entry_candle_pct?: number;
   entry_candle_max?: number;
   handoff_candle?: "OFF" | "WAIT" | "FOLLOW" | string;

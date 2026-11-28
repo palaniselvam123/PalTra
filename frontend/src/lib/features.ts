@@ -42,6 +42,8 @@ const TERM = "/terminal/";
 const S = (anchor: string) => `/settings/#${anchor}`;
 
 export const FEATURES: Feature[] = [
+  { id: "set-trade-loss", area: "settings", added: "2026-11-28", pr: 582, href: S("sma-trade-loss"), where: "Settings → Strategy → 5. Stop-loss and target → Loss limit per trade (₹)", title: "Loss limit per trade in rupees",
+    purpose: "One rupee amount for every stock, cheap or costly. A trade that is in profit is left to run; once a trade's loss reaches the amount (points against it × quantity, before charges), only that trade is closed. The other stocks and the bot carry on. With 1,000 shares and ₹20,000, a ₹1,000 stock and a ₹50,000 stock are both closed 20 points against you, so a costly stock can no longer lose a lakh in two candles. Use it with the profit safety net below it to keep the winners' profit. Works in practice, live and backtests, for the bot or one stock." },
   // --- Trend quality ------------------------------------------------------------------------------------------
   { id: "tq-scan", area: "trend", added: "2026-10-09", pr: 155, href: TQ, where: "Scalp → Trend quality", title: "Trend quality scan: trending, mixed or choppy",
     purpose: "Counts today's SMA crosses for each stock on the candle size you pick and labels it Trending, Mixed or Choppy, so a clean trend is told apart from a stock that keeps flipping." },
@@ -809,7 +811,7 @@ export function featureById(id: string): Feature | undefined {
 const ANCHOR_GROUP: Record<string, string> = {
   "sma-candle-interval": "enter", "sma-day-extreme": "enter", "sma-colour-exit": "enter", "sma-colour-force": "enter",
   "sma-fresh": "check", "sma-exit-candle": "exit", "sma-slope-candle": "exit", "sma-small-colour": "exit",
-  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced", "sma-order-flow": "enter", "sma-flatten-exit": "exit", "sma-trend-trade": "enter", "sma-ha-scope": "check", "sma-turn-gap": "enter", "sma-live-sma": "enter", "sma-day-target": "stop", "sma-target-net": "stop", "sma-small-candles": "exit", "sma-macd-hist": "check", "sma-macd-shrink": "exit", "sma-pattern-check": "check", "sma-pattern-exit": "exit", "sma-triple-exit": "enter", "sma-index-check": "check", "sma-level": "check", "sma-stack-entry": "enter", "sma-sideways-check": "check",
+  "sma-slope-editor": "exit", "sma-atr-target": "stop", "sma-pressure-exit": "exit", "sma-pressure-entry": "enter", "sma-pressure-flip": "enter", "sma-flow-exit": "exit", "sma-flow-entry": "check", "sma-flow-trigger": "enter", "sma-buyers-sellers": "enter", "sma-smart-stop": "stop", "sma-fade-unarm": "advanced", "sma-order-flow": "enter", "sma-flatten-exit": "exit", "sma-trend-trade": "enter", "sma-ha-scope": "check", "sma-turn-gap": "enter", "sma-live-sma": "enter", "sma-day-target": "stop", "sma-target-net": "stop", "sma-trade-loss": "stop", "sma-small-candles": "exit", "sma-macd-hist": "check", "sma-macd-shrink": "exit", "sma-pattern-check": "check", "sma-pattern-exit": "exit", "sma-triple-exit": "enter", "sma-index-check": "check", "sma-level": "check", "sma-stack-entry": "enter", "sma-sideways-check": "check",
 };
 
 /** The strategy form's group (enter, check, exit, gap, stop, risk, advanced) a Settings link opens, or null. */
