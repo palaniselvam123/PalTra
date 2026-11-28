@@ -622,6 +622,16 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     stack_only: Boolean(form.stack_only),
     stack_fresh: Boolean(form.stack_fresh),
     stack_fresh_candles: Math.min(30, Math.max(1, Math.round(Number(form.stack_fresh_candles ?? 6)) || 6)),
+    setup_entry: setupKeys(form.setup_entry).join(","),
+    setup_only: Boolean(form.setup_only),
+    setup_side: ["BOTH", "LONG", "SHORT"].includes(String(form.setup_side ?? "BOTH").toUpperCase()) ? String(form.setup_side ?? "BOTH").toUpperCase() : "BOTH",
+    setup_trend: form.setup_trend !== false,
+    setup_vol_mult: Math.min(10, Math.max(0, Number(form.setup_vol_mult ?? 1.5) || 0)),
+    setup_orb_minutes: Math.min(60, Math.max(5, Math.round(Number(form.setup_orb_minutes ?? 15)) || 15)),
+    setup_break_candles: Math.min(100, Math.max(5, Math.round(Number(form.setup_break_candles ?? 20)) || 20)),
+    setup_squeeze_candles: Math.min(100, Math.max(10, Math.round(Number(form.setup_squeeze_candles ?? 30)) || 30)),
+    time_stop_candles: Math.min(60, Math.max(0, Math.round(Number(form.time_stop_candles ?? 0)) || 0)),
+    time_stop_atr: Math.min(5, Math.max(0.1, Number(form.time_stop_atr ?? 0.5) || 0.5)),
     tq_only: form.tq_only !== false,
     tq_exit: Boolean(form.tq_exit),
     tq_exit_score: Math.min(100, Math.max(0, Math.round(Number(form.tq_exit_score ?? 40)))) || 0,
@@ -835,6 +845,9 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
         max_trades_per_day: Number(form.max_trades_per_day),
         square_off_time: form.square_off_time,
         entry_cutoff_time: form.entry_cutoff_time || "15:00",
+        // Pause after losses in a row (loss_guard.py): the bot's own, never a stock's.
+        loss_streak_max: Math.min(10, Math.max(0, Math.round(Number(form.loss_streak_max ?? 0)) || 0)),
+        loss_streak_pause_min: Math.min(240, Math.max(0, Math.round(Number(form.loss_streak_pause_min ?? 30)) || 0)),
         ...(currentDesk() === "research" ? {} : { auto_start: Boolean(form.auto_start) }),
       });
       markDirty(false);
@@ -1383,6 +1396,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           <BuyersSellersMap form={form} set={set} />
           <TrendTrade form={form} set={set} isOwn={isOwn} />
           <StackEntry form={form} set={set} isOwn={isOwn} />
+          <TechSetups form={form} set={set} isOwn={isOwn} />
           <PressureEntry form={form} set={set} isOwn={isOwn} />
           <FlowTrigger form={form} set={set} isOwn={isOwn} />
           <Only s="sma trend turn colour">
@@ -2506,6 +2520,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           <FlattenExit form={form} set={set} isOwn={isOwn} />
           <PressureExit form={form} set={set} isOwn={isOwn} />
           <FlowExit form={form} set={set} isOwn={isOwn} />
+          <TimeStop form={form} set={set} isOwn={isOwn} />
           <Only s="sma">
           <div className={clsx("mt-2 rounded-md p-2 ring-1 ring-inset ring-white/10", !crossExitOn(form) && "opacity-50")}>
             <label htmlFor="sma-exit-candle" className="flex items-center gap-1 text-sm text-slate-300">
@@ -3560,6 +3575,24 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
                   onChange={(v) => set("reentry_wait_candles", v)}
                   own={isOwn("reentry_wait_candles")}
                 />
+                {!stockScope ? (
+                  <>
+                    <span id="sma-loss-streak" className="contents">
+                      <Field
+                        label="Pause after N losing trades in a row (0 = off)"
+                        fresh="set-loss-streak"
+                        value={String(form.loss_streak_max ?? 0)}
+                        onChange={(v) => set("loss_streak_max", v)}
+                      />
+                    </span>
+                    <Field
+                      label="Pause for (0 = rest of the day)"
+                      suffix="min"
+                      value={String(form.loss_streak_pause_min ?? 30)}
+                      onChange={(v) => set("loss_streak_pause_min", v)}
+                    />
+                  </>
+                ) : null}
                 <Field
                   label="No new entries after"
                   value={form.entry_cutoff_time || "15:00"}
@@ -4376,6 +4409,27 @@ export function activeRules(f: SmaConfig): Rule[] {
       key: "chop_losses",
       text: `After ${Number(f.chop_losses)} losing trades on a stock today, it moves to Bot 2`,
       off: { chop_losses: "0" },
+    });
+  if (setupKeys(f.setup_entry).length)
+    add({
+      group: "enter",
+      key: "setup_entry",
+      text: `Technical setups: ${setupKeys(f.setup_entry).map((k) => SETUP_CHOICES.find((c) => c.key === k)?.name ?? k).join(", ")} enter a flat stock${Number(f.setup_vol_mult ?? 1.5) > 0 ? `, breakout volume at least ${f.setup_vol_mult ?? 1.5}× the usual` : ""}${f.setup_trend !== false ? ", breakouts only with the day's trend (VWAP)" : ""}${String(f.setup_side ?? "BOTH") === "LONG" ? ", buys only" : String(f.setup_side ?? "BOTH") === "SHORT" ? ", sells only" : ""}${f.setup_only ? " (only these open trades)" : ""}`,
+      off: { setup_entry: "" },
+    });
+  if (Number(f.time_stop_candles ?? 0) > 0)
+    add({
+      group: "exit",
+      key: "time_stop_candles",
+      text: `Time stop: a trade that was never ${f.time_stop_atr ?? 0.5}× ATR in profit is closed ${f.time_stop_candles} candle(s) after its entry`,
+      off: { time_stop_candles: "0" },
+    });
+  if (Number(f.loss_streak_max ?? 0) > 0)
+    add({
+      group: "enter",
+      key: "loss_streak_max",
+      text: `After ${f.loss_streak_max} losing trades in a row the bot takes no new entry ${Number(f.loss_streak_pause_min ?? 30) > 0 ? `for ${f.loss_streak_pause_min ?? 30} min` : "for the rest of the day"}`,
+      off: { loss_streak_max: "0" },
     });
   if (f.stack_entry)
     add({
@@ -6793,6 +6847,157 @@ function stackLines(f: Partial<SmaConfig>): string {
   const medium = Number(f.sma_medium ?? 0);
   if (medium > fast && medium < slow) return `${fast} / ${medium} / ${slow}`;
   return `${fast} / ${slow} / ${Number(f.stack_third ?? 50) || 50}`;
+}
+
+/** Technical setups as entries (backend setups.py): five classic intraday setups, each on the bot's closed candles. */
+const SETUP_CHOICES: { key: string; name: string; what: string }[] = [
+  { key: "ORB", name: "Opening-range breakout", what: "the first close beyond the high or low of the day's first minutes" },
+  { key: "VWAP_PULL", name: "VWAP pullback", what: "in a trend, a dip back to the day's average price that closes back its way" },
+  { key: "SQUEEZE", name: "Bollinger squeeze breakout", what: "the bands went narrow (a quiet stretch), then a close outside them" },
+  { key: "BREAKOUT", name: "High / low breakout", what: "the first close above the highest high (below the lowest low) of the last candles" },
+  { key: "INSIDE", name: "Inside-bar breakout", what: "a candle wholly inside the one before it, then a close beyond that bigger candle" },
+];
+
+function setupKeys(value: unknown): string[] {
+  const picked = new Set(String(value ?? "").toUpperCase().split(",").map((p) => p.trim()).filter(Boolean));
+  return SETUP_CHOICES.map((c) => c.key).filter((k) => picked.has(k));
+}
+
+function TechSetups({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const own = (["setup_entry", "setup_only", "setup_side", "setup_trend", "setup_vol_mult", "setup_orb_minutes", "setup_break_candles", "setup_squeeze_candles"] as const).some((k) => isOwn(k));
+  const box = "min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9";
+  const keys = setupKeys(form.setup_entry);
+  const on = keys.length > 0;
+  const has = (k: string) => keys.includes(k);
+  const toggle = (k: string, ticked: boolean) =>
+    set("setup_entry", SETUP_CHOICES.map((c) => c.key).filter((x) => (x === k ? ticked : has(x))).join(","));
+  const breakouts = keys.some((k) => k !== "VWAP_PULL");
+  return (
+    <div id="sma-setups" className="mb-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-white/10">
+      <p className="text-sm text-slate-300">
+        {own && <OwnTag />}
+        <b className="text-slate-100">Enter on a technical setup</b> <NewTag id="set-tech-setups" />{" "}
+        <InfoTip label="About the technical setups">
+          Five well-known intraday setups as bot entries. Tick one or more; a stock the bot is not holding is bought or sold
+          when a ticked setup shows on a candle that has closed (never on the candle still forming). No SMA cross is needed.
+          The four breakouts can be confirmed two ways: by volume (the breakout candle traded more than usual, so the move
+          has people behind it) and by the day&apos;s trend (buy only above today&apos;s average price, the VWAP; sell only
+          below it). The VWAP pullback reads the VWAP itself and needs no volume. Two setups pointing opposite ways on the
+          same candle give no order. Every ticked entry check, the stop, flip, cut-off, caps, &quot;wait after an exit&quot;
+          and one LIVE bot per stock still apply, and your exits and stop close the trade as usual. Not used in gap mode or
+          the candle colour / pattern / second candle / executed volume modes. PAPER and LIVE, backtests too. No setup
+          wins every time: backtest it on your stocks before you trust it.
+        </InfoTip>
+      </p>
+      <div className="mt-2 space-y-1">
+        {SETUP_CHOICES.map((c) => (
+          <label key={c.key} className="flex flex-wrap items-baseline gap-2 text-sm text-slate-300">
+            <input type="checkbox" checked={has(c.key)} onChange={(e) => toggle(c.key, e.target.checked)} className="accent-[#10B981]" />
+            <span className="text-slate-100">{c.name}</span>
+            <span className="text-xs text-slate-400">{c.what}</span>
+          </label>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 pl-6 text-sm text-slate-300">
+        {has("ORB") ? (
+          <label className="flex items-center gap-2">
+            Opening range: first
+            <input type="number" min={5} max={60} step={5} value={Number(form.setup_orb_minutes ?? 15)}
+              onChange={(e) => set("setup_orb_minutes", e.target.value)} className={box} aria-label="Opening range length in minutes" />
+            min
+          </label>
+        ) : null}
+        {has("BREAKOUT") ? (
+          <label className="flex items-center gap-2">
+            High / low of the last
+            <input type="number" min={5} max={100} step={1} value={Number(form.setup_break_candles ?? 20)}
+              onChange={(e) => set("setup_break_candles", e.target.value)} className={box} aria-label="Candles the breakout looks back over" />
+            candles
+          </label>
+        ) : null}
+        {has("SQUEEZE") ? (
+          <label className="flex items-center gap-2">
+            Squeeze judged over the last
+            <input type="number" min={10} max={100} step={1} value={Number(form.setup_squeeze_candles ?? 30)}
+              onChange={(e) => set("setup_squeeze_candles", e.target.value)} className={box} aria-label="Candles the squeeze is judged over" />
+            candles
+          </label>
+        ) : null}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 pl-6 text-sm text-slate-300">
+        <label className="flex items-center gap-2">
+          Breakout volume at least
+          <input type="number" min={0} max={10} step={0.1} disabled={!breakouts} value={Number(form.setup_vol_mult ?? 1.5)}
+            onChange={(e) => set("setup_vol_mult", e.target.value)} className={box} aria-label="Breakout candle volume against the usual, times" />
+          × the usual (0 = not checked)
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" disabled={!breakouts} checked={form.setup_trend !== false} onChange={(e) => set("setup_trend", e.target.checked)} />
+          Breakouts only with the day&apos;s trend (buy above the VWAP, sell below)
+        </label>
+        <label className="flex items-center gap-2">
+          Take
+          <select disabled={!on} value={String(form.setup_side ?? "BOTH")} onChange={(e) => set("setup_side", e.target.value)}
+            className="min-h-11 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9" aria-label="Which side the setups may trade">
+            <option value="BOTH">buys and sells</option>
+            <option value="LONG">buys only</option>
+            <option value="SHORT">sells only</option>
+          </select>
+        </label>
+      </div>
+      <label className="mt-2 flex items-center gap-2 pl-6 text-sm text-slate-300">
+        <input type="checkbox" disabled={!on} checked={Boolean(form.setup_only)} onChange={(e) => set("setup_only", e.target.checked)} />
+        Only these setups open trades (the SMA cross and the other signals open nothing; a cross still closes a trade)
+      </label>
+    </div>
+  );
+}
+
+/** Time stop (backend loss_guard.py): close a trade that has gone nowhere since its entry. */
+function TimeStop({
+  form,
+  set,
+  isOwn,
+}: {
+  form: Partial<SmaConfig>;
+  set: (key: keyof SmaConfig, value: string | boolean) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const box = "min-h-11 w-20 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100 disabled:opacity-50 sm:min-h-9";
+  const candles = Number(form.time_stop_candles ?? 0);
+  return (
+    <div id="sma-time-stop" className="mt-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-white/10">
+      <p className="text-sm text-slate-300">
+        {(isOwn("time_stop_candles") || isOwn("time_stop_atr")) && <OwnTag />}
+        <b className="text-slate-100">Time stop: close a trade that goes nowhere</b> <NewTag id="set-time-stop" />{" "}
+        <InfoTip label="About the time stop">
+          A good entry usually moves your way soon. One that just sits there ties up money and often ends at the stop-loss.
+          With this on, once the set number of candles has closed since the entry, the trade is closed unless its best price
+          so far was at least the set number of ATRs in profit (ATR = the stock&apos;s usual candle size at the entry). A trade
+          that once ran that far is never closed by this rule; your stop, target and other exits look after it. It closes a
+          small loss or a flat trade early instead of waiting for the full stop. Exit reason &quot;TIME STOP&quot;. In LIVE the
+          exchange stop is cancelled first, like every exit. PAPER and LIVE, backtests too.
+        </InfoTip>
+      </p>
+      <label className="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-300">
+        After
+        <input type="number" min={0} max={60} step={1} value={Number.isFinite(candles) ? candles : 0}
+          onChange={(e) => set("time_stop_candles", e.target.value)} className={box} aria-label="Candles since the entry before the time stop looks (0 = off)" />
+        candle(s) (0 = off), close the trade unless it was at least
+        <input type="number" min={0.1} max={5} step={0.1} disabled={!(candles > 0)} value={Number(form.time_stop_atr ?? 0.5)}
+          onChange={(e) => set("time_stop_atr", e.target.value)} className={box} aria-label="Smallest best move in ATRs" />
+        × ATR in profit at its best
+      </label>
+    </div>
+  );
 }
 
 /** Three SMAs stacked with widening gaps as an entry (backend stack_entry.py). Owner's request: the Trend quality

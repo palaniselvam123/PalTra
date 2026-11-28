@@ -95,6 +95,9 @@ BASELINE_OFF = {
     "use_or_spread": False,
     "use_or_break": False,
     "st_exit": False,
+    "setup_entry": "",
+    "time_stop_candles": 0,
+    "loss_streak_max": 0,
     "stock_settings": "{}",
 }
 
