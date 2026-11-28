@@ -669,7 +669,7 @@ export const FEATURES: Feature[] = [
     purpose: "A guide to the smart stop with its Advanced settings." },
   { id: "set-reentry-wait", area: "settings", added: "2026-11-14", pr: 425, href: S("sma-risk"), where: "Settings → 6. Size, daily limits and times → After an exit, wait N candles", title: "Wait N candles after an exit",
     purpose: "After any exit, a stock waits N candles before its next entry, so a sideways stock is not reversed on every candle." },
-  { id: "set-recovery-sma", area: "settings", added: "2026-11-28", pr: 0, href: S("sma-recovery-sma"), where: "Settings → 7. Advanced → Recovery hold → A candle touching the slow SMA also counts as recovered", title: "Recovery hold can ignore the slow-SMA touch",
+  { id: "set-recovery-sma", area: "settings", added: "2026-11-28", pr: 578, href: S("sma-recovery-sma"), where: "Settings → 7. Advanced → Recovery hold → A candle touching the slow SMA also counts as recovered", title: "Recovery hold can ignore the slow-SMA touch",
     purpose: "Untick it and a held losing trade closes as recovered only when its loss shrinks to the recovery target %, not when a candle merely touches the slow SMA (which closed a DIVISLAB buy at a 0.25 % loss on its first candle). The candle limit and the two loss floors still close it if it never comes back." },
   { id: "set-fade-unarm", area: "settings", added: "2026-11-14", pr: 426, href: S("sma-fade-unarm"), where: "Settings → 7. Advanced → Un-arm a stock once its trend fades", title: "Un-arm a stock once its trend fades",
     purpose: "A stock that reads choppy for N minutes in a row comes off the bot's Trade list (once the bot is flat on it), so an armed trend that died is not traded all day." },
