@@ -2257,6 +2257,11 @@ export type ChartPayload = {
     net_pnl?: number | null;
     /** The same before charges (what the screens show). */
     gross_pnl?: number | null;
+    /** The trade's quantity, charges, entry reason and flip (so a past run's card needs no blotter row). */
+    qty?: number | null;
+    charges?: number | null;
+    entry_reason?: string | null;
+    flipped?: boolean;
     /** Only on EXIT markers: why the trade closed. */
     reason?: string | null;
     /** The trade's id inside its book: N-12 (NSE live), P-12 (simulation), R7-12 (replay run 7). */

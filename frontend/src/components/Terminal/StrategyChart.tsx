@@ -990,25 +990,25 @@ function tradeTip(
   const mark = open ? row?.market_price ?? lastPrice : exitPrice;
   const points =
     entryPrice != null && mark != null ? (m.direction === "SHORT" ? entryPrice - mark : mark - entryPrice) : null;
-  const qty = row?.qty ?? null;
+  const qty = row?.qty ?? m.qty ?? other?.qty ?? null;
   // Charges are booked at the exit, so an open trade has no net P&L yet.
   const net = open ? null : row?.net_pnl ?? ex?.net_pnl ?? en?.net_pnl ?? null;
   const byPoints = points != null && qty ? points * qty : null;
   return {
     ref: m.trade_ref ?? row?.trade_ref ?? null,
     direction: m.direction,
-    flipped: Boolean(row?.flipped),
+    flipped: Boolean(row?.flipped ?? m.flipped),
     qty,
     entryPrice,
     entryTime,
     exitPrice: open ? null : exitPrice,
     exitTime: open ? null : exitTime,
     reason: ex?.reason ?? row?.exit_reason ?? null,
-    entryReason: entryReasonShort(row?.entry_reason),
+    entryReason: entryReasonShort(row?.entry_reason ?? m.entry_reason ?? other?.entry_reason),
     open,
     points,
-    gross: open ? row?.mark_pnl ?? byPoints : row?.gross_pnl ?? m.gross_pnl ?? byPoints,
-    charges: open ? null : row?.brokerage_and_taxes ?? null,
+    gross: open ? row?.mark_pnl ?? byPoints : row?.gross_pnl ?? m.gross_pnl ?? other?.gross_pnl ?? byPoints,
+    charges: open ? null : row?.brokerage_and_taxes ?? m.charges ?? other?.charges ?? null,
     net,
     gapEntry: gapAt(rows, entryTime, snap),
     entryFlow: row?.entry_flow ?? null,

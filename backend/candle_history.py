@@ -212,6 +212,11 @@ def _markers(
                         "kind": "ENTRY",
                         # Lets the chart colour the entry by the trade's result.
                         "net_pnl": row.net_pnl if row.net_pnl is not None else row.gross_pnl,
+                        "gross_pnl": row.gross_pnl,
+                        "qty": row.qty,
+                        "charges": getattr(row, "brokerage_and_taxes", None),
+                        "entry_reason": getattr(row, "entry_reason", None),
+                        "flipped": bool(getattr(row, "flipped", False)),
                         "trade_ref": ref,
                         "open": row.exit_time is None,
                     }
@@ -226,6 +231,11 @@ def _markers(
                         "price": row.exit_price,
                         "kind": "EXIT",
                         "net_pnl": row.net_pnl if row.net_pnl is not None else row.gross_pnl,
+                        "gross_pnl": row.gross_pnl,
+                        "qty": row.qty,
+                        "charges": getattr(row, "brokerage_and_taxes", None),
+                        "entry_reason": getattr(row, "entry_reason", None),
+                        "flipped": bool(getattr(row, "flipped", False)),
                         "reason": row.exit_reason,
                         "trade_ref": ref,
                         "open": False,
