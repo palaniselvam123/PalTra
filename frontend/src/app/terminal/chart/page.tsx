@@ -65,6 +65,8 @@ export default function StockChartPage() {
   // The replay is still on (loading, playing or paused) by its own status: a missed chart answer while it is
   // on keeps the last chart instead of switching to the "ended" view and back on the next poll.
   const replayOnRef = useRef(false);
+  // The day the run is replaying now, while that is not this page's day (null otherwise).
+  const [otherDay, setOtherDay] = useState<string | null>(null);
   // Chart answers that failed in a row; the page gives up on the live replay chart only after a few.
   const misses = useRef(0);
   const bars = useRef(400);
@@ -116,13 +118,19 @@ export default function StockChartPage() {
         setReplay(info);
         loadingRef.current = info.status === "LOADING";
         const routed = routedFor(info, p.runId, Boolean(p.date));
-        replayOnRef.current = routed;
-        if (p.date) follow = routed;
+        // A run of several days plays one day at a time: follow it only while it is on this page's day. Once
+        // it has moved to another day (a stock not picked that day has no candles there), show this day from
+        // Groww with the run's trades instead of a blank chart.
+        const sameDay = !p.date || !info.date || info.date === p.date;
+        const onDay = routed && sameDay;
+        replayOnRef.current = onDay;
+        setOtherDay(routed && !sameDay ? (info.date ?? null) : null);
+        if (p.date) follow = onDay;
         else follow = !routed; // a live chart while no replay is on
-        setReplayRouting(routed && Boolean(p.date));
+        setReplayRouting(onDay && Boolean(p.date));
         if (following.current && !follow && p.date) {
-          // The replay this page followed has ended: show its day from Groww with the run's trades.
-          setPin((prev) => ({ seq: (prev?.seq ?? 1) + 1, date: info.date ?? p.date, runId: p.runId, symbol: p.symbol }));
+          // The replay this page followed has ended or moved on: show its day from Groww with the run's trades.
+          setPin((prev) => ({ seq: (prev?.seq ?? 1) + 1, date: p.date, runId: p.runId, symbol: p.symbol }));
         }
         if (!following.current && follow && p.date) {
           // It is still playing: follow it live instead of the past view.
@@ -220,7 +228,7 @@ export default function StockChartPage() {
             {p?.date
               ? following.current
                 ? `Replay · ${replayRun?.clock ? new Date(replayRun.clock).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : p.date}`
-                : `Replay ${p.date}${p.runId != null ? ` · run ${p.runId}` : ""} · ended`
+                : `Replay ${p.date}${p.runId != null ? ` · run ${p.runId}` : ""} · ${otherDay ? `day done (run now on ${otherDay})` : "ended"}`
               : research
                 ? "Research desk"
                 : desk !== "live"
