@@ -480,6 +480,10 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     use_level: Boolean(form.use_level),
     use_fresh: Boolean(form.use_fresh),
     fresh_rvol: Math.min(20, Math.max(0, Number(form.fresh_rvol ?? 1.5) || 0)),
+    use_sideways: Boolean(form.use_sideways),
+    sideways_candles: Math.min(30, Math.max(3, Math.round(Number(form.sideways_candles ?? 6) || 6))),
+    sideways_eff: Math.min(1, Math.max(0.1, Number(form.sideways_eff ?? 0.5) || 0.5)),
+    sideways_atr: Math.min(5, Math.max(0, Number(form.sideways_atr ?? 1) || 0)),
     use_high52: Boolean(form.use_high52),
     high52_side: ["LONG", "SHORT", "BOTH"].includes(String(form.high52_side)) ? (String(form.high52_side) as SmaConfig["high52_side"]) : "LONG",
     high52_pct: Math.min(20, Math.max(0, Number(form.high52_pct ?? 0) || 0)),
@@ -2221,6 +2225,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
           </label>
           </Only>
           <IndexCheckCard form={form} set={set} isOwn={isOwn} />
+          <SidewaysCheckCard form={form} set={set} isOwn={isOwn} />
           <Only s="ind colour">
           <PatternCheckCard form={form} set={set} isOwn={isOwn} />
           </Only>
@@ -4183,6 +4188,11 @@ export function activeRules(f: SmaConfig): Rule[] {
       CPR: "Price beyond the CPR (buy above its top, sell below its bottom)",
       PREV_DAY: "Price beyond yesterday's range (buy above its high, sell below its low)",
     }[String(f.level_line ?? "BB_MIDDLE")] ?? "Price beyond the chosen level"
+  );
+  check(
+    "use_sideways",
+    f.use_sideways,
+    `Skip sideways candles: the last ${n(f.sideways_candles, 6)} candles must have moved (efficiency ${n(f.sideways_eff, 0.5)}${Number(f.sideways_atr ?? 1) > 0 ? `, at least ${n(f.sideways_atr, 1)} ATR` : ""})`
   );
   check("use_fresh", f.use_fresh, `Fresh trend only: a new cross, beyond VWAP, the gap widening${Number(f.fresh_rvol ?? 1.5) > 0 ? `, volume ${n(f.fresh_rvol, 1.5)}× usual` : ""}`);
   if (f.flow_trigger && !flowOnly)
@@ -7037,6 +7047,63 @@ function IndexCheckCard({
             <option value="BOTH">both</option>
           </select>
         </label>
+      ) : null}
+    </div>
+  );
+}
+
+function SidewaysCheckCard({
+  form,
+  set,
+  isOwn,
+}: {
+  form: SmaConfig;
+  set: (key: keyof SmaConfig, value: string | boolean | number) => void;
+  isOwn: (key: keyof SmaConfig) => boolean;
+}) {
+  const box = "min-h-9 w-24 rounded-md border border-white/15 bg-black/30 px-2 text-sm text-slate-100";
+  return (
+    <div id="sma-sideways-check" className="mt-4 scroll-mt-24 rounded-md p-2 text-sm text-slate-300 ring-1 ring-inset ring-white/10">
+      <div className="flex items-center gap-1">
+        Skip sideways candles <NewTag id="set-sideways-check" />
+        <InfoTip label="About the sideways check">
+          The moving averages keep pointing one way for several candles after the price has gone flat, so a signal can come
+          from the top of a small cluster of mixed candles. This check reads the candles themselves, the same rule as the
+          Trend quality page&apos;s phases: over the last N closed candles, how far the price got compared with how far it
+          travelled up and down (efficiency: 1 = a straight line, near 0 = back and forth), and how far it got in ATRs (the
+          stock&apos;s usual candle size). If either is too small the candles went sideways and the entry is skipped like the
+          other checks; late entry can take it once the candles move again. It does not care which way they moved, so the
+          signal and your other checks still decide the side. Force, news and hand-off orders do not read it.
+        </InfoTip>
+      </div>
+      <label className="mt-2 flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={Boolean(form.use_sideways)}
+          onChange={(e) => set("use_sideways", e.target.checked)}
+          className="accent-[#10B981]"
+        />
+        {isOwn("use_sideways") && <OwnTag />}
+        Don&apos;t enter while the last candles went nowhere
+      </label>
+      {form.use_sideways ? (
+        <div className="mt-2 flex flex-wrap items-end gap-3 text-xs text-slate-400">
+          <label className="flex flex-col gap-1">
+            <span>{isOwn("sideways_candles") && <OwnTag />}Read the last (candles)</span>
+            <input type="number" min={3} max={30} step={1} value={String(form.sideways_candles ?? 6)} onChange={(e) => set("sideways_candles", e.target.value)} className={box} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span>{isOwn("sideways_eff") && <OwnTag />}Efficiency at least (0.1-1)</span>
+            <input type="number" min={0.1} max={1} step={0.05} value={String(form.sideways_eff ?? 0.5)} onChange={(e) => set("sideways_eff", e.target.value)} className={box} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span>{isOwn("sideways_atr") && <OwnTag />}Moved at least (ATR, 0 = any)</span>
+            <input type="number" min={0} max={5} step={0.1} value={String(form.sideways_atr ?? 1)} onChange={(e) => set("sideways_atr", e.target.value)} className={box} />
+          </label>
+          <span className="basis-full">
+            0.5 and 1 ATR over 6 candles is the Trend quality page&apos;s rule. Lower them to skip only the flattest stretches.
+          </span>
+        </div>
       ) : null}
     </div>
   );

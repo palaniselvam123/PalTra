@@ -480,6 +480,12 @@ class BotConfig(Base):
     # widening and volume at least fresh_rvol x the usual (0 = volume not checked).
     use_fresh: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     fresh_rvol: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
+    # Skip sideways candles (sideways_check.py): no entry while the last sideways_candles closed candles went nowhere
+    # (efficiency under sideways_eff or a net move under sideways_atr ATRs).
+    use_sideways: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    sideways_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=6)
+    sideways_eff: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.5)
+    sideways_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.0)
     # 52-week high entry check (high52.py): side LONG / SHORT / BOTH, and how far from the level still counts (%).
     use_high52: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     high52_side: Mapped[str | None] = mapped_column(String, nullable=True, default="LONG")

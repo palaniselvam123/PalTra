@@ -109,6 +109,7 @@ import live_sma
 import turn_entry
 import high52
 import fresh_entry
+import sideways_check
 import level_check
 import day_extreme
 import colour_pull
@@ -436,7 +437,7 @@ SNAPSHOT_FIELDS = (
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
     "reverse_on_exit", "reverse_colour_exit", "reverse_settings",
     "exit_join", "exit_group", "exit_need", "exit_within",
-    "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol",
+    "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol", "use_sideways", "sideways_candles", "sideways_eff", "sideways_atr",
     "use_high52", "high52_side", "high52_pct",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
     "tall_pullback", "tall_atr_mult", "tall_expiry_candles",
@@ -784,6 +785,10 @@ def _entry_block(
         fr = fresh_entry.entry_reason(frame, direction, cfg)
         if fr:
             reason = f"{reason}; {fr}" if reason else fr
+    if on("sideways"):
+        sw = sideways_check.entry_reason(frame, direction, cfg)
+        if sw:
+            reason = f"{reason}; {sw}" if reason else sw
     if on("high52"):
         h52 = high52.entry_reason(frame, direction, cfg)
         if h52:
@@ -901,6 +906,8 @@ def _short_block_label(reason: str) -> str:
             parts.append("Level")
         elif low.startswith("fresh trend"):
             parts.append("Fresh")
+        elif low.startswith("sideways"):
+            parts.append("Sideways")
         elif low.startswith("adx"):
             parts.append(part.split(" is")[0])
         elif part:
@@ -962,7 +969,7 @@ def filter_blocks(frame: pd.DataFrame, cfg) -> list[dict]:
 
 _CHECK_NAMES = (
     ("vwap", "VWAP"), ("volume", "Volume"), ("density", "Density"), ("rsi", "RSI"), ("bollinger", "Bollinger"),
-    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("macd", "MACD"), ("macd_grow", "MACD histogram"), ("cvd", "Cumulative delta"), ("supertrend", "Supertrend"), ("level", "Price level"), ("fresh", "Fresh trend"),
+    ("gap", "SMA gap"), ("candle_dir", "Candle direction"), ("ema", "EMA"), ("macd", "MACD"), ("macd_grow", "MACD histogram"), ("cvd", "Cumulative delta"), ("supertrend", "Supertrend"), ("level", "Price level"), ("fresh", "Fresh trend"), ("sideways", "Sideways"),
     ("high52", "52w high"),
     ("or_volume", "Opening volume"), ("or_vwap", "Opening VWAP"), ("or_spread", "Opening SMA spread"), ("or_break", "Opening break"),
 )
@@ -1023,6 +1030,8 @@ def _check_passed(name: str, frame: pd.DataFrame, direction: str, cfg) -> str:
             return level_check.passed_text(frame, direction, cfg)
         if name == "fresh":
             return fresh_entry.passed_text(frame, direction, cfg)
+        if name == "sideways":
+            return sideways_check.passed_text(frame, direction, cfg)
         if name == "high52":
             return high52.passed_text(frame, direction, cfg)
         if name in opening_range.CHECKS:
@@ -1197,7 +1206,7 @@ _FILTER_KEYS = (
     "use_macd", "macd_exit", "macd_fast", "macd_slow", "macd_signal", "use_macd_grow", "macd_grow_candles", "macd_shrink_exit", "macd_shrink_candles", "ha_colours", "ha_scope",
     "pc_entry", "pc_exit", "pc_minutes", "pc_set", "pc_within", "triple_exit", "use_index", "index_rule",
     "use_cvd", "cvd_lookback", "cvd_div_exit", "cvd_div_lookback",
-    "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol",
+    "use_supertrend", "st_exit", "st_period", "st_mult", "use_level", "level_line", "use_fresh", "fresh_rvol", "use_sideways", "sideways_candles", "sideways_eff", "sideways_atr",
     "use_or_volume", "use_or_vwap", "use_or_spread", "use_or_break", "or_volume_ratio", "or_spread_pct",
 )
 
@@ -9032,6 +9041,8 @@ def _filter_note(cfg: BotConfig) -> str:
         checked.append("price level")
     if fresh_entry.on(cfg):
         checked.append("fresh trend")
+    if sideways_check.on(cfg):
+        checked.append("sideways candles")
     if high52.on(cfg):
         checked.append("52-week high")
     if opening_range.any_on(cfg):

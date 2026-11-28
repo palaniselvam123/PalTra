@@ -272,6 +272,11 @@ export type SmaConfig = {
   /** Fresh trend entry check (fresh_entry.py): a new cross, beyond VWAP, the gap widening, volume fresh_rvol x usual. */
   use_fresh?: boolean;
   fresh_rvol?: number;
+  /** Skip sideways candles (sideways_check.py): no entry while the last N closed candles went nowhere. */
+  use_sideways?: boolean;
+  sideways_candles?: number;
+  sideways_eff?: number;
+  sideways_atr?: number;
   level_line?: "BB_MIDDLE" | "BB_UPPER" | "PIVOT_P" | "PIVOT_R1" | "CPR" | "PREV_DAY";
   /** Nifty direction check (index_check.py): entries only while Nifty goes the trade's way. */
   use_index?: boolean;
