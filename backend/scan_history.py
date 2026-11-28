@@ -315,6 +315,10 @@ def save_copy(kind: str, snapshot: dict, meta: dict | None = None) -> int | None
 # day -> (last run id read, {symbol: [(epoch, share 0..1, volume vs usual or None, money traded ₹ cr or None)]}).
 _ACTIVE_CACHE: dict[str, tuple[int, dict[str, list[tuple[float, float, float | None, float | None]]]]] = {}
 _ACTIVE_CACHE_DAYS = 6
+# When each cached day was last asked for: the least recently used day goes first, never simply the oldest date (a
+# replay playing late days kept those, and a comparison walking earlier days lost each day as soon as it was read, so
+# every stock unpacked that whole day's scans again and the comparison ran past the page's minute).
+_ACTIVE_USED: dict[str, float] = {}
 # The bots read it on every pass (pressure_exit): the file is asked for new runs at most this often per day.
 ACTIVE_RECHECK_SEC = 15.0
 _ACTIVE_CHECKED: dict[str, float] = {}
@@ -377,6 +381,7 @@ def active_reads(day: str) -> dict[str, list[tuple[float, float, float | None, f
     import time as _time
 
     now = _time.monotonic()
+    _ACTIVE_USED[day] = now
     if day in _ACTIVE_CACHE and now - _ACTIVE_CHECKED.get(day, 0.0) < ACTIVE_RECHECK_SEC:
         return by_symbol
     _ACTIVE_CHECKED[day] = now
@@ -408,7 +413,8 @@ def active_reads(day: str) -> dict[str, list[tuple[float, float, float | None, f
     for reads in by_symbol.values():
         reads.sort(key=lambda r: r[0])
     _ACTIVE_CACHE[day] = (last_id, by_symbol)
-    for old in sorted(_ACTIVE_CACHE)[:-_ACTIVE_CACHE_DAYS]:
+    for old in sorted(_ACTIVE_CACHE, key=lambda d: _ACTIVE_USED.get(d, 0.0))[:-_ACTIVE_CACHE_DAYS]:
         _ACTIVE_CACHE.pop(old, None)
+        _ACTIVE_USED.pop(old, None)
         _ACTIVE_QTY.pop(old, None)
     return by_symbol
