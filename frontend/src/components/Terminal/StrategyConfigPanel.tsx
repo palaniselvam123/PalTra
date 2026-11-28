@@ -591,6 +591,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     recovery_atr_mult: Math.min(20, Math.max(0.5, Number(form.recovery_atr_mult ?? 2.5) || 2.5)),
     recovery_max_candles: Math.min(75, Math.max(1, Math.round(Number(form.recovery_max_candles ?? 6) || 6))),
     recovery_handoff: form.recovery_handoff !== false,
+    recovery_sma_target: form.recovery_sma_target !== false,
     breakout_handoff: Boolean(form.breakout_handoff),
     breakout_atr_mult: Math.min(10, Math.max(0.5, Number(form.breakout_atr_mult ?? 1.8) || 1.8)),
     breakout_gap_pct: Math.min(5, Math.max(0, Number(form.breakout_gap_pct ?? 0.2) || 0)),
@@ -3646,6 +3647,23 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               own={isOwn("recovery_atr_mult")}
             />
           </div>
+          <label id="sma-recovery-sma" className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={form.recovery_sma_target !== false}
+              onChange={(e) => set("recovery_sma_target", e.target.checked)}
+              className="accent-[#10B981]"
+            />
+            {isOwn("recovery_sma_target") && <OwnTag />}
+            A candle touching the slow SMA also counts as recovered
+            <InfoTip label="About the slow-SMA recovery">
+              On (as before): a candle whose high reaches the slow SMA (a buy) or whose low reaches it (a sell) closes the held
+              trade as recovered, even while it is still losing more than the target %. A trade sitting on the right side of the
+              slow SMA can then close on the first candle. Off: only the loss shrinking to the recovery target % counts; the
+              candles and the two floors still close it if it does not come back.
+            </InfoTip>
+            <NewTag id="set-recovery-sma" />
+          </label>
           <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
             <input
               type="checkbox"

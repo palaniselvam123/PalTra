@@ -1299,7 +1299,7 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   reversing (a winner turns as usual, `COLOUR_TURN`; a turn while held only holds), and `_watch_recovery` judges it on the
   colour candles of `pattern_tf` minutes (`_recovery_frame` / `_recovery_minutes`, the bot's own candle being 1 minute in
   that mode), so the target, emergency floors, candle count and hand-off to Bot 2 work there as on a cross. `_watch_recovery`, once per closed candle, runs `recovery.judge`:
-  loss within `recovery_tolerance_pct` (0.15) % of entry or the candle touched the slow SMA → `RECOVERY_TARGET_HIT`;
+  loss within `recovery_tolerance_pct` (0.15) % of entry or the candle touched the slow SMA (only with `recovery_sma_target`, on by default; off = only the loss shrinking counts, owner's DIVISLAB case: a long whose candle sat above SMA 21 "recovered" at a 0.25 % loss; Settings → 7. Advanced, `#sma-recovery-sma`) → `RECOVERY_TARGET_HIT`;
   loss ≥ `recovery_emergency_mult` (1.5) × the loss at the cross, ≥ `recovery_atr_mult` (2.5) × ATR, or
   `recovery_max_candles` (6) candles → `EMERGENCY_RECOVERY_ABORT` and the stock is blocked on that bot for the day
   (`_recovery_blocked`); still held at the entry cut-off → `SQUARE_OFF_CUTOFF`. A LIVE position restored without its

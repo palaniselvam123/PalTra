@@ -648,6 +648,7 @@ class BotConfig(Base):
     recovery_atr_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=2.5)
     recovery_max_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=6)
     recovery_handoff: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    recovery_sma_target: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
     # All-bots day target / stop loss in ₹ (all_bots_guard.py), read from row 1 only; 0 = off.
     all_bots_target: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     all_bots_stop: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)

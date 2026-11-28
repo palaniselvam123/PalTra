@@ -84,6 +84,23 @@ def test_judge_rules():
     assert recovery.slow_breach("SHORT", 101.0, 100.0) and not recovery.slow_breach("SHORT", 99.0, 100.0)
 
 
+def test_slow_sma_touch_can_be_ignored():
+    """recovery_sma_target off: a candle touching the slow SMA no longer counts as recovered (owner's DIVISLAB case)."""
+    on = type("C", (), {"recovery_tolerance_pct": 0.15, "recovery_emergency_mult": 3.0,
+                        "recovery_atr_mult": 5.0, "recovery_max_candles": 20})()
+    off = type("C", (), {**{k: v for k, v in vars(type(on)).items() if k.startswith("recovery")}, "recovery_sma_target": False})()
+    assert recovery.sma_target_on(on) and not recovery.sma_target_on(off)
+    # DIVISLAB 22 Oct 11:05: bought 9,156, candle H 9,152 / C 9,141.50 above SMA 21 9,123.86; loss at the cross 20.
+    bar = {"close": 9141.5, "high": 9152.0, "low": 9129.5, "sma_21": 9123.86, "atr_14": 28.47}
+    assert recovery.judge("LONG", 9156.0, bar, 20.0, 2, on)[0] == "target"
+    verdict, note = recovery.judge("LONG", 9156.0, bar, 20.0, 2, off)
+    assert verdict == "hold", note
+    assert recovery.judge("LONG", 9156.0, {**bar, "close": 9145.0}, 20.0, 3, off)[0] == "target"  # within 0.15 %
+    assert recovery.judge("LONG", 9156.0, bar, 20.0, 20, off)[0] == "abort"  # the candle limit still applies
+    short_bar = {"close": 101.0, "high": 101.2, "low": 99.4, "sma_21": 99.5, "atr_14": 2.0}
+    assert recovery.judge("SHORT", 100.0, short_bar, 1.0, 1, off)[0] == "hold"
+
+
 @pytest.mark.asyncio
 async def test_a_losing_trade_is_held_through_the_cross_and_closes_on_its_recovery(db):  # noqa: F811
     plain = await _trades(db, _recovers)
