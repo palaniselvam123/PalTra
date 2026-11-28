@@ -3232,6 +3232,8 @@ export type AutoArmBody = {
   /** "Force order when armed" per source: the replayed bot enters at once at each arm minute (entry rule picks the side). */
   force_strong?: boolean;
   force_pressure?: boolean;
+  /** Where it was started (backend run_source.ORIGINS); display only. */
+  origin?: string;
 };
 
 export type QueueItem = {
@@ -3580,7 +3582,7 @@ export const smaApi = {
   regimeStudyStop: () => request<RegimeStudy>("/api/regime-study/stop", { method: "POST" }, 20000, false),
   /** Strategy lab (backend strategy_lab.py): base trades with every rule's answer, any choice evaluated in seconds. */
   strategyLab: () => request<StrategyLabView>("/api/strategy-lab", undefined, undefined, false),
-  strategyLabStart: (body: { symbols: string[]; date: string; end_date?: string; bot: number; label?: string; minutes?: number }) =>
+  strategyLabStart: (body: { symbols: string[]; date: string; end_date?: string; bot: number; label?: string; minutes?: number; auto_arm?: LabAutoArmBody }) =>
     request<StrategyLabView & { job: StrategyLabJob }>("/api/strategy-lab/start", { method: "POST", body: JSON.stringify(body) }, 20000, false),
   strategyLabStop: () => request<StrategyLabView>("/api/strategy-lab/stop", { method: "POST" }, 20000, false),
   strategyLabJob: (id: string) =>
@@ -4179,6 +4181,29 @@ export type StrategyLabJob = {
   finished_at: string | null;
   settings: Record<string, unknown> | null;
   choice: StrategyLabChoice | null;
+  /** Auto-arm picks (backend strategy_lab `pick_rule`): the rule as a backtest saves it, null for a plain list run. */
+  pick?: Record<string, unknown> | null;
+  /** Per day, each stock the auto-arm would have armed and its minute. */
+  picks?: Record<string, { symbol: string; at: string; side?: string; why?: string }[]> | null;
+  /** load = reading the candles, pick = finding each day's arms, read = reading the picked stocks' trades. */
+  phase?: "load" | "pick" | "read";
+};
+/** The Trend quality auto-arm rule for the Strategy lab's picks (backend LabAutoArm); unset values = the live auto-arm's. */
+export type LabAutoArmBody = {
+  first: string;
+  last: string;
+  every_min: 1 | 2 | 3 | 5 | 10 | 15 | 30;
+  minutes: 1 | 3 | 5 | 10 | 15;
+  candles: "NORMAL" | "HA";
+  skip_candles: number;
+  min_checks?: number;
+  side?: "BOTH" | "UP" | "DOWN";
+  stack?: boolean;
+  widen?: number;
+  third?: number;
+  max_day?: number;
+  price_min?: number;
+  price_max?: number;
 };
 export type StrategyLabView = { running: boolean; current: StrategyLabJob | null; jobs: StrategyLabJob[]; rules: StrategyLabRules };
 export type StrategyLabTotals = {

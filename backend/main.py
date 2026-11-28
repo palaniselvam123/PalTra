@@ -3112,6 +3112,40 @@ async def _auto_arm_scans(day: dt.date, rule: "auto_arm.AutoArmRule") -> tuple[l
     return [], f"{day:%d %b}: no saved Most active scans."
 
 
+def _auto_arm_rule(body, source: str, first: dt.time, last: dt.time, until: dt.time | None, alerts, scan_cfg) -> "auto_arm.AutoArmRule":
+    """The auto-arm rule from a start body (the auto-arm replay's, or the Strategy lab's auto-arm picks): each value left
+    None takes the Scalp alerts' own (scalp_alerts.json), as the live auto-arm reads them. The Trend quality scan (and so
+    its History and the live auto-arm) reads the main desk's SMA periods whichever bot it arms (`scan_cfg`), so this does
+    too. Raises HTTPException 400 when the third SMA repeats one of the two."""
+    def get(name: str):
+        return getattr(body, name, None)
+
+    rule = auto_arm.AutoArmRule(
+        source=source, first=first, last=last, every_min=get("every_min") or 5, minutes=get("minutes") or 5, until=until,
+        sma_fast=int(scan_cfg.sma_fast), sma_slow=int(scan_cfg.sma_slow), candles=get("candles") or "NORMAL",
+        skip_candles=get("skip_candles") or 0,
+        min_checks=get("min_checks") or alerts.strong_min_checks, side=get("side") or alerts.strong_side,
+        stack=alerts.arm_strong_stack if get("stack") is None else get("stack"),
+        widen=alerts.arm_strong_widen if get("widen") is None else get("widen"),
+        third=get("third") or alerts.arm_strong_third,
+        pct=get("pct") or alerts.pressure_pct, pressure_side=get("pressure_side") or alerts.pressure_side,
+        min_value_cr=alerts.pressure_min_value_cr if get("min_value_cr") is None else get("min_value_cr"),
+        min_rvol=alerts.pressure_min_rvol if get("min_rvol") is None else get("min_rvol"),
+        basis=get("basis") or alerts.pressure_basis,
+        flow_pct=get("flow_pct") or alerts.pressure_flow_pct,
+        max_day=get("max_day") or alerts.arm_max_day,
+        price_min=alerts.arm_price_min if get("price_min") is None else get("price_min"),
+        price_max=alerts.arm_price_max if get("price_max") is None else get("price_max"),
+        force_strong=alerts.arm_strong_force if get("force_strong") is None else get("force_strong"),
+        force_pressure=alerts.arm_pressure_force if get("force_pressure") is None else get("force_pressure"),
+    )
+    if (rule.stack or rule.widen) and rule.third in (rule.sma_fast, rule.sma_slow):
+        raise HTTPException(
+            400, f"The third SMA must be a different length from SMA {rule.sma_fast} and SMA {rule.sma_slow}."
+        )
+    return rule
+
+
 @app.post("/api/replay/auto-arm")
 async def replay_auto_arm(body: AutoArmStart):
     """Auto-arm replay (auto_arm.py): past days played like live ones, each stock armed at the minute the Scalp
@@ -3135,32 +3169,7 @@ async def replay_auto_arm(body: AutoArmStart):
     eng = engine if body.bot == 1 else bot_engines.get(body.bot)
     if eng is None:
         raise HTTPException(404, f"No bot {body.bot}")
-    # The Trend quality scan (and so its History and the live auto-arm) reads the main desk's SMA periods whichever
-    # bot it arms: read the same ones here, not the replayed bot's (a bot 2-5 on other periods read other trends).
-    scan_cfg = engine.load_config()
-    rule = auto_arm.AutoArmRule(
-        source=body.source, first=first, last=last, every_min=body.every_min, minutes=body.minutes, until=until,
-        sma_fast=int(scan_cfg.sma_fast), sma_slow=int(scan_cfg.sma_slow), candles=body.candles,
-        skip_candles=body.skip_candles,
-        min_checks=body.min_checks or alerts.strong_min_checks, side=body.side or alerts.strong_side,
-        stack=alerts.arm_strong_stack if body.stack is None else body.stack,
-        widen=alerts.arm_strong_widen if body.widen is None else body.widen,
-        third=body.third or alerts.arm_strong_third,
-        pct=body.pct or alerts.pressure_pct, pressure_side=body.pressure_side or alerts.pressure_side,
-        min_value_cr=alerts.pressure_min_value_cr if body.min_value_cr is None else body.min_value_cr,
-        min_rvol=alerts.pressure_min_rvol if body.min_rvol is None else body.min_rvol,
-        basis=body.basis or alerts.pressure_basis,
-        flow_pct=body.flow_pct or alerts.pressure_flow_pct,
-        max_day=body.max_day or alerts.arm_max_day,
-        price_min=alerts.arm_price_min if body.price_min is None else body.price_min,
-        price_max=alerts.arm_price_max if body.price_max is None else body.price_max,
-        force_strong=alerts.arm_strong_force if body.force_strong is None else body.force_strong,
-        force_pressure=alerts.arm_pressure_force if body.force_pressure is None else body.force_pressure,
-    )
-    if (rule.stack or rule.widen) and rule.third in (rule.sma_fast, rule.sma_slow):
-        raise HTTPException(
-            400, f"The third SMA must be a different length from SMA {rule.sma_fast} and SMA {rule.sma_slow}."
-        )
+    rule = _auto_arm_rule(body, body.source, first, last, until, alerts, engine.load_config())
     names = list(body.universe)
     notes: list[str] = []
     if body.source in ("ACTIVE", "BOTH"):
@@ -6084,6 +6093,26 @@ async def regime_study_stop():
 # ---------------------------------------------------------------------------
 
 
+class LabAutoArm(BaseModel):
+    """The Trend quality auto-arm rule for the Strategy lab's picks; a value left None takes the live auto-arm's own
+    (the Scalp alerts' settings), as `_auto_arm_rule` reads them."""
+
+    first: str = "09:30"
+    last: str = "14:30"
+    every_min: Literal[1, 2, 3, 5, 10, 15, 30] = 5
+    minutes: Literal[1, 3, 5, 10, 15] = 5
+    candles: Literal["NORMAL", "HA"] = "NORMAL"
+    skip_candles: int = Field(default=0, ge=0, le=chop_scan.MAX_SKIP_CANDLES)
+    min_checks: int | None = Field(default=None, ge=5, le=7)
+    side: Literal["BOTH", "UP", "DOWN"] | None = None
+    stack: bool | None = None
+    widen: int | None = Field(default=None, ge=0, le=scalp_alerts.STACK_WIDEN_MAX)
+    third: int | None = Field(default=None, ge=3, le=200)
+    max_day: int | None = Field(default=None, ge=1, le=auto_arm.MAX_DAY)
+    price_min: float | None = Field(default=None, ge=0, le=1_000_000)
+    price_max: float | None = Field(default=None, ge=0, le=1_000_000)
+
+
 class StrategyLabStart(BaseModel):
     symbols: list[str] = Field(default_factory=list, max_length=strategy_lab.MAX_STOCKS)
     date: str
@@ -6092,6 +6121,9 @@ class StrategyLabStart(BaseModel):
     label: str = ""
     # The candle to read every stock on (0 / None = the bot's own).
     minutes: Literal[0, 1, 2, 3, 5, 10, 15] | None = None
+    #: Pick the stocks the way the Trend quality auto-arm would have (`symbols` = the stocks the rule reads): each day
+    #: only the stocks it armed count, and only their trades after the arm minute, as live. None = every stock, all day.
+    auto_arm: LabAutoArm | None = None
 
 
 class StrategyLabChoice(BaseModel):
@@ -6170,9 +6202,21 @@ async def strategy_lab_start(body: StrategyLabStart):
     async def fetch(name, start, end):
         return await fetch_frame(_scan_broker(), name, start, end)
 
+    rule = None
+    if body.auto_arm is not None:
+        try:
+            arm_first = parse_start(body.auto_arm.first)
+            arm_last = parse_start(body.auto_arm.last)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if not (dt.time(9, 15) <= arm_first <= arm_last <= dt.time(15, 25)):
+            raise HTTPException(400, "Arm between 09:15 and 15:25 IST, the first time before the last.")
+        alerts = await asyncio.to_thread(scalp_alerts.load)
+        rule = _auto_arm_rule(body.auto_arm, "TREND", arm_first, arm_last, None, alerts, engine.load_config())
     try:
         job = strategy_lab.lab().start(
-            body.symbols, first, last, body.bot, cfg_for, fetch, wait=groww_pressure.wait_for_bots, label=body.label, minutes=body.minutes or None
+            body.symbols, first, last, body.bot, cfg_for, fetch, wait=groww_pressure.wait_for_bots, label=body.label,
+            minutes=body.minutes or None, pick_rule=rule,
         )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc

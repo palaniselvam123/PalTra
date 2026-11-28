@@ -9,6 +9,7 @@ import { money, num, pct } from "@/lib/format";
 import {
   replayActive,
   smaApi,
+  type LabAutoArmBody,
   type StrategyLabCapital,
   type StrategyLabChoice,
   type StrategyLabJob,
@@ -22,6 +23,7 @@ import {
 import { lastClosedWeekdays } from "@/lib/tradingDays";
 import { NewTag } from "@/components/ui/NewTag";
 import { GuideBar } from "./GuideBar";
+import { DEFAULT_LAB_ARM, LabArmedList, LabAutoArmPick } from "./LabAutoArmPick";
 
 /**
  * Strategy lab (backend strategy_lab.py): tick the entry checks, exits and stop and watch the P&L change at once.
@@ -56,6 +58,9 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
   const [bot, setBot] = useState(1);
   const [label, setLabel] = useState("");
   const [minutes, setMinutes] = useState(0);
+  // Which stocks: the picked lists all day, or each day only the Trend quality auto-arm's picks (the lists = what it reads).
+  const [pickBy, setPickBy] = useState<"LISTS" | "AUTOARM">("LISTS");
+  const [armRule, setArmRule] = useState<LabAutoArmBody>(DEFAULT_LAB_ARM);
   const [view, setView] = useState<StrategyLabView | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [job, setJob] = useState<StrategyLabJob | null>(null);
@@ -178,13 +183,17 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
     try {
       const symbols = (await resolveScanSymbols(lists as ScanList[], armed.keys())).slice(0, 250);
       if (!symbols.length) throw new Error("No stocks in the picked lists.");
-      const v = await smaApi.strategyLabStart({ symbols, date: range[0], end_date: range[range.length - 1], bot, label, minutes: minutes || undefined });
+      const auto = pickBy === "AUTOARM";
+      const v = await smaApi.strategyLabStart({
+        symbols, date: range[0], end_date: range[range.length - 1], bot, label, minutes: minutes || undefined,
+        auto_arm: auto ? armRule : undefined,
+      });
       setView(v);
       setOpenId(null);
       lastDone.current = null;
       setNote({
         ok: true,
-        text: `Reading ${symbols.length} stock(s), ${range[0]} → ${range[range.length - 1]}, with Bot ${bot}'s numbers${minutes ? ` on ${minutes}-minute candles` : ""}. The first read of a day downloads its candles (a second or two a stock); days read before come from the cache.`,
+        text: `${auto ? `Finding each day's auto-arm picks among ${symbols.length} stock(s), then reading their trades from the arm minute; ` : "Reading "}${auto ? "" : `${symbols.length} stock(s), `}${range[0]} → ${range[range.length - 1]}, with Bot ${bot}'s numbers${minutes ? ` on ${minutes}-minute candles` : ""}. The first read of a day downloads its candles (a second or two a stock); days read before come from the cache.`,
       });
     } catch (e: unknown) {
       setNote({ ok: false, text: e instanceof Error ? e.message : "Could not start" });
@@ -275,7 +284,10 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
     const what = resetFirst
       ? `Reset Bot ${target}'s other strategy settings to their defaults, then put on these switches and the numbers the lab read (SMAs, stop, filter ranges, quantity, candle). The Trade list, PAPER/LIVE, name and per-stock settings stay.`
       : `Save these switches on Bot ${target} (its numbers and every other setting stay as they are).`;
-    const text = `${what}\n\nThen replay ${stocks.length} stock(s)${picked.length ? " (the ticked ones)" : ""}, ${job.first} → ${job.last}, through the real bot? Practice money; no order is sent. The old settings stay in Settings → Strategy → Saved strategies & history.`;
+    const which = job.pick
+      ? `the auto-arm backtest (the same Trend quality rule arms each stock at its minute among the run's ${job.symbols.length} stock(s))`
+      : `${stocks.length} stock(s)${picked.length ? " (the ticked ones)" : ""}`;
+    const text = `${what}\n\nThen replay ${which}, ${job.first} → ${job.last}, through the real bot? Practice money; no order is sent. The old settings stay in Settings → Strategy → Saved strategies & history.`;
     if (!window.confirm(text)) return;
     setBusy(true);
     try {
@@ -283,7 +295,19 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
       const playing = Boolean(current && replayActive(current) && current.status !== "FINISHED");
       if (playing && !window.confirm(`Bot ${target}'s replay is already running. Stop it and start this one instead?`)) return;
       await smaApi.strategyLabApply(job.id, { ...choice, reset: resetFirst, stop_replay: playing });
-      await smaApi.replayStart(job.first, "09:15", 300, job.last, stocks, target, false, true, "strategy_lab");
+      if (job.pick) {
+        // Auto-arm picks: the real auto-arm backtest with the same rule, so the bot arms each stock at its minute.
+        const r = job.pick as Record<string, unknown>;
+        await smaApi.replayAutoArm({
+          date: job.first, end_date: job.last, universe: job.symbols, source: "TREND",
+          first: String(r.first), last: String(r.last), every_min: Number(r.every_min), minutes: Number(r.minutes),
+          candles: r.candles === "HA" ? "HA" : "NORMAL", skip_candles: Number(r.skip_candles ?? 0),
+          min_checks: Number(r.min_checks), side: r.side as "BOTH" | "UP" | "DOWN", stack: Boolean(r.stack),
+          widen: Number(r.widen ?? 0), third: Number(r.third ?? 50), max_day: Number(r.max_day),
+          price_min: Number(r.price_min ?? 0), price_max: Number(r.price_max ?? 0), force_strong: false, force_pressure: false,
+          bot: target, speed: 300, play_handoffs: true, origin: "strategy_lab",
+        });
+      } else await smaApi.replayStart(job.first, "09:15", 300, job.last, stocks, target, false, true, "strategy_lab");
       setNote({
         ok: true,
         text: `${resetFirst ? "Reset and saved" : "Saved"} on Bot ${target} and started the replay. Its trades build up in the terminal's Backtests tab; compare them with the lab's ${result.totals.trades} trade(s) and ${money(result.totals.gross, true)}.`,
@@ -331,8 +355,32 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
 
       {/* Run */}
       <div className="flex flex-wrap items-end gap-3 text-xs text-slate-400">
+        <div className="flex flex-col gap-1">
+          <span>
+            Which stocks <NewTag id="lab-auto-arm" />
+          </span>
+          <span role="group" aria-label="Which stocks" className="inline-flex overflow-hidden rounded-md border border-slate-700">
+            {(
+              [
+                ["LISTS", "The lists, all day"],
+                ["AUTOARM", "Auto-arm: Trend quality picks"],
+              ] as const
+            ).map(([key, text]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={pickBy === key}
+                disabled={running}
+                onClick={() => setPickBy(key)}
+                className={clsx("min-h-8 px-2", pickBy === key ? "bg-accentSky text-on-accent font-semibold" : "text-slate-300 hover:bg-white/5")}
+              >
+                {text}
+              </button>
+            ))}
+          </span>
+        </div>
         <label className="flex flex-col gap-1">
-          Stocks
+          {pickBy === "AUTOARM" ? "Stocks the rule reads" : "Stocks"}
           <ScanListPicker value={lists as ScanList[]} onChange={setLists} disabled={running} />
         </label>
         <label className="flex flex-col gap-1">
@@ -381,10 +429,16 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
         )}
         {running && current && (
           <span className="inline-flex items-center gap-1.5 text-slate-300">
-            <Loader2 size={13} className="animate-spin" /> {current.done} of {current.total} stocks, {current.trades.toLocaleString("en-IN")} trades so far
+            <Loader2 size={13} className="animate-spin" />{" "}
+            {current.phase === "load"
+              ? `Reading candles: ${current.done} of ${current.total} stocks`
+              : current.phase === "pick"
+                ? `Finding the auto-arm picks: day ${current.done} of ${current.total}`
+                : `${current.done} of ${current.total} stocks, ${current.trades.toLocaleString("en-IN")} trades so far`}
           </span>
         )}
       </div>
+      {pickBy === "AUTOARM" && <LabAutoArmPick value={armRule} onChange={setArmRule} disabled={running} />}
       {note && <p className={clsx("text-xs", note.ok ? "text-accentSky" : "text-amber-300")}>{note.text}</p>}
 
       {/* Runs */}
@@ -396,6 +450,7 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
               <button type="button" onClick={() => j.status !== "RUNNING" && setOpenId(j.id)} className="hover:underline" title={`${j.symbols.length} stocks, Bot ${j.bot}, ${j.trades} trades, ${j.status}`}>
                 {j.label || `${j.symbols.length} stocks`} · {j.first === j.last ? j.first : `${j.first} → ${j.last}`} · Bot {j.bot}
                 {j.minutes ? ` · ${j.minutes}-min` : ""}
+                {j.pick ? " · auto-arm picks" : ""}
                 {j.status !== "DONE" && <span className="ml-1 text-slate-500">({j.status.toLowerCase()})</span>}
               </button>
               {j.status !== "RUNNING" && (
@@ -416,6 +471,8 @@ export function StrategyLab({ armed, onArmMany }: { armed: Map<string, string[]>
               {job.errors.length > 6 ? " …" : ""}
             </p>
           )}
+
+          {job.picks ? <LabArmedList picks={job.picks} /> : null}
 
           {/* Rules */}
           <BestFound
