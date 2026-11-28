@@ -351,3 +351,33 @@ def test_most_active_across_days_sends_every_scan_slim(sma_api):
     both = sma_api.get("/api/scan-history/across-active?days=2026-10-08,2026-10-07").json()
     assert [r["day"] for r in both["runs"]] == ["2026-10-07", "2026-10-08", "2026-10-08"]
     assert sma_api.get("/api/scan-history/across-active?days=yesterday").status_code == 400
+
+
+def test_an_earlier_day_stays_cached_while_later_days_are_in_use(monkeypatch):
+    """The saved Most active cache drops the least recently used day, not the oldest date: a replay playing later
+    days kept those, and a comparison walking an earlier day lost it at once, so it unpacked that day's scans again
+    for every stock (the trade-by-trade comparison then ran past the page's minute)."""
+    scan_history._ACTIVE_CACHE.clear()
+    scan_history._ACTIVE_CHECKED.clear()
+    scan_history._ACTIVE_USED.clear()
+    calls: list[str] = []
+    real = scan_history._connect
+
+    def counting():
+        calls.append("db")
+        return real()
+
+    monkeypatch.setattr(scan_history, "_connect", counting)
+    late = [dt.date(2026, 11, d).isoformat() for d in (2, 3, 4, 5, 6, 9)]
+    for day in late:
+        scan_history.active_reads(day)
+    early = "2026-10-19"
+    scan_history.active_reads(early)
+    assert early in scan_history._ACTIVE_CACHE           # the newest use stays; the least used later day went
+    assert late[0] not in scan_history._ACTIVE_CACHE
+    calls.clear()
+    for _ in range(5):                                   # every later stock of that day: no new read of the file
+        scan_history.active_reads(early)
+    assert calls == []
+    scan_history._ACTIVE_CACHE.clear()
+    scan_history._ACTIVE_USED.clear()
