@@ -66,6 +66,25 @@ export function compareMarkers(trades: CmpTrade[], hidden: Set<number>, bar: num
   return out.sort((a, b) => a.time - b.time || kind(a) - kind(b) || a.trade.run_id - b.trade.run_id);
 }
 
+/** Each marker moved to the last candle at or before its time; one before every candle keeps its own time. */
+export function snapMarkers<M extends { time: number }>(markers: M[], times: number[]): M[] {
+  if (!times.length) return markers;
+  const sorted = [...times].sort((a, b) => a - b);
+  return markers.map((m) => {
+    let lo = 0;
+    let hi = sorted.length - 1;
+    let at = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid] <= m.time) {
+        at = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return at < 0 || sorted[at] === m.time ? m : { ...m, time: sorted[at] };
+  });
+}
+
 const money = (v: number) => `${v < 0 ? "−" : "+"}₹${Math.abs(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
 
 export function CompareCandles({
@@ -175,7 +194,10 @@ export function CompareCandles({
     };
   }, [mode]);
 
-  const markers = useMemo(() => compareMarkers(trades, hidden, size), [trades, hidden, size]);
+  const raw = useMemo(() => compareMarkers(trades, hidden, size), [trades, hidden, size]);
+  // An entry or exit on a minute with no candle of its own (the 15:20 square-off after the day's last candle) goes on
+  // the last candle before it, so every trade's P&L shows; one before the first candle stays off the chart.
+  const markers = useMemo(() => snapMarkers(raw, candles.map((c) => c.time)), [raw, candles]);
   const placeOf = useMemo(() => new Map(runs.map((r) => [r.id, r.place])), [runs]);
 
   // Candles, lines and markers.
