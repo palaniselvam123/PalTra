@@ -306,6 +306,7 @@ def test_api_starts_evaluates_recommends_and_deletes(tmp_path, monkeypatch):
             row = db.get(Cfg, 1)
             assert row.use_vwap is False and row.always_in is True and row.sma_fast == 7 and row.flip_orders is True
             row.sma_fast = 9  # the number the run read
+            row.max_daily_loss, row.max_trades_per_day = 5_000_000, 40
             db.commit()
         reset = client.post(f"/api/strategy-lab/{job_id}/apply", json={"entries": ["rsi"], "exits": ["cross"], "stop": "TSL", "qty": 250, "reset": True})
         assert reset.status_code == 200, reset.text
@@ -314,6 +315,7 @@ def test_api_starts_evaluates_recommends_and_deletes(tmp_path, monkeypatch):
             assert row.use_rsi is True and row.use_stop is True and row.stop_type == "TSL" and row.cross_exit is True
             assert row.always_in is False and row.flip_orders is False and row.entry_mode == "SMA"  # back to defaults
             assert row.sma_fast == 9 and row.sma_slow == 21 and row.qty == 250  # the lab's numbers put back
+            assert row.max_daily_loss == 5_000_000 and row.max_trades_per_day == 40  # the bot's own daily limits stay
         # "Apply to bot": another bot, no replay
         import bots
 

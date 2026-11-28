@@ -6227,6 +6227,10 @@ class StrategyLabApply(StrategyLabChoice):
     to_bot: int | None = Field(default=None, ge=1, le=5)
 
 
+#: Fields "Reset the bot's other settings first" leaves as the bot has them: its own daily limits.
+LAB_RESET_KEEPS = ("max_daily_loss", "max_trades_per_day")
+
+
 @app.post("/api/strategy-lab/{job_id}/apply")
 async def strategy_lab_apply(job_id: str, body: StrategyLabApply):
     """Put the lab's choice on a bot (the run's own, or `to_bot`; "Backtest this in the replay" and "Apply to bot"): the switches of `settings_for_choice`
@@ -6249,6 +6253,12 @@ async def strategy_lab_apply(job_id: str, body: StrategyLabApply):
     if body.reset:
         defaults = {k: v for k, v in strategy_defaults().items() if v is not None}
         fields = {**defaults, **strategy_lab.numbers_for_bot(settings, choice), **fields}
+        # The bot's own daily limits stay: the lab tests no loss limit or day cap, so a reset to the defaults
+        # (max loss ₹5,000) used to halt the replay that was meant to prove the lab's result.
+        row = eng.load_config()
+        for name in LAB_RESET_KEEPS:
+            if getattr(row, name, None) is not None:
+                fields[name] = getattr(row, name)
     allowed = set(ConfigUpdate.model_fields) - COPY_SKIP
     fields = {k: v for k, v in fields.items() if k in allowed}
     if isinstance(fields.get("review_check_minutes"), str):
