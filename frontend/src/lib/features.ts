@@ -42,7 +42,7 @@ const TERM = "/terminal/";
 const S = (anchor: string) => `/settings/#${anchor}`;
 
 export const FEATURES: Feature[] = [
-  { id: "set-trade-loss", area: "settings", added: "2026-11-28", pr: 582, href: S("sma-trade-loss"), where: "Settings → Strategy → 5. Stop-loss and target → Loss limit per trade (₹)", title: "Loss limit per trade in rupees",
+  { id: "set-trade-loss", area: "settings", added: "2026-11-28", pr: 583, href: S("sma-trade-loss"), where: "Settings → Strategy → 5. Stop-loss and target → Loss limit per trade (₹)", title: "Loss limit per trade in rupees",
     purpose: "One rupee amount for every stock, cheap or costly. A trade that is in profit is left to run; once a trade's loss reaches the amount (points against it × quantity, before charges), only that trade is closed. The other stocks and the bot carry on. With 1,000 shares and ₹20,000, a ₹1,000 stock and a ₹50,000 stock are both closed 20 points against you, so a costly stock can no longer lose a lakh in two candles. Use it with the profit safety net below it to keep the winners' profit. Works in practice, live and backtests, for the bot or one stock." },
   // --- Trend quality ------------------------------------------------------------------------------------------
   { id: "tq-scan", area: "trend", added: "2026-10-09", pr: 155, href: TQ, where: "Scalp → Trend quality", title: "Trend quality scan: trending, mixed or choppy",
