@@ -1113,6 +1113,16 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   form-fill only, nothing saved until Save): 5-minute candles with the SMA cross entry, the check at 1.5x, late entry
   15 minutes, and the trailing stop in ATR multiples 1.5 / 0.5 with no target. Other checks and exits already on stay on.
   The Strategy lab does not know this check. The stock research baseline keeps it off.
+- `backend/sideways_check.py` – **Skip sideways candles** (`use_sideways`, off by default; `sideways_candles` 6, 3-30;
+  `sideways_eff` 0.5, 0.1-1; `sideways_atr` 1.0, 0-5, 0 = not checked; per bot and per stock, PAPER and LIVE, replays too;
+  entries only; owner's case: SMAs still stacked bullish while the candles had gone flat, bought at the top of the cluster).
+  Wired through `_entry_block` (check name `sideways`, chart ✕ "Sideways"): on the bot's own closed candles over the last N,
+  Kaufman efficiency |net close move| / sum |close moves| at least `sideways_eff` and |net move| at least `sideways_atr` × the
+  last closed `atr_14` (the `trend_phases` rule); either short refuses ("Sideways candles: …", late entry can retry). Direction
+  is not read (the signal and other checks pick the side); not enough candles / no ATR refuses. Settings → 2. Checks before
+  entering, `StrategyConfigPanel.SidewaysCheckCard`, anchor `#sma-sideways-check` (always shown); also a tick in the
+  Sideways starting set-up. Direct orders never read it. The Strategy lab does not know it; the stock research baseline keeps
+  it off.
 - `backend/index_check.py` – **Nifty direction check** (`use_index`, off by default; `index_rule` `SMA` default | `DAY` |
   `BOTH`; per bot and per stock, PAPER and LIVE, replays too; entries only; owner's request: stop buying stocks into a
   falling market). The index is Nifty 50 (`INDEX` "NIFTY"), quotes only, never armed, held or ordered: while a watched
@@ -2886,7 +2896,7 @@ spinning top), body and range) / Matched / Call columns
   still-valid medium / high NSE filings from `api.newsFeed`). "Good to trade" = busy and strong trend / TRENDING (top 8, with
   the reasons and Arm); `CHOPPY` ones are named under "Sideways, skip for now"; other stocks with news are listed.
 - **Sideways starting set-up** (`StylePicker.SidewaysGuard`, under the style picker on Settings → Strategy; form-fill only):
-  four existing settings with the form's value now and a tick each: ADX check at least 20, `max_trades_per_stock` 3,
+  five existing settings with the form's value now and a tick each: ADX check at least 20, skip sideways candles (`use_sideways`), `max_trades_per_stock` 3,
   `counter_exit_count` 3 with `counter_need_fast`, and (optional, unticked) `chop_losses` 2. "Put the ticked ones in the
   form" sets them through the form's `turnOff` setter; nothing is saved until Save. No new setting or engine change.
 - **What's new page** (desk `/whats-new`, nav "What's new", `components/WhatsNew/WhatsNewPage.tsx`; display only): every

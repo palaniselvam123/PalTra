@@ -70,6 +70,7 @@ import exit_join as exit_join_mod
 import strategy_presets
 import fast_move
 import fresh_entry
+import sideways_check
 import level_check
 import news_entry
 import arm_log
@@ -854,6 +855,11 @@ class ConfigUpdate(BaseModel):
     use_level: bool | None = None
     use_fresh: bool | None = None
     fresh_rvol: float | None = Field(default=None, ge=0, le=fresh_entry.MAX_RVOL)
+    # Skip sideways candles (sideways_check.py): no entry while the last N candles went nowhere.
+    use_sideways: bool | None = None
+    sideways_candles: int | None = Field(default=None, ge=sideways_check.MIN_CANDLES, le=sideways_check.MAX_CANDLES)
+    sideways_eff: float | None = Field(default=None, ge=sideways_check.MIN_EFF, le=sideways_check.MAX_EFF)
+    sideways_atr: float | None = Field(default=None, ge=0, le=sideways_check.MAX_ATR)
     level_line: str | None = Field(default=None, pattern="^(BB_MIDDLE|BB_UPPER|PIVOT_P|PIVOT_R1|CPR|PREV_DAY)$")
     # Nifty direction check (index_check.py): a buy only while Nifty is up, a sell only while it is down.
     use_index: bool | None = None
@@ -2061,6 +2067,10 @@ def _gap_dict(row) -> dict:
         "use_level": bool(getattr(row, "use_level", False)),
         "use_fresh": fresh_entry.on(row),
         "fresh_rvol": fresh_entry.min_rvol(row),
+        "use_sideways": sideways_check.on(row),
+        "sideways_candles": sideways_check.candles(row),
+        "sideways_eff": sideways_check.min_eff(row),
+        "sideways_atr": sideways_check.min_atr(row),
         "use_high52": high52.on(row),
         "high52_side": high52.side_of(row),
         "high52_pct": high52.pct_of(row),

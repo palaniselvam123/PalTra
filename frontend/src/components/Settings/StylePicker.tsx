@@ -312,6 +312,14 @@ function sidewaysSteps(f: SmaConfig): Step[] {
       fill: { use_adx_filter: true, adx_threshold: String(Math.max(adx, 20)) },
     },
     {
+      id: "sideways",
+      title: "Skip signals while the candles go nowhere",
+      why: "The averages keep saying up or down after the price has gone flat. This reads the last 6 candles themselves and skips the signal when they went back and forth.",
+      now: yes(f.use_sideways) ? `on, last ${num(f.sideways_candles) || 6} candles` : "off",
+      done: yes(f.use_sideways),
+      fill: { use_sideways: true },
+    },
+    {
       id: "cap",
       title: "Stop trading a stock after 3 trades in a day",
       why: "A stock that keeps giving signals is going back and forth. After three tries the bot leaves it alone until tomorrow.",
@@ -353,7 +361,7 @@ export function SidewaysGuard({ form, onFill }: { form: SmaConfig; onFill: (valu
         <span className={clsx("rounded-full px-2 py-0.5 text-[11px] font-semibold", coreDone === core.length ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-300")}>
           {coreDone} of {core.length} on
         </span>
-        <span className="text-xs font-normal text-slate-400">— three settings that skip weak signals and leave earlier. Click to open.</span>
+        <span className="text-xs font-normal text-slate-400">— settings that skip weak signals and leave earlier. Click to open.</span>
       </summary>
       <div className="px-3 pb-3">
         <p className="text-xs leading-relaxed text-slate-300">
