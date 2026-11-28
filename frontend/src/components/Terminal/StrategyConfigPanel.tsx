@@ -573,6 +573,7 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
     day_target_min_pct: Math.min(10, Math.max(0, Number(form.day_target_min_pct ?? 0.2) || 0)),
     day_target_early_pct: Math.min(2, Math.max(0, Number(form.day_target_early_pct ?? 0) || 0)),
     day_target_skip_min: Math.min(180, Math.max(0, Math.round(Number(form.day_target_skip_min ?? 0)) || 0)),
+    trade_loss_rs: Math.min(10_000_000, Math.max(0, Number(form.trade_loss_rs ?? 0) || 0)),
     target_net: Boolean(form.target_net),
     target_net_keep: Math.min(99, Math.max(1, Number(form.target_net_keep ?? 70) || 70)),
     target_net_keep2: Math.min(99, Math.max(1, Number(form.target_net_keep2 ?? 75) || 75)),
@@ -3316,6 +3317,29 @@ export function StrategyConfigPanel({ config, onChanged, wide = false }: Props) 
               </div>
             ) : null}
           </div>
+          <div id="sma-trade-loss" className="mt-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-white/10">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
+              Loss limit per trade (₹) <NewTag id="set-trade-loss" />
+              <InfoTip label="About the loss limit per trade">
+                One rupee amount for every stock, cheap or costly. A trade in profit is never touched, so winners run. Once a
+                trade&apos;s loss before charges (points against it × quantity) reaches this amount, only that trade is closed;
+                the other stocks and the bot carry on (the max daily loss still halts the whole bot). Judged on every price, so
+                a fast move or a gap can fill a little past it. In LIVE the Groww stop is cancelled first, then the exit is
+                sent. 0 = off. Pair it with the profit safety net below to keep part of a winner&apos;s profit.
+              </InfoTip>
+            </div>
+            <div className="mt-2 grid grid-cols-1 items-end gap-2 sm:grid-cols-4">
+              <Field label="Close a trade once it is down (0 = off)" value={String(form.trade_loss_rs ?? 0)} onChange={(v) => set("trade_loss_rs", v)} own={isOwn("trade_loss_rs")} suffix="₹" />
+              {Number(form.trade_loss_rs ?? 0) > 0 && Number(form.qty ?? 0) > 0 ? (
+                <p className="text-xs text-slate-400 sm:col-span-3">
+                  At quantity {Number(form.qty).toLocaleString("en-IN")} that is{" "}
+                  {(Number(form.trade_loss_rs) / Number(form.qty)).toFixed(2)} points against the trade, on any stock: about{" "}
+                  {((Number(form.trade_loss_rs) / Number(form.qty) / 1000) * 100).toFixed(2)}% of a ₹1,000 stock and{" "}
+                  {((Number(form.trade_loss_rs) / Number(form.qty) / 50000) * 100).toFixed(3)}% of a ₹50,000 stock.
+                </p>
+              ) : null}
+            </div>
+          </div>
           <div id="sma-target-net" className="mt-3 scroll-mt-24 rounded-md p-2 ring-1 ring-inset ring-white/10">
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input
@@ -4353,6 +4377,8 @@ export function activeRules(f: SmaConfig): Rule[] {
     add({ group: "exit", key: "pressure_over_counter", text: "Most active stocks: the counter-candle exit waits while the buyers / sellers still hold", off: { pressure_over_counter: false } });
   if (f.pivot_target === "R1" || f.pivot_target === "R2")
     add({ group: "stop", key: "pivot_target", text: f.pivot_target === "R1" ? "Target at the R1 / S1 pivot (else R2 / S2)" : "Target at the R2 / S2 pivot", off: { pivot_target: "OFF" } });
+  if (Number(f.trade_loss_rs ?? 0) > 0)
+    add({ group: "stop", key: "trade_loss_rs", text: `Loss limit per trade: a trade closes once it is down ₹${Number(f.trade_loss_rs).toLocaleString("en-IN")}`, off: { trade_loss_rs: "0" } });
   const netStart = netStartOf(f.target_net_start);
   if (f.target_net)
     add({ group: "stop", key: "target_net", text: `Profit safety net on every trade from ${netStart === "PCT" ? `${f.target_net_start_pct ?? 0.25}%` : netStart === "RS" ? `₹${f.target_net_start_rs ?? 500}` : `${f.target_net_start_atr ?? 1}× ATR`} profit, keeping ${f.target_net_keep ?? 70}% of the best profit${Number(f.target_net_at2 ?? 2) > 0 ? ` (${f.target_net_keep2 ?? 75}% from ${f.target_net_at2 ?? 2}× that distance)` : ""}`, off: { target_net: false } });

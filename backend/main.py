@@ -46,6 +46,7 @@ import hold_test
 import trend_rank
 import scan_arm
 import target_net as target_net_mod
+import trade_loss as trade_loss_mod
 import day_target as day_target_mod
 import live_sma as live_sma_mod
 import turn_entry as turn_entry_mod
@@ -915,6 +916,8 @@ class ConfigUpdate(BaseModel):
     target_net_start_pct: float | None = Field(default=None, ge=0.01, le=20)
     target_net_start_rs: float | None = Field(default=None, ge=1, le=10_000_000)
     target_net_start_atr: float | None = Field(default=None, ge=0.05, le=20)
+    #: Loss limit per trade in ₹ before charges (trade_loss.py); 0 = off.
+    trade_loss_rs: float | None = Field(default=None, ge=0, le=trade_loss_mod.MAX_RS)
     day_extreme_guard: bool | None = None
     day_extreme_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
     day_extreme_pull_pct: float | None = Field(default=None, ge=0, le=day_extreme_mod.MAX_PCT)
@@ -2125,6 +2128,7 @@ def _gap_dict(row) -> dict:
         "target_net_start_pct": target_net_mod.start_pct(row),
         "target_net_start_rs": target_net_mod.start_rs(row),
         "target_net_start_atr": target_net_mod.start_atr(row),
+        "trade_loss_rs": trade_loss_mod.limit(row),
         "day_extreme_guard": day_extreme_mod.on(row),
         "day_extreme_pct": day_extreme_mod.near_pct(row),
         "day_extreme_pull_pct": day_extreme_mod.pull_pct(row),

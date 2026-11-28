@@ -557,6 +557,8 @@ class BotConfig(Base):
     target_net_start_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.25)
     target_net_start_rs: Mapped[float | None] = mapped_column(Float, nullable=True, default=500.0)
     target_net_start_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.0)
+    # Loss limit per trade in ₹ (trade_loss.py): 0 = off.
+    trade_loss_rs: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     uturn_min_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.005)
     day_extreme_guard: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     day_extreme_pct: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.15)

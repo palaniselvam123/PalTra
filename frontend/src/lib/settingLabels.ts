@@ -282,6 +282,7 @@ export const SETTING_LABELS: Record<string, string> = {
   target_net_start_pct: "Safety net: start at % profit",
   target_net_start_rs: "Safety net: start at ₹ profit",
   target_net_start_atr: "Safety net: start at × ATR profit",
+  trade_loss_rs: "Loss limit per trade (₹)",
   entry_candle_pct: "entry candle margin",
   entry_candle_max: "entry candle wait",
   handoff_candle: "hand-off orders wait for the forming candle",

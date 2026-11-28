@@ -320,6 +320,14 @@ README.md, SMA_TERMINAL.md, PLAN.md   Product docs
   (`_move_stop`, tighter only; a hit there shows as the stop). The old mode that held a trade past the pivot / day target
   was removed (owner's request): those targets close as usual again, and a saved `TARGET` start reads as `PCT`
   (`target_net.start`, frontend `netStartOf`). Counts as an exit for `strategyChecks.noExitOn`.
+- `backend/trade_loss.py` – **Loss limit per trade in ₹** (`trade_loss_rs`, 0 = off, up to 1 crore; per bot and per stock, PAPER
+  and LIVE, replays too; Settings → 5. Stop-loss and target, above the profit safety net, anchor `#sma-trade-loss`; owner's
+  request: one quantity on cheap and costly stocks risked very different money, and the daily loss limit closes everything).
+  `StrategyEngine._watch_trade_loss` (held-stock loop, right after `_watch_stop`, every price, RUNNING only) closes only that
+  trade once its open loss before charges (points against × qty, `open_loss`) reaches the limit (`TRADE_LOSS_LIMIT` via
+  `_exit_now`, LIVE stop cancelled first; a LIVE position restored without its stop id is left to that stop). A trade in
+  profit is never touched; the other stocks and the bot carry on. Not an exchange stop: judged on the price, so a gap can
+  fill past it. Not counted as an exit for `strategyChecks.noExitOn`. The Strategy lab does not know it.
 - `backend/order_gate.py` – **Simple order-flow check** (owner's request: the waiting / executed settings were hard to set
   up together; a separate plain card, the old settings untouched; `og_entry_exec` / `og_entry_exec_pct` 60, `og_entry_wait` /
   `og_entry_wait_pct` 60, `og_exit_exec` / `og_exit_exec_pct` 45, `og_exit_wait` / `og_exit_wait_pct` 45, all off, % 1-99;
