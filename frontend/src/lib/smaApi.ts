@@ -463,6 +463,20 @@ export type SmaConfig = {
   tq_entry_phase?: boolean;
   tq_skip_doji?: boolean;
   tq_doji_pct?: number;
+  /** Technical setups as entries (setups.py): a CSV of ORB / VWAP_PULL / SQUEEZE / BREAKOUT / INSIDE, "" = off. */
+  setup_entry?: string;
+  setup_only?: boolean;
+  setup_side?: string;
+  setup_trend?: boolean;
+  setup_vol_mult?: number;
+  setup_orb_minutes?: number;
+  setup_break_candles?: number;
+  setup_squeeze_candles?: number;
+  /** Loss guards (loss_guard.py): the time stop and the pause after losing trades in a row (the bot's own). */
+  time_stop_candles?: number;
+  time_stop_atr?: number;
+  loss_streak_max?: number;
+  loss_streak_pause_min?: number;
   /** Three SMAs stacked with widening gaps as an entry (stack_entry.py). */
   stack_entry?: boolean;
   stack_widen?: number;

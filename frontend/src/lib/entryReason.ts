@@ -26,6 +26,11 @@ const ENTRY_SHORT: Record<string, string> = {
   AUTO_REVIEW_REVERSE: "Reversed on review",
   TREND_QUALITY: "Trend quality",
   STACK_WIDEN: "3 SMAs widening",
+  SETUP_ORB: "Opening-range breakout",
+  SETUP_VWAP_PULL: "VWAP pullback",
+  SETUP_SQUEEZE: "Squeeze breakout",
+  SETUP_BREAKOUT: "High / low breakout",
+  SETUP_INSIDE: "Inside-bar breakout",
 };
 
 const ENTRY_LONG: Record<string, string> = {
@@ -55,6 +60,11 @@ const ENTRY_LONG: Record<string, string> = {
   AUTO_REVIEW_REVERSE: "1-minute review, default answer Exit and reverse: the uncertain trade was closed and this side opened at once",
   TREND_QUALITY: "Trend quality entry: the trend score (and the phase) on the bot's candles agreed with this side, no SMA cross needed",
   STACK_WIDEN: "Three-SMA entry: the three moving averages were stacked this way and both gaps had widened for the set number of candles",
+  SETUP_ORB: "Technical setup: the first candle that closed beyond the high or low of the day's opening range",
+  SETUP_VWAP_PULL: "Technical setup: in a trend, the price came back to the day's average price (VWAP) and closed back its way",
+  SETUP_SQUEEZE: "Technical setup: the Bollinger bands had gone narrow and this candle closed outside them",
+  SETUP_BREAKOUT: "Technical setup: the first close beyond the high or low of the last candles",
+  SETUP_INSIDE: "Technical setup: a candle inside the one before it, then a close beyond that bigger candle",
 };
 
 /** How a waiting limit was filled (the part after ":"). */

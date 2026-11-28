@@ -730,6 +730,22 @@ class BotConfig(Base):
     # Only a fresh line-up: the three lines stacked no more than stack_fresh_candles closed candles ago (stack_entry).
     stack_fresh: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     stack_fresh_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=6)
+    # Technical setups as entries (setups.py): a CSV of ORB / VWAP_PULL / SQUEEZE / BREAKOUT / INSIDE ("" = off), only
+    # these open trades, the side kept, the with-the-day's-trend (VWAP) and volume confirmations, and each setup's number.
+    setup_entry: Mapped[str | None] = mapped_column(String(80), nullable=True, default="")
+    setup_only: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    setup_side: Mapped[str | None] = mapped_column(String(8), nullable=True, default="BOTH")
+    setup_trend: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=True)
+    setup_vol_mult: Mapped[float | None] = mapped_column(Float, nullable=True, default=1.5)
+    setup_orb_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=15)
+    setup_break_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=20)
+    setup_squeeze_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=30)
+    # Loss guards (loss_guard.py): the time stop (candles since the entry, 0 = off; the move in ATRs a trade must have
+    # made by then) and the pause after losing trades in a row (0 = off; minutes, 0 = the rest of the day; per bot).
+    time_stop_candles: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    time_stop_atr: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.5)
+    loss_streak_max: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    loss_streak_pause_min: Mapped[int | None] = mapped_column(Integer, nullable=True, default=30)
     # Opening range (opening_range.py): four checks on 09:15–09:30, each its own tick box.
     use_or_volume: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     use_or_vwap: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)

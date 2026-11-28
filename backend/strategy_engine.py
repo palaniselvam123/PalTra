@@ -73,6 +73,8 @@ import heikin_ashi
 import macd
 import index_check
 import pattern_check
+import loss_guard
+import setups
 import stack_entry
 import triple_exit
 import cum_delta
@@ -227,6 +229,7 @@ ENTRY_REASONS = (
     "AUTO_REVIEW_REVERSE",
     "TREND_QUALITY",
     "STACK_WIDEN",
+    *setups.ENTRY_REASONS,
 )
 
 
@@ -317,6 +320,8 @@ class OpenPosition:
     pc_bar: int | None = None
     # Three-line fast / medium cross exit (triple_exit.py): the last closed candle read.
     tx_bar: int | None = None
+    # Time stop (loss_guard.py): the last closed candle read.
+    ts_bar: int | None = None
     # Last exit candle read by the mixed-candle exit (exit_candle.py), memory only.
     xc_bar: int | None = None
     # Watch smaller candles (small_candles.py): the last closed candle read per size, and what each size says.
@@ -470,6 +475,8 @@ SNAPSHOT_FIELDS = (
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "breakout_min_profit_pct",
     "breakout_min_profit_rs", "chop_losses", "fade_unarm", "fade_unarm_rule", "fade_unarm_min",
     "tq_entry", "tq_entry_score", "tq_entry_phase", "tq_only", "tq_exit", "tq_exit_score", "tq_exit_phase", "tq_all", "tq_skip_doji", "tq_doji_pct", "stack_entry", "stack_widen", "stack_third", "stack_min_gap", "stack_only", "stack_fresh", "stack_fresh_candles",
+    "setup_entry", "setup_only", "setup_side", "setup_trend", "setup_vol_mult", "setup_orb_minutes", "setup_break_candles", "setup_squeeze_candles",
+    "time_stop_candles", "time_stop_atr", "loss_streak_max", "loss_streak_pause_min",
     "entry_mode", "pattern_tf", "pattern_trend", "pattern_set", "pattern_min_edge", "colour_count", "colour_min_body", "colour_body_unit", "colour_body_by_tf", "colour_body_atr", "colour_body_seq", "colour_inside_minutes", "colour_inside_body", "colour_exit_on", "colour_exit_count", "colour_exit_body", "colour_exit_inside", "colour_force", "colour_pull", "colour_pull_candles", "colour_pull_market", "candle_minutes",
     "nth_candle_no", "nth_candle_minutes", "nth_min_body_pct", "nth_min_rvol", "nth_side_rule", "nth_majority_by", "nth_skip_checks", "nth_dir_rule",
     "exit_candle_minutes",
@@ -488,7 +495,8 @@ SNAPSHOT_FIELDS = (
 # (daily loss, entry cut-off, square-off) and the mode, trade cap and Trade
 # list are for the whole account and always come from the shared row.
 STOCK_FIELDS = tuple(
-    name for name in SNAPSHOT_FIELDS if name not in ("max_daily_loss", "entry_cutoff_time", "square_off_time")
+    name for name in SNAPSHOT_FIELDS
+    if name not in ("max_daily_loss", "entry_cutoff_time", "square_off_time", "loss_streak_max", "loss_streak_pause_min")
 )
 
 
@@ -1497,6 +1505,12 @@ class StrategyEngine:
         # (side, the closed candle at the entry) already traded. Memory only.
         self._stack_tried: dict[str, int] = {}
         self._stack_done: dict[str, tuple[str, int]] = {}
+        # Technical setups (setups.py): the last closed candle asked per stock, and the events already traded today.
+        self._setup_tried: dict[str, int] = {}
+        self._setup_done: dict[str, set[str]] = {}
+        # Pause after losses in a row (loss_guard.py): today's losing run on this bot and when its last loss closed.
+        self._loss_run: int = 0
+        self._loss_run_at: dt.datetime | None = None
         # Nifty's 1-minute tape while a stock's entry check reads the market (index_check.py); None until read.
         self._index_tape: pd.DataFrame | None = None
         # Daily pivot levels per (stock, trading day) (pivots.py); the earlier session never changes.
@@ -1853,6 +1867,9 @@ class StrategyEngine:
             self._always_tried.clear()
             self._stack_tried.clear()
             self._stack_done.clear()
+            self._setup_tried.clear()
+            self._setup_done.clear()
+            self._loss_run, self._loss_run_at = 0, None
             if self.status in ("DAY_COMPLETED", "HALTED"):
                 self.status = "STOPPED"
                 self.halt_reason = ""
@@ -1942,7 +1959,7 @@ class StrategyEngine:
             # say so to the quote client, which every bot shares (candles.note_need; read-only, no order).
             own = stock_overrides(cfg, symbol)
             # The three-SMA entry's third line is longer than the slow SMA: enough candles for it too.
-            ask = (candle_minutes(cfg, own), max(int(own.get("sma_slow", cfg.sma_slow) or 21), stack_entry.longest(_cfg_for(cfg, symbol))))
+            ask = (candle_minutes(cfg, own), max(int(own.get("sma_slow", cfg.sma_slow) or 21), stack_entry.longest(_cfg_for(cfg, symbol)), setups.longest(_cfg_for(cfg, symbol))))
             _, keep_bars = candles_mod.note_need(id(self), symbol, *ask) if self.asks_history else candles_mod.history_need(*ask)
             try:
                 ltp, frame, source = await self.broker.refresh(symbol)
@@ -2070,6 +2087,9 @@ class StrategyEngine:
                 await self._stack_entry_pass(symbol, frame, cfg, now)
                 if self.status != "RUNNING":
                     break
+                await self._setup_entry_pass(symbol, frame, cfg, now)
+                if self.status != "RUNNING":
+                    break
                 # Always in a trade: between candles, a stock that just went flat is entered again at once.
                 await self._always_in_pass(symbol, frame, cfg, now)
                 if self.status != "RUNNING":
@@ -2128,6 +2148,9 @@ class StrategyEngine:
             if self.status != "RUNNING":
                 break
             await self._stack_entry_pass(symbol, frame, cfg, now)
+            if self.status != "RUNNING":
+                break
+            await self._setup_entry_pass(symbol, frame, cfg, now)
             if self.status != "RUNNING":
                 break
             await self._always_in_pass(symbol, frame, cfg, now)
@@ -2203,6 +2226,7 @@ class StrategyEngine:
         await self._watch_macd_shrink(symbol_cfg)
         await self._watch_pattern_exit(symbol_cfg)
         await self._watch_triple_exit(symbol_cfg)
+        await self._watch_time_stop(symbol_cfg)
         await self._watch_cvd_exit(symbol_cfg)
         await self._watch_exit_candle(symbol_cfg)
         await self._watch_small_candles(symbol_cfg)
@@ -2626,6 +2650,48 @@ class StrategyEngine:
             text = f"{result} — {note}"
         else:
             text = f"{symbol} three-SMA entry: no {want} order yet — {result.split(' — ', 1)[-1]} ({note})"
+        self._signals[symbol] = text
+        self.last_signal = text
+
+    async def _setup_entry_pass(self, symbol: str, frame: pd.DataFrame, cfg: BotConfig, now: dt.datetime) -> None:
+        """Technical setups (setups.py): a flat armed stock is entered when a ticked setup fires on the closed candle.
+
+        Asked once per closed candle; each setup event is traded at most once. Everything else goes through
+        apply_signal (checks, stop, flip, caps, cut-off)."""
+        symbol_cfg = _cfg_for(cfg, symbol)
+        if not setups.enabled(symbol_cfg) or self.status != "RUNNING" or flow_exit.only_mode(symbol_cfg):
+            return
+        if symbol in self.positions or uses_gap_mode(symbol_cfg) or per_candle(symbol_cfg) or symbol in self._pullback:
+            return
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or self._setup_tried.get(symbol) == closed_ts:
+            return
+        if not market_is_open(now) or now.time() < dt.time(9, 20) or self._past_square_off(now, symbol_cfg):
+            return
+        if not self._still_armed(symbol):
+            return
+        self._setup_tried[symbol] = int(closed_ts)
+        enriched = enrich(frame, symbol_cfg.sma_fast, symbol_cfg.sma_slow, symbol_cfg.atr_period, getattr(symbol_cfg, "sma_medium", None))
+        want, key, event, note = setups.call(enriched, symbol_cfg)
+        if want is None:
+            if setups.only(symbol_cfg):
+                self._signals[symbol] = f"{symbol} waits — {note}"
+            return
+        done = self._setup_done.setdefault(symbol, set())
+        if event in done:
+            return  # this event was already traded today (the opening range gives each side once a day)
+        self._focus = symbol
+        self.ltp = self._ltps.get(symbol, self.ltp)
+        sig = "BULLISH" if want == "LONG" else "BEARISH"
+        result = await self.apply_signal(sig, enriched, symbol_cfg, now, alert=False, why=setups.REASON_PREFIX + key)
+        if result.startswith("blocked — order PENDING"):
+            self._setup_tried.pop(symbol, None)
+            return
+        if symbol in self.positions or symbol in self._pullback:
+            done.add(event)
+            text = f"{result} — {note}"
+        else:
+            text = f"{symbol} setup: no {want} order — {result.split(' — ', 1)[-1]} ({note})"
         self._signals[symbol] = text
         self.last_signal = text
 
@@ -3708,7 +3774,9 @@ class StrategyEngine:
                 return "closed on cross — trade cap locks the day"
             if (stock_cap := self._stock_cap_hit(cfg)) is not None:
                 return f"closed on {signal} — {stock_cap}"
-            if (trend_only := self._trend_only_hit(cfg, why) or stack_entry.blocks(cfg, why)) is not None:
+            if (losing := self._loss_pause_hit(cfg)) is not None:
+                return f"closed on {signal} — {losing}"
+            if (trend_only := self._trend_only_hit(cfg, why) or stack_entry.blocks(cfg, why) or setups.blocks(cfg, why)) is not None:
                 return f"closed on {signal} — {trend_only}"
             if (resting := self._reentry_wait_hit(cfg)) is not None:
                 return f"closed on {signal} — {resting}"
@@ -3731,7 +3799,9 @@ class StrategyEngine:
             return "entry blocked — trade cap"
         if (stock_cap := self._stock_cap_hit(cfg)) is not None:
             return f"{signal} ignored — {stock_cap}"
-        if (trend_only := self._trend_only_hit(cfg, why) or stack_entry.blocks(cfg, why)) is not None:
+        if (losing := self._loss_pause_hit(cfg)) is not None:
+            return f"{signal} ignored — {losing}"
+        if (trend_only := self._trend_only_hit(cfg, why) or stack_entry.blocks(cfg, why) or setups.blocks(cfg, why)) is not None:
             return f"{signal} ignored — {trend_only}"
         if (resting := self._reentry_wait_hit(cfg)) is not None:
             return f"{signal} ignored — {resting}"
@@ -4317,6 +4387,8 @@ class StrategyEngine:
                 why = "trade cap reached"
             elif (stock_cap := self._stock_cap_hit(symbol_cfg)) is not None:
                 why = stock_cap
+            elif (losing := self._loss_pause_hit(symbol_cfg)) is not None:
+                why = losing
             elif (resting := self._reentry_wait_hit(symbol_cfg)) is not None:
                 why = resting
             if why:
@@ -6049,6 +6121,32 @@ class StrategyEngine:
         self._signals[symbol] = f"{symbol} fast / medium SMA exit — {note}"
         await self._exit_now(cfg, self.ltp, triple_exit.REASON)
 
+    async def _watch_time_stop(self, cfg: BotConfig) -> None:
+        """Once per closed candle: close a trade that has gone nowhere since its entry (loss_guard.py, time stop)."""
+        pos = self.position
+        if pos is None or self.status != "RUNNING" or not loss_guard.time_on(cfg) or self.ltp <= 0:
+            return
+        symbol = (cfg.symbol or self._focus or "").upper()
+        frame = self._exit_frame(symbol, cfg)
+        closed_ts = _closed_bar_ts(frame)
+        if closed_ts is None or pos.ts_bar == closed_ts:
+            return
+        if (pos.mode or "PAPER").upper() == "LIVE" and pos.stop_active and not pos.sl_order_id:
+            # Restored after a restart without its stop id: left to that stop (as the Bollinger exit).
+            return
+        pos.ts_bar = closed_ts
+        opened = pos.entry_time if pos.entry_time.tzinfo else pos.entry_time.replace(tzinfo=IST)
+        span = self._exit_minutes(symbol, cfg) * 60
+        closed = frame.iloc[:-1]
+        # Candles that closed after the entry (the one the trade opened in counts once it has closed).
+        since = int((pd.to_numeric(closed["ts"], errors="coerce") + span > opened.timestamp()).sum())
+        best = loss_guard.best_move(pos.direction, float(pos.entry_price), pos.high, pos.low)
+        hit, note = loss_guard.time_verdict(cfg, since, best, _finite(pos.atr_at_entry))
+        if not hit:
+            return
+        self._signals[symbol] = f"{symbol} time stop — {note}"
+        await self._exit_now(cfg, self.ltp, loss_guard.TIME_REASON)
+
     async def _watch_pattern_exit(self, cfg: BotConfig) -> None:
         """Once per closed pattern candle that closed after the entry: exit on a candle pattern against the trade
         (pattern_check.py)."""
@@ -7021,6 +7119,14 @@ class StrategyEngine:
         name = (symbol or "").upper()
         if name:
             self._last_exit[name] = now  # every exit starts the re-entry wait (reentry_wait.py)
+        if loss_guard.counts(reason):
+            # Pause after losses in a row (loss_guard.py): a loss before charges adds one, a win starts again.
+            run = loss_guard.next_run(self._loss_run, costs.get("gross_pnl"))
+            if run > self._loss_run:
+                self._loss_run_at = now
+            elif run == 0:
+                self._loss_run_at = None
+            self._loss_run = run
 
             self._signals[name] = f"{name} flat — {_ALERT_REASON.get(reason, reason or 'closed')}"
         self._alert(
@@ -7451,6 +7557,16 @@ class StrategyEngine:
             return f"{name} has had its {cap} trade(s) today (per-stock cap)"
         return None
 
+    def _loss_pause_hit(self, cfg) -> str | None:
+        """Pause after losses in a row (loss_guard.py, 0 = off): why the bot takes no new entry now."""
+        if loss_guard.streak_max(cfg) <= 0:
+            return None
+        now = self._now()
+        if loss_guard.pause_over(cfg, self._loss_run, self._loss_run_at, now):
+            self._loss_run, self._loss_run_at = 0, None  # the pause has ended: the count starts again
+            return None
+        return loss_guard.refusal(cfg, self._loss_run, self._loss_run_at, now)
+
     def _reentry_wait_hit(self, cfg) -> str | None:
         """Wait N candles after an exit (reentry_wait.py, 0 = off): why this stock takes no entry yet."""
         n = reentry_wait.candles(cfg)
@@ -7513,7 +7629,7 @@ class StrategyEngine:
                 .all()
             )
             exits = (
-                db.query(TradeLog.symbol, TradeLog.exit_time, TradeLog.mode)
+                db.query(TradeLog.symbol, TradeLog.exit_time, TradeLog.mode, TradeLog.gross_pnl, TradeLog.exit_reason, TradeLog.id)
                 .filter(TradeLog.date == day, TradeLog.exit_time.isnot(None), self._bot_rows())
                 .all()
             )
@@ -7526,7 +7642,14 @@ class StrategyEngine:
             self._stock_trades[key] = self._stock_trades.get(key, 0) + 1
         # The re-entry wait (reentry_wait.py) carries on after a restart from each stock's last exit today.
         self._last_exit = {}
-        for sym, when, row_mode in exits:
+        # The losing run (loss_guard.py) carries on too, from today's closed trades since the count was reset.
+        closed_rows = [
+            (when.replace(tzinfo=IST) if when.tzinfo is None else when, gross)
+            for _sym, when, row_mode, gross, why, row_id in exits
+            if when is not None and (row_mode or "PAPER").upper() == mode and loss_guard.counts(why) and row_id > floor
+        ]
+        self._loss_run, self._loss_run_at = loss_guard.run_from_rows(cfg, closed_rows) if cfg is not None else (0, None)
+        for sym, when, row_mode, *_rest in exits:
             key = (sym or "").upper()
             if key and when is not None and (row_mode or "PAPER").upper() == mode:
                 at = when.replace(tzinfo=IST) if when.tzinfo is None else when
@@ -8488,6 +8611,7 @@ _WARN_MINUTES = 3
 _WARN_CLEAR_MINUTES = 5
 
 _ALERT_REASON = {
+    "TIME_STOP": "time stop (the trade went nowhere)",
     "MA_CROSS": "MA cross",
     "MA_APPROACH": "sold before the MA cross",
     "ATR_SL_HIT": "ATR stop",

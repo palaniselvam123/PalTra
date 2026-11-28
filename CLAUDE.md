@@ -1458,6 +1458,35 @@ lower one, anything else counts like a doji; `nth_candle.candle_moves`, the body
   news, hand-offs pass). Not in gap mode or the per-candle / executed-volume-only modes. The tape keeps enough candles
   for the third line (`stack_entry.longest` in `tick`'s history need and `replay.warmup_days`). Exits are the bot's own.
   The Strategy lab does not know it; the stock research baseline keeps it off.
+- `backend/setups.py` – **Technical setups as entries** (`setup_entry`, a CSV of `KEYS`, "" = off by default; per bot and
+  per stock, PAPER and LIVE, replays too; Settings → 1. When to enter, `StrategyConfigPanel.TechSetups`, anchor
+  `#sma-setups`). Five setups read on the bot's closed candles (`read_one`, `call`): `ORB` (first close beyond the high /
+  low of the day's first `setup_orb_minutes` 15, 5-60; each side once a day), `VWAP_PULL` (SMA fast vs slow trend, 4 of the
+  5 candles before closed beyond the VWAP, this candle reached within `TOUCH_ATR` 0.25 ATR of it and closed back its way),
+  `SQUEEZE` (Bollinger width, `bb_period` / `bb_std`, in the narrowest `SQUEEZE_SHARE` quarter of the last
+  `setup_squeeze_candles` 30, then the first close outside the bands), `BREAKOUT` (first close beyond the high / low of the
+  `setup_break_candles` 20 candles before) and `INSIDE` (a candle inside its mother candle of at least `MOTHER_ATR` 0.75
+  ATR, then a close beyond the mother's high / low). The four breakouts (not the pullback) are confirmed by volume
+  (`setup_vol_mult` 1.5, 0 = not checked: the candle's volume against the 20 before it, unknown refuses) and the day's trend
+  (`setup_trend`, on: buy above today's VWAP, sell below); `setup_side` BOTH / LONG / SHORT; setups that disagree on one
+  candle give no order. `StrategyEngine._setup_entry_pass` (armed loop, after `_stack_entry_pass`), once per closed candle
+  of a flat stock (`_setup_tried`), each event once a day (`_setup_done`), through `apply_signal(..., why="SETUP_<KEY>")`,
+  so every entry check, the stop, flip, cut-off, caps and one LIVE bot per stock apply. `setup_only`: `setups.blocks` in
+  `_apply_locked` refuses the bot's own signals (a cross still closes; Force, news, hand-offs pass). Not in gap mode or
+  the per-candle / executed-volume-only modes. The Strategy lab does not know it; the stock research baseline keeps it off.
+- `backend/loss_guard.py` – **two loss guards** (off by default, PAPER and LIVE, replays too; neither opens a trade).
+  **Time stop** (`time_stop_candles` 0 = off, 1-60; `time_stop_atr` 0.5, 0.1-5; per bot and per stock; Settings → 3. When
+  to exit, `StrategyConfigPanel.TimeStop`, anchor `#sma-time-stop`): `StrategyEngine._watch_time_stop` (held-stock loop,
+  after the three-line exit), once per closed exit candle (`pos.ts_bar`), closes a trade (`TIME_STOP` via `_exit_now`, LIVE
+  stop cancelled first; a LIVE position restored without its stop id is left to that stop) once that many candles have
+  closed since the entry unless its best price (`pos.high` / `low`) was at least that many × `atr_at_entry` in profit
+  (`time_verdict`); a trade that once ran that far is never closed by it, so it is not counted as an exit by
+  `strategyChecks.noExitOn`. **Pause after losses in a row** (`loss_streak_max` 0 = off, 1-10; `loss_streak_pause_min` 30,
+  0 = the rest of the day; the bot's own, not in `STOCK_FIELDS`; Settings → 6, anchor `#sma-loss-streak`):
+  `_finalize_trade` counts the bot's losing trades in a row before charges (`_loss_run`, `_loss_run_at`; a win starts
+  again, cleared with the day, restored by `restore_trades_today` via `run_from_rows`), and `_loss_pause_hit` refuses every
+  new entry next to `_stock_cap_hit` (a reverse closes flat, a waiting pullback is dropped) until the pause ends, when the
+  count starts again. Exits are never held. The Strategy lab does not know them; the stock research baseline keeps both off.
 - `backend/trend_log.py` – **Trend readings of a backtest** (display only; owner's request: the auto-arm backtest works the
   Trend quality reading out by itself and kept none of it, so 10:45's score 86 could not be set against the trade at 12:00):
   `StrategyEngine._record_trend` (after `_trend_entry_pass` in the armed loop and `_watch_trend_exit` in the held loop),

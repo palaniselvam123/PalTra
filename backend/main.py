@@ -99,6 +99,8 @@ import heikin_ashi
 import macd
 import index_check
 import pattern_check
+import loss_guard
+import setups as setups_mod
 import stack_entry as stack_entry_mod
 import cum_delta
 import reverse_exit
@@ -1022,6 +1024,31 @@ class ConfigUpdate(BaseModel):
     stack_only: bool | None = None
     stack_fresh: bool | None = None
     stack_fresh_candles: int | None = Field(default=None, ge=1, le=stack_entry_mod.FRESH_MAX)
+    # Technical setups as entries (setups.py): a CSV of ORB / VWAP_PULL / SQUEEZE / BREAKOUT / INSIDE, "" = off.
+    setup_entry: str | None = Field(default=None, max_length=80)
+    setup_only: bool | None = None
+    setup_side: Literal["BOTH", "LONG", "SHORT"] | None = None
+    setup_trend: bool | None = None
+    setup_vol_mult: float | None = Field(default=None, ge=0, le=setups_mod.VOL_MAX)
+    setup_orb_minutes: int | None = Field(default=None, ge=setups_mod.ORB_MIN, le=setups_mod.ORB_MAX)
+    setup_break_candles: int | None = Field(default=None, ge=setups_mod.BREAK_MIN, le=setups_mod.BREAK_MAX)
+    setup_squeeze_candles: int | None = Field(default=None, ge=setups_mod.SQUEEZE_MIN, le=setups_mod.SQUEEZE_MAX)
+    # Loss guards (loss_guard.py): the time stop and the pause after losing trades in a row.
+    time_stop_candles: int | None = Field(default=None, ge=0, le=loss_guard.TIME_MAX_CANDLES)
+    time_stop_atr: float | None = Field(default=None, ge=loss_guard.TIME_ATR_MIN, le=loss_guard.TIME_ATR_MAX)
+    loss_streak_max: int | None = Field(default=None, ge=0, le=loss_guard.STREAK_MAX)
+    loss_streak_pause_min: int | None = Field(default=None, ge=0, le=loss_guard.PAUSE_MAX)
+
+    @field_validator("setup_entry")
+    @classmethod
+    def _setup_keys(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        asked = [p.strip().upper() for p in value.replace(";", ",").split(",") if p.strip()]
+        unknown = [p for p in asked if p not in setups_mod.KEYS]
+        if unknown:
+            raise ValueError(f"unknown setup(s): {', '.join(unknown)}. Choose from {', '.join(setups_mod.KEYS)}")
+        return setups_mod.clean(asked)
     use_or_volume: bool | None = None
     use_or_vwap: bool | None = None
     use_or_spread: bool | None = None
@@ -2216,6 +2243,18 @@ def _gap_dict(row) -> dict:
         "stack_only": bool(getattr(row, "stack_only", False)),
         "stack_fresh": bool(getattr(row, "stack_fresh", False)),
         "stack_fresh_candles": int(getattr(row, "stack_fresh_candles", None) or stack_entry_mod.FRESH_DEFAULT),
+        "setup_entry": setups_mod.clean(getattr(row, "setup_entry", "") or ""),
+        "setup_only": bool(getattr(row, "setup_only", False)),
+        "setup_side": setups_mod.side_rule(row),
+        "setup_trend": setups_mod.with_trend(row),
+        "setup_vol_mult": setups_mod.vol_mult(row),
+        "setup_orb_minutes": setups_mod.orb_minutes(row),
+        "setup_break_candles": setups_mod.break_candles(row),
+        "setup_squeeze_candles": setups_mod.squeeze_candles(row),
+        "time_stop_candles": loss_guard.time_candles(row),
+        "time_stop_atr": loss_guard.time_atr(row),
+        "loss_streak_max": loss_guard.streak_max(row),
+        "loss_streak_pause_min": loss_guard.pause_minutes(row),
         "use_or_volume": bool(getattr(row, "use_or_volume", False)),
         "use_or_vwap": bool(getattr(row, "use_or_vwap", False)),
         "use_or_spread": bool(getattr(row, "use_or_spread", False)),
