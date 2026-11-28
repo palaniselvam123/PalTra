@@ -292,6 +292,7 @@ export const SETTING_LABELS: Record<string, string> = {
   recovery_atr_mult: "recovery ATR floor ×",
   recovery_max_candles: "recovery candles",
   recovery_handoff: "hand off to Bot 2",
+  recovery_sma_target: "slow SMA touch counts as recovered",
   breakout_handoff: "breakout hand-off to Bot 3",
   breakout_atr_mult: "breakout candle × ATR",
   breakout_gap_pct: "breakout SMA gap %",

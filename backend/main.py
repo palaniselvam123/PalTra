@@ -983,6 +983,7 @@ class ConfigUpdate(BaseModel):
     recovery_atr_mult: float | None = Field(default=None, ge=0.5, le=20)
     recovery_max_candles: int | None = Field(default=None, ge=1, le=recovery_mod.MAX_CANDLES)
     recovery_handoff: bool | None = None
+    recovery_sma_target: bool | None = None
     breakout_handoff: bool | None = None
     breakout_atr_mult: float | None = Field(default=None, ge=0.5, le=10)
     breakout_gap_pct: float | None = Field(default=None, ge=0, le=5)
@@ -2174,6 +2175,7 @@ def _gap_dict(row) -> dict:
         "recovery_atr_mult": recovery_mod.atr_mult(row),
         "recovery_max_candles": recovery_mod.max_candles(row),
         "recovery_handoff": recovery_mod.handoff_on(row),
+        "recovery_sma_target": recovery_mod.sma_target_on(row),
         "breakout_handoff": breakout_mod.on(row),
         "breakout_atr_mult": breakout_mod.atr_mult(row),
         "breakout_gap_pct": breakout_mod.gap_pct(row),

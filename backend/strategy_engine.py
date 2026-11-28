@@ -464,7 +464,7 @@ SNAPSHOT_FIELDS = (
     "live_sma_check", "live_sma_min_gap",
     "day_extreme_guard", "day_extreme_pct", "day_extreme_pull_pct", "day_extreme_candles",
     "slow_sma_exit", "recovery_hold", "recovery_tolerance_pct", "recovery_emergency_mult",
-    "recovery_atr_mult", "recovery_max_candles", "recovery_handoff",
+    "recovery_atr_mult", "recovery_max_candles", "recovery_handoff", "recovery_sma_target",
     "breakout_handoff", "breakout_atr_mult", "breakout_gap_pct", "breakout_volume_mult", "breakout_rule", "breakout_cut",
     "breakout_trend_checks", "breakout_trend_need", "breakout_when", "breakout_min_profit_pct",
     "breakout_min_profit_rs", "chop_losses", "fade_unarm", "fade_unarm_rule", "fade_unarm_min",

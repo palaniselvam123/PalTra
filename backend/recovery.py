@@ -18,8 +18,8 @@ losing or flat trade holds it, and the rules below are read on the colour candle
 loss at the cross kept as its reference. On each candle close after that, in order:
 
 1. Recovery target (`RECOVERY_TARGET_HIT`): the loss has shrunk to `recovery_tolerance_pct`
-   % of the entry price or less, or the candle touched or closed back across the slow
-   SMA. With `recovery_handoff` on, the stock then moves to Bot 2 (`HANDOFF_BOT`).
+   % of the entry price or less, or (with `recovery_sma_target`, on by default) the candle
+   touched or closed back across the slow SMA; off, only the loss shrinking counts. With `recovery_handoff` on, the stock then moves to Bot 2 (`HANDOFF_BOT`).
 2. Emergency exit (`EMERGENCY_RECOVERY_ABORT`): the loss reached `recovery_emergency_mult`
    x the loss at the cross, or `recovery_atr_mult` x ATR, or `recovery_max_candles`
    candles have closed in recovery. The stock is not traded again on this bot today.
@@ -152,6 +152,13 @@ def tolerance_pct(cfg) -> float:
     return _num(cfg, "recovery_tolerance_pct", DEFAULT_TOLERANCE_PCT, 0.0, 5.0)
 
 
+def sma_target_on(cfg) -> bool:
+    """Does a candle touching the slow SMA count as recovered? (on by default, the old rule; off = only the loss
+    shrinking to the tolerance counts: owner's DIVISLAB case, a long whose whole candle sat above SMA 21 "recovered"
+    at a 0.25 % loss)."""
+    return getattr(cfg, "recovery_sma_target", None) is not False
+
+
 def emergency_mult(cfg) -> float:
     return _num(cfg, "recovery_emergency_mult", DEFAULT_EMERGENCY_MULT, 1.0, 10.0)
 
@@ -197,7 +204,7 @@ def judge(
     tol = tolerance_pct(cfg) / 100 * entry
     if loss <= tol:
         return "target", f"loss {max(loss, 0):.2f} is within {tolerance_pct(cfg):g}% of the entry"
-    if slow is not None:
+    if slow is not None and sma_target_on(cfg):
         touched = bar.get("high", close) >= slow if direction == "LONG" else bar.get("low", close) <= slow
         if touched:
             return "target", f"the candle came back to the slow SMA {slow:.2f}"

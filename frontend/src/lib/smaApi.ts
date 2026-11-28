@@ -435,6 +435,7 @@ export type SmaConfig = {
   recovery_atr_mult?: number;
   recovery_max_candles?: number;
   recovery_handoff?: boolean;
+  recovery_sma_target?: boolean;
   /** Trend breakout: cut the trade and hand the stock back to Bot 3 (breakout.py). */
   breakout_handoff?: boolean;
   breakout_atr_mult?: number;
